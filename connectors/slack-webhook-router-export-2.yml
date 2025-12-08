@@ -1,0 +1,772 @@
+category: Communication
+configPages:
+  - elements: []
+    name: Configuration
+    tagline: ''
+defaultInstanceProfile: Default Instance Profile
+definitionVersion: 7
+description: >-
+  The Registration Endpoint flow provides an endpoint allowing Slack
+  integrations to register and deregister themselves when they get deployed. The
+  Route Request endpoint will take Slack's webhook requests, which are only sent
+  to a single endpoint, and routes them to the respective Slack Integration
+  instance.
+documentation: >-
+  --- ~ Started from Slack Webhook Router Template ~ ---
+
+
+  Allow Slack instances to register pairs of Slack Channel IDs and webhook URLs.
+  Route webhook notifications from Slack that contain Slack Channel IDs to the
+  correct webhook URLs.
+endpointType: flow_specific
+flows:
+  - description: >-
+      Other instances call this endpoint to register or deregister a mapping of
+      Dropbox account <> customer instance URL
+    endpointSecurityType: customer_optional
+    isSynchronous: false
+    name: Registration Endpoint
+    steps:
+      - action:
+          key: webhook
+          component:
+            isPublic: true
+            key: webhook-triggers
+            version: LATEST
+        description: ''
+        inputs:
+          body:
+            type: value
+            value: ''
+          contentType:
+            type: value
+            value: ''
+          headers:
+            type: complex
+            value: []
+          statusCode:
+            type: value
+            value: ''
+        isTrigger: true
+        name: Integration Trigger
+      - action:
+          key: branchOnValue
+          component:
+            isPublic: true
+            key: branch
+            version: LATEST
+        branches:
+          - name: Register
+            steps:
+              - action:
+                  key: writeLog
+                  component:
+                    isPublic: true
+                    key: log
+                    version: LATEST
+                description: ''
+                inputs:
+                  level:
+                    type: value
+                    value: info
+                  message:
+                    type: template
+                    value: >-
+                      Registering Slack Team
+                      "{{$integrationTrigger.results.body.data.teamId}}" to send
+                      requests to
+                      "{{$integrationTrigger.results.body.data.instanceInteractivityWebhookUrl}}"
+                name: Log registration
+              - action:
+                  key: branchOnValue
+                  component:
+                    isPublic: true
+                    key: branch
+                    version: LATEST
+                branches:
+                  - name: admin
+                    steps:
+                      - action:
+                          key: saveCrossFlowValue
+                          component:
+                            isPublic: true
+                            key: persist-data
+                            version: LATEST
+                        description: ''
+                        inputs:
+                          keyInput:
+                            type: template
+                            value: >-
+                              {{$integrationTrigger.results.body.data.teamId}}-admin
+                          valueInput:
+                            type: reference
+                            value: >-
+                              integrationTrigger.results.body.data.adminWebhookUrl
+                        name: AdminUrl
+                      - action:
+                          key: saveCrossFlowValue
+                          component:
+                            isPublic: true
+                            key: persist-data
+                            version: LATEST
+                        description: ''
+                        inputs:
+                          keyInput:
+                            type: template
+                            value: >-
+                              {{$integrationTrigger.results.body.data.teamId}}-adminApiKey
+                          valueInput:
+                            type: reference
+                            value: integrationTrigger.results.body.data.adminApiKey
+                        name: AdminApiKey
+                  - name: user
+                    steps:
+                      - action:
+                          key: saveCrossFlowValue
+                          component:
+                            isPublic: true
+                            key: persist-data
+                            version: LATEST
+                        description: ''
+                        inputs:
+                          keyInput:
+                            type: template
+                            value: >-
+                              {{$integrationTrigger.results.body.data.teamId}}-{{$integrationTrigger.results.body.data.authed_user}}-user
+                          valueInput:
+                            type: reference
+                            value: >-
+                              integrationTrigger.results.body.data.userWebhookUrl
+                        name: userUrl
+                      - action:
+                          key: saveCrossFlowValue
+                          component:
+                            isPublic: true
+                            key: persist-data
+                            version: LATEST
+                        description: ''
+                        inputs:
+                          keyInput:
+                            type: template
+                            value: >-
+                              {{$integrationTrigger.results.body.data.teamId}}-{{$integrationTrigger.results.body.data.authed_user}}-userApiKey
+                          valueInput:
+                            type: reference
+                            value: integrationTrigger.results.body.data.userApiKey
+                        name: userApiKey
+                  - name: Else
+                    steps:
+                      - action:
+                          key: stopExecution
+                          component:
+                            isPublic: true
+                            key: stop-execution
+                            version: LATEST
+                        description: ''
+                        inputs:
+                          contentType:
+                            type: value
+                            value: application/json
+                          headers:
+                            type: complex
+                            value: []
+                          jsonBody:
+                            type: value
+                            value: ''
+                          statusCode:
+                            type: value
+                            value: '200'
+                        name: Stop Execution
+                description: ''
+                inputs:
+                  branchValueMappings:
+                    type: complex
+                    value:
+                      - name: admin
+                        type: value
+                        value: admin
+                      - name: user
+                        type: value
+                        value: user
+                  inputValue:
+                    type: reference
+                    value: integrationTrigger.results.body.data.type
+                name: Branch on Expression
+          - name: Deregister
+            steps:
+              - action:
+                  key: writeLog
+                  component:
+                    isPublic: true
+                    key: log
+                    version: LATEST
+                description: ''
+                inputs:
+                  level:
+                    type: value
+                    value: info
+                  message:
+                    type: template
+                    value: >-
+                      Deregistering Slack Team
+                      "{{$integrationTrigger.results.body.data.teamId}}"
+                name: Log deregistration
+              - action:
+                  key: branchOnValue
+                  component:
+                    isPublic: true
+                    key: branch
+                    version: LATEST
+                branches:
+                  - name: admin
+                    steps:
+                      - action:
+                          key: removeCrossFlowValue
+                          component:
+                            isPublic: true
+                            key: persist-data
+                            version: LATEST
+                        description: ''
+                        inputs:
+                          keyInput:
+                            type: template
+                            value: >-
+                              {{$integrationTrigger.results.body.data.teamId}}-admin
+                        name: Remove Admin
+                      - action:
+                          key: removeCrossFlowValue
+                          component:
+                            isPublic: true
+                            key: persist-data
+                            version: LATEST
+                        description: ''
+                        inputs:
+                          keyInput:
+                            type: template
+                            value: >-
+                              {{$integrationTrigger.results.body.data.teamId}}-adminApiKey
+                        name: Remove AdminApiKey
+                  - name: user
+                    steps:
+                      - action:
+                          key: removeCrossFlowValue
+                          component:
+                            isPublic: true
+                            key: persist-data
+                            version: LATEST
+                        description: ''
+                        inputs:
+                          keyInput:
+                            type: template
+                            value: >-
+                              {{$integrationTrigger.results.body.data.teamId}}-{{$integrationTrigger.results.body.data.authed_user}}-user
+                        name: Remove User
+                      - action:
+                          key: removeCrossFlowValue
+                          component:
+                            isPublic: true
+                            key: persist-data
+                            version: LATEST
+                        description: ''
+                        inputs:
+                          keyInput:
+                            type: template
+                            value: >-
+                              {{$integrationTrigger.results.body.data.teamId}}-{{$integrationTrigger.results.body.data.authed_user}}-userApiKey
+                        name: Remove UserApiKey
+                  - name: Else
+                    steps:
+                      - action:
+                          key: stopExecution
+                          component:
+                            isPublic: true
+                            key: stop-execution
+                            version: LATEST
+                        description: ''
+                        inputs:
+                          contentType:
+                            type: value
+                            value: application/json
+                          headers:
+                            type: complex
+                            value: []
+                          jsonBody:
+                            type: value
+                            value: ''
+                          statusCode:
+                            type: value
+                            value: '200'
+                        name: Stop Execution 2
+                description: ''
+                inputs:
+                  branchValueMappings:
+                    type: complex
+                    value:
+                      - name: admin
+                        type: value
+                        value: admin
+                      - name: user
+                        type: value
+                        value: user
+                  inputValue:
+                    type: reference
+                    value: integrationTrigger.results.body.data.type
+                name: Branch on Value 2
+          - name: Else
+            steps: []
+        description: ''
+        inputs:
+          branchValueMappings:
+            type: complex
+            value:
+              - name: Register
+                type: value
+                value: register
+              - name: Deregister
+                type: value
+                value: deregister
+          inputValue:
+            type: reference
+            value: integrationTrigger.results.body.data.event
+        name: Branch on Value
+  - description: Dispatch a Dropbox request to a customer's instance
+    endpointSecurityType: customer_optional
+    isSynchronous: true
+    name: Route Request
+    steps:
+      - action:
+          key: webhook
+          component:
+            isPublic: true
+            key: webhook-triggers
+            version: LATEST
+        description: ''
+        inputs:
+          body:
+            type: value
+            value: ''
+          contentType:
+            type: value
+            value: ''
+          headers:
+            type: complex
+            value: []
+          statusCode:
+            type: value
+            value: ''
+        isTrigger: true
+        name: Receive Slack Webhook
+      - action:
+          key: branchOnExpression
+          component:
+            isPublic: true
+            key: branch
+            version: LATEST
+        branches:
+          - name: If Challenge
+            steps:
+              - action:
+                  key: runCode
+                  component:
+                    isPublic: true
+                    key: code
+                    version: LATEST
+                description: ''
+                inputs:
+                  code:
+                    type: value
+                    value: >
+                      /*
+                        Access config variables by name through the configVars object. e.g.
+                          const apiEndpoint = `${configVars["App Base URL"]}/api`;
+
+                        Access previous steps' results through the stepResults object. Trigger
+                        and step names are camelCased. If the step "Get Data from API" returned
+                        {"foo": "bar", "baz": 123}, you could destructure that data with:
+                          const { foo, baz } = stepResults.getDataFromApi.results;
+
+                        You can return string, number or complex object data. e.g.
+                          return { data: { foo: "Hello", bar: 123.45, baz: true } };
+                      */
+
+
+                      module.exports = async ({ logger, configVars },
+                      stepResults) => {
+                        return { 
+                          data: {
+                            "challenge": stepResults.receiveSlackWebhook.results.body.data.challenge
+                          }
+                        };
+                      };
+                name: Respond to Challenge
+          - name: Else
+            steps:
+              - action:
+                  key: writeLog
+                  component:
+                    isPublic: true
+                    key: log
+                    version: LATEST
+                description: ''
+                inputs:
+                  level:
+                    type: value
+                    value: info
+                  message:
+                    type: reference
+                    value: >-
+                      receiveSlackWebhook.results.body.data.results.body.data.event.channel_type
+                name: Write Log Message
+              - action:
+                  key: branchOnExpression
+                  component:
+                    isPublic: true
+                    key: branch
+                    version: LATEST
+                branches:
+                  - name: channel
+                    steps:
+                      - action:
+                          key: getCrossFlowValue
+                          component:
+                            isPublic: true
+                            key: persist-data
+                            version: LATEST
+                        description: ''
+                        inputs:
+                          defaultValueInput:
+                            type: value
+                            value: ''
+                          keyInput:
+                            type: template
+                            value: >-
+                              {{$receiveSlackWebhook.results.body.data.team_id}}-admin
+                        name: Get Admin WebhookUrl
+                      - action:
+                          key: branchOnExpression
+                          component:
+                            isPublic: true
+                            key: branch
+                            version: LATEST
+                        branches:
+                          - name: Webhook URL Set
+                            steps:
+                              - action:
+                                  key: getCrossFlowValue
+                                  component:
+                                    isPublic: true
+                                    key: persist-data
+                                    version: LATEST
+                                description: ''
+                                inputs:
+                                  defaultValueInput:
+                                    type: value
+                                    value: ''
+                                  keyInput:
+                                    type: template
+                                    value: >-
+                                      {{$receiveSlackWebhook.results.body.data.team_id}}-adminApiKey
+                                name: Get Admin WebhookApiKey
+                              - action:
+                                  key: httpPost
+                                  component:
+                                    isPublic: true
+                                    key: http
+                                    version: LATEST
+                                description: ''
+                                inputs:
+                                  connection:
+                                    type: configVar
+                                    value: ''
+                                  data:
+                                    type: reference
+                                    value: receiveSlackWebhook.results.body.data
+                                  debugRequest:
+                                    type: value
+                                    value: 'true'
+                                  headers:
+                                    type: complex
+                                    value:
+                                      - name:
+                                          type: value
+                                          value: Api-Key
+                                        type: reference
+                                        value: getAdminWebhookapikey.results
+                                  ignoreSslErrors:
+                                    type: value
+                                    value: 'false'
+                                  includeFullResponse:
+                                    type: value
+                                    value: 'false'
+                                  maxRetries:
+                                    type: value
+                                    value: '0'
+                                  queryParams:
+                                    type: complex
+                                    value: []
+                                  responseType:
+                                    type: value
+                                    value: json
+                                  retryDelayMS:
+                                    type: value
+                                    value: '0'
+                                  retryOnAllErrors:
+                                    type: value
+                                    value: 'false'
+                                  timeout:
+                                    type: value
+                                    value: ''
+                                  url:
+                                    type: reference
+                                    value: getAdminWebhookurl.results
+                                  useExponentialBackoff:
+                                    type: value
+                                    value: 'false'
+                                name: Post Request
+                          - name: Else
+                            steps:
+                              - action:
+                                  key: stopExecution
+                                  component:
+                                    isPublic: true
+                                    key: stop-execution
+                                    version: LATEST
+                                description: ''
+                                inputs:
+                                  contentType:
+                                    type: value
+                                    value: application/json
+                                  headers:
+                                    type: complex
+                                    value: []
+                                  jsonBody:
+                                    type: value
+                                    value: ''
+                                  statusCode:
+                                    type: value
+                                    value: '200'
+                                name: Stop Execution
+                        description: ''
+                        inputs:
+                          conditions:
+                            type: complex
+                            value:
+                              - name: Webhook URL Set
+                                type: complex
+                                value:
+                                  - and
+                                  - - exists
+                                    - name: ''
+                                      type: reference
+                                      value: getAdminWebhookurl.results
+                        name: Branch on Expression
+                  - name: Else
+                    steps:
+                      - action:
+                          key: getCrossFlowValue
+                          component:
+                            isPublic: true
+                            key: persist-data
+                            version: LATEST
+                        description: ''
+                        inputs:
+                          defaultValueInput:
+                            type: value
+                            value: ''
+                          keyInput:
+                            type: template
+                            value: >-
+                              {{$receiveSlackWebhook.results.body.data.authorizations.0.team_id}}-{{$receiveSlackWebhook.results.body.data.authorizations.0.user_id}}-user
+                        name: Get User WebhookUrl
+                      - action:
+                          key: branchOnExpression
+                          component:
+                            isPublic: true
+                            key: branch
+                            version: LATEST
+                        branches:
+                          - name: Webhook URL Set
+                            steps:
+                              - action:
+                                  key: getCrossFlowValue
+                                  component:
+                                    isPublic: true
+                                    key: persist-data
+                                    version: LATEST
+                                description: ''
+                                inputs:
+                                  defaultValueInput:
+                                    type: value
+                                    value: ''
+                                  keyInput:
+                                    type: template
+                                    value: >-
+                                      {{$receiveSlackWebhook.results.body.data.authorizations.0.team_id}}-{{$receiveSlackWebhook.results.body.data.authorizations.0.user_id}}-userApiKey
+                                name: Get User WebhookApiKey
+                              - action:
+                                  key: httpPost
+                                  component:
+                                    isPublic: true
+                                    key: http
+                                    version: LATEST
+                                description: ''
+                                inputs:
+                                  connection:
+                                    type: configVar
+                                    value: ''
+                                  data:
+                                    type: reference
+                                    value: receiveSlackWebhook.results.body.data
+                                  debugRequest:
+                                    type: value
+                                    value: 'true'
+                                  headers:
+                                    type: complex
+                                    value:
+                                      - name:
+                                          type: value
+                                          value: Api-Key
+                                        type: reference
+                                        value: getUserWebhookapikey.results
+                                  ignoreSslErrors:
+                                    type: value
+                                    value: 'false'
+                                  includeFullResponse:
+                                    type: value
+                                    value: 'false'
+                                  maxRetries:
+                                    type: value
+                                    value: '0'
+                                  queryParams:
+                                    type: complex
+                                    value: []
+                                  responseType:
+                                    type: value
+                                    value: json
+                                  retryDelayMS:
+                                    type: value
+                                    value: '0'
+                                  retryOnAllErrors:
+                                    type: value
+                                    value: 'false'
+                                  timeout:
+                                    type: value
+                                    value: ''
+                                  url:
+                                    type: reference
+                                    value: getUserWebhookurl.results
+                                  useExponentialBackoff:
+                                    type: value
+                                    value: 'false'
+                                name: Post Request 2
+                          - name: Else
+                            steps:
+                              - action:
+                                  key: stopExecution
+                                  component:
+                                    isPublic: true
+                                    key: stop-execution
+                                    version: LATEST
+                                description: ''
+                                inputs:
+                                  contentType:
+                                    type: value
+                                    value: application/json
+                                  headers:
+                                    type: complex
+                                    value: []
+                                  jsonBody:
+                                    type: value
+                                    value: ''
+                                  statusCode:
+                                    type: value
+                                    value: '200'
+                                name: Stop Execution 2
+                        description: ''
+                        inputs:
+                          conditions:
+                            type: complex
+                            value:
+                              - name: Webhook URL Set
+                                type: complex
+                                value:
+                                  - and
+                                  - - exists
+                                    - name: ''
+                                      type: reference
+                                      value: getUserWebhookurl.results
+                        name: Branch on Expression 4
+                description: ''
+                inputs:
+                  conditions:
+                    type: complex
+                    value:
+                      - name: channel
+                        type: complex
+                        value:
+                          - and
+                          - - equal
+                            - name: ''
+                              type: reference
+                              value: >-
+                                receiveSlackWebhook.results.body.data.event.channel_type
+                            - name: ''
+                              type: value
+                              value: channel
+                name: Branch on Expression 3
+        description: ''
+        inputs:
+          conditions:
+            type: complex
+            value:
+              - name: If Challenge
+                type: complex
+                value:
+                  - and
+                  - - exists
+                    - name: ''
+                      type: reference
+                      value: receiveSlackWebhook.results.body.data.challenge
+        name: Branch on Expression 2
+  - description: View persisted data for debugging purposes
+    endpointSecurityType: customer_optional
+    isSynchronous: false
+    name: Print Persisted Data
+    steps:
+      - action:
+          key: webhook
+          component:
+            isPublic: true
+            key: webhook-triggers
+            version: LATEST
+        description: ''
+        inputs:
+          body:
+            type: value
+            value: ''
+          contentType:
+            type: value
+            value: ''
+          headers:
+            type: complex
+            value: []
+          statusCode:
+            type: value
+            value: ''
+        isTrigger: true
+        name: Print Persisted Data Trigger
+      - action:
+          key: runCode
+          component:
+            isPublic: true
+            key: code
+            version: LATEST
+        description: ''
+        inputs:
+          code:
+            type: value
+            value: >-
+              module.exports = async ({ crossFlowState }) => ({ data:
+              crossFlowState })
+        name: Return Persisted Data
+name: Slack Webhook Router

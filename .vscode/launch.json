@@ -1,0 +1,137 @@
+{
+  // Debug configs for Cursor/VSCode
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Pytest: test_document_upload_v2_with_real_pdf_file",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": [
+        "-vv",
+        "-s",
+        "tests/test_document_processing_v2.py::test_document_upload_v2_with_real_pdf_file"
+      ],
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "justMyCode": false,
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Python: Temporal core worker (debug)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/start_temporal_worker.py",
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "justMyCode": false,
+      "console": "integratedTerminal",
+      "args": []
+    },
+    {
+      "name": "Python: Temporal worker (debug)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/start_document_worker.py",
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "justMyCode": false,
+      "console": "integratedTerminal",
+      "args": []
+    },
+    {
+      "name": "Python Debugger: Memory Server",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "main.py",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Python Debugger: Celery",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "start_worker.py",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Python Debugger: Remote Attach Memory Server",
+      "type": "debugpy",
+      "request": "attach",
+      "connect": {
+        "host": "127.0.0.1",
+        "port": 5678
+      },
+      "pathMappings": [
+        {
+          "localRoot": "${workspaceFolder}",
+          "remoteRoot": "."
+        }
+      ]
+    },
+    {
+      "name": "Python Debugger: Remote Attach Celery",
+      "type": "debugpy",
+      "request": "attach",
+      "connect": {
+        "host": "127.0.0.1",
+        "port": 5778
+      },
+      "pathMappings": [
+        {
+          "localRoot": "${workspaceFolder}",
+          "remoteRoot": "."
+        }
+      ]
+    },
+    {
+      "name": "Python: Pytest test_v1_update_memory_with_api_key",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": [
+        "-s",
+        "-o",
+        "log_cli_level=INFO",
+        "tests/test_add_memory_fastapi.py",
+        "-k",
+        "test_v1_update_memory_with_api_key",
+        "--log-file=pytest_full.log"
+      ],
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Python Debugger: Copy Lost Data",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "scripts/copy_lost_data.py",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Python: Pytest test_v1_add_memory_batch_with_webhook_success",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": [
+        "-s",
+        "-o",
+        "log_cli_level=INFO",
+        "tests/test_add_memory_fastapi.py",
+        "-k",
+        "test_v1_add_memory_batch_with_webhook_success",
+        "--log-file=pytest_full.log"
+      ],
+      "console": "integratedTerminal"
+    }
+  ]
+  ,
+  "compounds": [
+    {
+      "name": "Workers: run both",
+      "configurations": [
+        "Python: Temporal core worker (debug)",
+        "Python: Temporal worker (debug)"
+      ],
+      "stopAll": true
+    }
+  ]
+}

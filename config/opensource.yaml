@@ -1,0 +1,109 @@
+# Open Source Edition Configuration
+# This configuration is included in the open source distribution
+
+edition: "opensource"
+
+features:
+  # Core features (always enabled in OSS)
+  memory_storage: true
+  vector_search: true
+  graph_relationships: true
+  api_access: true
+  background_jobs: true
+  webhooks: true
+  
+  # Authentication (simplified for self-hosted)
+  api_key_auth: true
+  session_token_auth: true
+  oauth: false  # Can be enabled manually
+  auth0: false  # Cloud-only
+  
+  # Analytics & Telemetry (opt-in, privacy-first)
+  telemetry: true  # Can be disabled via env var
+  posthog: true   # Self-hostable
+  amplitude: false  # Cloud-only
+  
+  # Payment & Billing (disabled in OSS)
+  stripe: false
+  subscriptions: false
+  usage_metering: false
+  
+  # Cloud Services (disabled in OSS)
+  azure_service_bus: false
+  sendgrid_email: false
+  
+  # Rate Limiting (disabled in OSS - self-hosted, no limits needed)
+  rate_limiting: false
+  subscription_enforcement: false
+  
+  # Developer Features
+  openapi_docs: true
+  swagger_ui: true
+  debug_endpoints: true
+
+plugins:
+  enabled:
+    - "posthog"  # Self-hosted analytics
+    - "local_auth"  # Simple authentication
+  
+  disabled:
+    - "stripe"
+    - "amplitude" 
+    - "azure"
+    - "auth0"
+
+batch_processing:
+  max_batch_size: 50  # OSS limited to smaller batches
+  max_concurrent_processing: 10
+
+messaging:
+  batch_limit_exceeded: |
+    Batch size exceeds open source limits (50 memories).
+    For bulk processing with guaranteed delivery, use Papr Cloud: https://papr.ai/cloud
+
+limits:
+  # No limits in open source (self-hosted)
+  max_memories_per_user: null
+  max_api_calls_per_day: null
+  rate_limit_per_minute: 100
+  
+subscription:
+  # Everyone gets full access in open source
+  default_tier: "unlimited"
+  require_payment: false
+  trial_enabled: false
+
+telemetry:
+  enabled: true  # Overridable via TELEMETRY_ENABLED env var
+  provider: "posthog"
+  anonymous: true
+  
+  # What we collect (privacy-first)
+  collect:
+    - "feature_usage"  # Which endpoints are used
+    - "error_types"    # Anonymous error tracking
+    - "performance"    # Response times, query speeds
+    
+  # What we NEVER collect
+  never_collect:
+    - "memory_content"
+    - "search_queries"
+    - "user_data"
+    - "ip_addresses"
+    - "file_paths"
+
+# Query logging (available in OSS too!)
+# Philosophy: Give OSS users genuine utility, compete on execution
+# OSS users can build their own models - that's the point of open source
+# Our competitive moat: Better trained models, no ops burden, continuous improvement
+query_logging:
+  enabled: true
+  store_retrieval_logs: true
+  advanced_analytics: false  # OSS: No dashboard (raw data only)
+  model_training: false      # OSS: Build your own models
+
+documentation:
+  show_cloud_features: false
+  self_hosting_guide: true
+  community_support: true
+

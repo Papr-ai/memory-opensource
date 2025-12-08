@@ -1,0 +1,6849 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Papr Memory API",
+    "description": "API for managing personal memory items with authentication and user-specific data.\n## Authentication\nThis API supports three authentication methods:\n- **API Key**: Include your API key in the `X-API-Key` header\n  ```\n  X-API-Key: <your-api-key>\n  ```\n- **Session Token**: Include your session token in the `X-Session-Token` header\n  ```\n  X-Session-Token: <your-session-token>\n  ```\n- **Bearer Token**: Include your OAuth2 token from Auth0 in the `Authorization` header\n  ```\n  Authorization: Bearer <token>\n  ```\nAll endpoints require one of these authentication methods.",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/v1/user": {
+      "post": {
+        "tags": [
+          "v1",
+          "User"
+        ],
+        "summary": "Create User",
+        "description": "Create a new user or link existing user to developer",
+        "operationId": "create_user",
+        "parameters": [
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateUserRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-operation-name": "create_user",
+        "x-operation-description": "Create a new user or link existing user to developer",
+        "x-operation-tags": [
+          "User"
+        ]
+      },
+      "get": {
+        "tags": [
+          "v1",
+          "User"
+        ],
+        "summary": "List Users",
+        "description": "List users for a developer",
+        "operationId": "list_users",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 10,
+              "title": "Page Size"
+            }
+          },
+          {
+            "name": "external_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "External Id"
+            }
+          },
+          {
+            "name": "email",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Email"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-operation-name": "list_users",
+        "x-operation-description": "List users for a developer",
+        "x-operation-tags": [
+          "User"
+        ]
+      }
+    },
+    "/v1/user/{user_id}": {
+      "get": {
+        "tags": [
+          "v1",
+          "User"
+        ],
+        "summary": "Get User",
+        "description": "Get user details by user_id (_User.objectId) and developer association",
+        "operationId": "get_user",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-operation-name": "get_user",
+        "x-operation-description": "Get user details by user_id (_User.objectId) and developer association",
+        "x-operation-tags": [
+          "User"
+        ]
+      },
+      "put": {
+        "tags": [
+          "v1",
+          "User"
+        ],
+        "summary": "Update User",
+        "description": "Update user details by user_id (_User.objectId) and developer association",
+        "operationId": "update_user",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateUserRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-operation-name": "update_user",
+        "x-operation-description": "Update user details by user_id (_User.objectId) and developer association",
+        "x-operation-tags": [
+          "User"
+        ]
+      },
+      "delete": {
+        "tags": [
+          "v1",
+          "User"
+        ],
+        "summary": "Delete User",
+        "description": "Delete user association with developer and the user itself by , assume external user_id is provided, and resolve to internal user_id (_User.objectId)",
+        "operationId": "delete_user",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "is_external",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Is this an external user ID?",
+              "default": false,
+              "title": "Is External"
+            },
+            "description": "Is this an external user ID?"
+          },
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteUserResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-operation-name": "delete_user",
+        "x-operation-description": "Delete user association with developer and the user itself by , assume external user_id is provided, and resolve to internal user_id (_User.objectId)",
+        "x-operation-tags": [
+          "User"
+        ]
+      }
+    },
+    "/v1/user/batch": {
+      "post": {
+        "tags": [
+          "v1",
+          "User"
+        ],
+        "summary": "Create User Batch",
+        "description": "Create multiple users or link existing users to developer, and add each to the developer's workspace (if one exists).",
+        "operationId": "create_user_batch",
+        "parameters": [
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchUserCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-operation-name": "create_user_batch",
+        "x-operation-description": "Create multiple users or link existing users to developer, and add each to the developer's workspace (if one exists).",
+        "x-operation-tags": [
+          "User"
+        ]
+      }
+    },
+    "/v1/memory": {
+      "post": {
+        "tags": [
+          "v1",
+          "Memory"
+        ],
+        "summary": "Add Memory V1",
+        "description": "Add a new memory item to the system with size validation and background processing.\n    \n    **Authentication Required**:\n    One of the following authentication methods must be used:\n    - Bearer token in `Authorization` header\n    - API Key in `X-API-Key` header\n    - Session token in `X-Session-Token` header\n    \n    **Required Headers**:\n    - Content-Type: application/json\n    - X-Client-Type: (e.g., 'papr_plugin', 'browser_extension')\n    \n    The API validates content size against MAX_CONTENT_LENGTH environment variable (defaults to 15000 bytes).",
+        "operationId": "add_memory",
+        "security": [
+          {
+            "X-API-Key": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "X-API-Key": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "skip_background_processing",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "If True, skips adding background tasks for processing",
+              "default": false,
+              "title": "Skip Background Processing"
+            },
+            "description": "If True, skips adding background tasks for processing"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddMemoryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Memory successfully added",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddMemoryResponse"
+                },
+                "example": {
+                  "code": 200,
+                  "status": "success",
+                  "data": [
+                    {
+                      "id": "mem_123",
+                      "content": "Sample memory content.",
+                      "type": "text",
+                      "metadata": {
+                        "topics": "example, memory"
+                      },
+                      "createdAt": "2024-06-01T12:00:00Z"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "207": {
+            "description": "Memory added with degraded functionality",
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 207,
+                  "status": "success",
+                  "data": [
+                    {
+                      "id": "mem_124",
+                      "content": "Sample memory content.",
+                      "type": "text",
+                      "metadata": {
+                        "topics": "example, memory"
+                      },
+                      "createdAt": "2024-06-01T12:01:00Z"
+                    }
+                  ],
+                  "details": {
+                    "warning": "Neo4j unavailable, stored in Pinecone only."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/AddMemoryResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 400,
+                  "status": "error",
+                  "error": "Invalid request payload.",
+                  "details": {
+                    "field": "content",
+                    "reason": "Missing required field."
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/AddMemoryResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401,
+                  "status": "error",
+                  "error": "Missing or invalid authentication."
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/AddMemoryResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Subscription limit reached",
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 403,
+                  "status": "error",
+                  "error": "Subscription limit reached. Upgrade required.",
+                  "details": {
+                    "limit": "memory quota"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/AddMemoryResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Content too large",
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 413,
+                  "status": "error",
+                  "error": "Content size (16000 bytes) exceeds maximum limit of 15000 bytes.",
+                  "details": {
+                    "max_content_length": 15000
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/AddMemoryResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported Media Type",
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 415,
+                  "status": "error",
+                  "error": "Unsupported media type. Use application/json."
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/AddMemoryResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500,
+                  "status": "error",
+                  "error": "Internal server error.",
+                  "details": {
+                    "trace_id": "abc123"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/AddMemoryResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-openai-isConsequential": false
+      }
+    },
+    "/v1/memory/{memory_id}": {
+      "put": {
+        "tags": [
+          "v1",
+          "Memory"
+        ],
+        "summary": "Update Memory V1",
+        "description": "Update an existing memory item by ID.\n    \n    **Authentication Required**:\n    One of the following authentication methods must be used:\n    - Bearer token in `Authorization` header\n    - API Key in `X-API-Key` header\n    - Session token in `X-Session-Token` header\n    \n    **Required Headers**:\n    - Content-Type: application/json\n    - X-Client-Type: (e.g., 'papr_plugin', 'browser_extension')\n    \n    The API validates content size against MAX_CONTENT_LENGTH environment variable (defaults to 15000 bytes).",
+        "operationId": "update_memory",
+        "security": [
+          {
+            "X-API-Key": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "X-API-Key": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "memory_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Memory Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMemoryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Memory successfully updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateMemoryResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateMemoryResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateMemoryResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Memory not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateMemoryResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Content too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateMemoryResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateMemoryResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-openai-isConsequential": true
+      },
+      "delete": {
+        "tags": [
+          "v1",
+          "Memory"
+        ],
+        "summary": "Delete Memory V1",
+        "description": "Delete a memory item by ID.\n    \n    **Authentication Required**:\n    One of the following authentication methods must be used:\n    - Bearer token in `Authorization` header\n    - API Key in `X-API-Key` header\n    - Session token in `X-Session-Token` header\n    \n    **Required Headers**:\n    - X-Client-Type: (e.g., 'papr_plugin', 'browser_extension')",
+        "operationId": "delete_memory",
+        "security": [
+          {
+            "X-API-Key": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "X-API-Key": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "memory_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Memory Id"
+            }
+          },
+          {
+            "name": "skip_parse",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Skip Parse Server deletion",
+              "default": false,
+              "title": "Skip Parse"
+            },
+            "description": "Skip Parse Server deletion"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Memory successfully deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteMemoryResponse"
+                }
+              }
+            }
+          },
+          "207": {
+            "description": "Partially successful deletion",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteMemoryResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteMemoryResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteMemoryResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Memory not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteMemoryResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteMemoryResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-openai-isConsequential": true
+      },
+      "get": {
+        "tags": [
+          "v1",
+          "Memory"
+        ],
+        "summary": "Get Memory V1",
+        "description": "Retrieve a memory item by ID.\n    \n    **Authentication Required**:\n    One of the following authentication methods must be used:\n    - Bearer token in `Authorization` header\n    - API Key in `X-API-Key` header\n    - Session token in `X-Session-Token` header\n    \n    **Required Headers**:\n    - X-Client-Type: (e.g., 'papr_plugin', 'browser_extension')",
+        "operationId": "get_memory",
+        "security": [
+          {
+            "X-API-Key": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "X-API-Key": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "memory_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Memory Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Memory successfully retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Memory not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-openai-isConsequential": false
+      }
+    },
+    "/v1/memory/batch": {
+      "post": {
+        "tags": [
+          "v1",
+          "Memory"
+        ],
+        "summary": "Add Memory Batch V1",
+        "description": "Add multiple memory items in a batch with size validation and background processing.\n    \n    **Authentication Required**:\n    One of the following authentication methods must be used:\n    - Bearer token in `Authorization` header\n    - API Key in `X-API-Key` header\n    - Session token in `X-Session-Token` header\n    \n    **Required Headers**:\n    - Content-Type: application/json\n    - X-Client-Type: (e.g., 'papr_plugin', 'browser_extension')\n    \n    The API validates individual memory content size against MAX_CONTENT_LENGTH environment variable (defaults to 15000 bytes).",
+        "operationId": "add_memory_batch",
+        "security": [
+          {
+            "X-API-Key": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "X-API-Key": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "skip_background_processing",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "If True, skips adding background tasks for processing",
+              "default": false,
+              "title": "Skip Background Processing"
+            },
+            "description": "If True, skips adding background tasks for processing"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchMemoryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Memories successfully added",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchMemoryResponse"
+                }
+              }
+            }
+          },
+          "207": {
+            "description": "Partial success - some memories failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchMemoryResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchMemoryResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchMemoryResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Subscription limit reached",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchMemoryResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Content too large",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchMemoryResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported Media Type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchMemoryResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchMemoryResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-openai-isConsequential": false
+      }
+    },
+    "/v1/memory/search": {
+      "post": {
+        "tags": [
+          "v1",
+          "Memory"
+        ],
+        "summary": "Search V1",
+        "description": "Search through memories with authentication required.\n    \n    **Authentication Required**:\n    One of the following authentication methods must be used:\n    - Bearer token in `Authorization` header\n    - API Key in `X-API-Key` header\n    - Session token in `X-Session-Token` header\n    \n    **Recommended Headers**:\n    ```\n    Accept-Encoding: gzip\n    ```\n    \n    The API supports response compression for improved performance. Responses larger than 1KB will be automatically compressed when this header is present.\n    \n    **HIGHLY RECOMMENDED SETTINGS FOR BEST RESULTS:**\n    - Set `enable_agentic_graph: true` for intelligent, context-aware search that can understand ambiguous references\n    - Use `max_memories: 15-20` for comprehensive memory coverage\n    - Use `max_nodes: 10-15` for comprehensive graph entity relationships\n    \n    **Agentic Graph Benefits:**\n    When enabled, the system can understand vague references by first identifying specific entities from your memory graph, then performing targeted searches. For example:\n    - \"customer feedback\" \u2192 identifies your customers first, then finds their specific feedback\n    - \"project issues\" \u2192 identifies your projects first, then finds related issues\n    - \"team meeting notes\" \u2192 identifies your team members first, then finds meeting notes\n    \n    **User Resolution Precedence:**\n    - If both user_id and external_user_id are provided, user_id takes precedence.\n    - If only external_user_id is provided, it will be resolved to the internal user.\n    - If neither is provided, the authenticated user is used.",
+        "operationId": "search_memory",
+        "security": [
+          {
+            "X-API-Key": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "X-API-Key": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "max_memories",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 10,
+              "description": "HIGHLY RECOMMENDED: Maximum number of memories to return. Use at least 15-20 for comprehensive results. Lower values (5-10) may miss relevant information. Default is 20 for optimal coverage.",
+              "default": 20,
+              "title": "Max Memories"
+            },
+            "description": "HIGHLY RECOMMENDED: Maximum number of memories to return. Use at least 15-20 for comprehensive results. Lower values (5-10) may miss relevant information. Default is 20 for optimal coverage."
+          },
+          {
+            "name": "max_nodes",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 10,
+              "description": "HIGHLY RECOMMENDED: Maximum number of neo nodes to return. Use at least 10-15 for comprehensive graph results. Lower values may miss important entity relationships. Default is 15 for optimal coverage.",
+              "default": 15,
+              "title": "Max Nodes"
+            },
+            "description": "HIGHLY RECOMMENDED: Maximum number of neo nodes to return. Use at least 10-15 for comprehensive graph results. Lower values may miss important entity relationships. Default is 15 for optimal coverage."
+          },
+          {
+            "name": "Accept-Encoding",
+            "in": "header",
+            "description": "Recommended to use 'gzip' for response compression",
+            "schema": {
+              "type": "string",
+              "default": "gzip"
+            },
+            "required": false
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successfully retrieved memories",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No relevant items found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Unsupported Media Type",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-openai-isConsequential": false
+      }
+    },
+    "/v1/feedback": {
+      "post": {
+        "tags": [
+          "v1",
+          "Feedback"
+        ],
+        "summary": "Submit Feedback V1",
+        "description": "Submit feedback on search results to help improve model performance.\n    \n    This endpoint allows developers to provide feedback on:\n    - Overall answer quality (thumbs up/down, ratings)\n    - Specific memory relevance and accuracy\n    - User engagement signals (copy, save, create document actions)\n    - Corrections and improvements\n    \n    The feedback is used to train and improve:\n    - Router model tier predictions\n    - Memory retrieval ranking\n    - Answer generation quality\n    - Agentic graph search performance\n    \n    **Authentication Required**:\n    One of the following authentication methods must be used:\n    - Bearer token in `Authorization` header\n    - API Key in `X-API-Key` header\n    - Session token in `X-Session-Token` header\n    \n    **Required Headers**:\n    - Content-Type: application/json\n    - X-Client-Type: (e.g., 'papr_plugin', 'browser_extension')",
+        "operationId": "submit_feedback",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeedbackRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Feedback submitted successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedbackResponse"
+                },
+                "example": {
+                  "code": 200,
+                  "status": "success",
+                  "feedback_id": "fb_123456789",
+                  "message": "Feedback submitted successfully and will be processed for model improvement"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedbackResponse"
+                },
+                "example": {
+                  "code": 400,
+                  "status": "error",
+                  "message": "Failed to submit feedback",
+                  "error": "Invalid search_id or feedback data",
+                  "details": {
+                    "field": "search_id",
+                    "reason": "Search ID not found"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedbackResponse"
+                },
+                "example": {
+                  "code": 401,
+                  "status": "error",
+                  "message": "Failed to submit feedback",
+                  "error": "Missing or invalid authentication"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Search ID not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedbackResponse"
+                },
+                "example": {
+                  "code": 404,
+                  "status": "error",
+                  "message": "Failed to submit feedback",
+                  "error": "Search ID abc123def456 not found or access denied"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedbackResponse"
+                },
+                "example": {
+                  "code": 500,
+                  "status": "error",
+                  "message": "Failed to submit feedback",
+                  "error": "Internal server error",
+                  "details": {
+                    "trace_id": "abc123"
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "X-API-Key": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "X-API-Key": []
+          }
+        ],
+        "x-openai-isConsequential": false
+      }
+    },
+    "/v1/feedback/batch": {
+      "post": {
+        "tags": [
+          "v1",
+          "Feedback"
+        ],
+        "summary": "Submit Batch Feedback V1",
+        "description": "Submit multiple feedback items in a single request.\n    \n    Useful for submitting session-end feedback or bulk feedback collection.\n    Each feedback item is processed independently, so partial success is possible.\n    \n    **Authentication Required**:\n    One of the following authentication methods must be used:\n    - Bearer token in `Authorization` header\n    - API Key in `X-API-Key` header\n    - Session token in `X-Session-Token` header\n    \n    **Required Headers**:\n    - Content-Type: application/json\n    - X-Client-Type: (e.g., 'papr_plugin', 'browser_extension')",
+        "operationId": "submit_batch_feedback",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchFeedbackRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Batch feedback processed successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchFeedbackResponse"
+                },
+                "example": {
+                  "code": 200,
+                  "status": "success",
+                  "feedback_ids": [
+                    "fb_123",
+                    "fb_456"
+                  ],
+                  "successful_count": 2,
+                  "failed_count": 0,
+                  "errors": [],
+                  "message": "Processed 2 feedback items successfully"
+                }
+              }
+            }
+          },
+          "207": {
+            "description": "Partial success - some feedback items failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchFeedbackResponse"
+                },
+                "example": {
+                  "code": 207,
+                  "status": "success",
+                  "feedback_ids": [
+                    "fb_123"
+                  ],
+                  "successful_count": 1,
+                  "failed_count": 1,
+                  "errors": [
+                    {
+                      "index": 1,
+                      "search_id": "abc123",
+                      "error": "Search ID not found"
+                    }
+                  ],
+                  "message": "Processed 1 feedback items successfully"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchFeedbackResponse"
+                },
+                "example": {
+                  "code": 400,
+                  "status": "error",
+                  "feedback_ids": [],
+                  "successful_count": 0,
+                  "failed_count": 2,
+                  "errors": [
+                    {
+                      "index": 0,
+                      "search_id": "abc123",
+                      "error": "Invalid feedback data"
+                    }
+                  ],
+                  "message": "Batch feedback processed"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchFeedbackResponse"
+                },
+                "example": {
+                  "code": 401,
+                  "status": "error",
+                  "feedback_ids": [],
+                  "successful_count": 0,
+                  "failed_count": 0,
+                  "errors": [],
+                  "message": "Failed to process batch feedback",
+                  "error": "Missing or invalid authentication"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchFeedbackResponse"
+                },
+                "example": {
+                  "code": 500,
+                  "status": "error",
+                  "feedback_ids": [],
+                  "successful_count": 0,
+                  "failed_count": 0,
+                  "errors": [],
+                  "message": "Failed to process batch feedback",
+                  "error": "Internal server error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "X-API-Key": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "X-API-Key": []
+          }
+        ],
+        "x-openai-isConsequential": false
+      }
+    },
+    "/v1/feedback/{feedback_id}": {
+      "get": {
+        "tags": [
+          "v1",
+          "Feedback"
+        ],
+        "summary": "Get Feedback By Id V1",
+        "description": "Retrieve feedback by ID.\n    \n    This endpoint allows developers to fetch feedback details by feedback ID.\n    Only the user who created the feedback or users with appropriate permissions can access it.\n    \n    **Authentication Required**:\n    One of the following authentication methods must be used:\n    - Bearer token in `Authorization` header\n    - API Key in `X-API-Key` header\n    - Session token in `X-Session-Token` header\n    \n    **Required Headers**:\n    - X-Client-Type: (e.g., 'papr_plugin', 'browser_extension')",
+        "operationId": "get_feedback_by_id",
+        "security": [
+          {
+            "X-API-Key": []
+          },
+          {
+            "Bearer": []
+          },
+          {
+            "X-API-Key": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "feedback_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Feedback Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Feedback retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeedbackResponse"
+                },
+                "example": {
+                  "code": 200,
+                  "status": "success",
+                  "feedback_id": "fb_123456789",
+                  "message": "Feedback retrieved successfully",
+                  "details": {
+                    "feedback_type": "thumbs_up",
+                    "feedback_score": 1,
+                    "feedback_text": "This was helpful!",
+                    "search_id": "search_123",
+                    "created_at": "2024-01-17T17:30:45.123456Z"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 401,
+                  "status": "error",
+                  "message": "Failed to retrieve feedback",
+                  "error": "Missing or invalid authentication"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/FeedbackResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Feedback not found",
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 404,
+                  "status": "error",
+                  "message": "Failed to retrieve feedback",
+                  "error": "Feedback ID fb_123456789 not found or access denied"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/FeedbackResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal server error",
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 500,
+                  "status": "error",
+                  "message": "Failed to retrieve feedback",
+                  "error": "Internal server error",
+                  "details": {
+                    "trace_id": "abc123"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/FeedbackResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "x-openai-isConsequential": false
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AddMemoryItem": {
+        "properties": {
+          "memoryId": {
+            "type": "string",
+            "title": "Memoryid"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          },
+          "objectId": {
+            "type": "string",
+            "title": "Objectid"
+          },
+          "memoryChunkIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Memorychunkids"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "memoryId",
+          "createdAt",
+          "objectId"
+        ],
+        "title": "AddMemoryItem",
+        "description": "Response model for a single memory item in add_memory response"
+      },
+      "AddMemoryRequest": {
+        "properties": {
+          "content": {
+            "type": "string",
+            "title": "Content",
+            "description": "The content of the memory item you want to add to memory"
+          },
+          "type": {
+            "$ref": "#/components/schemas/MemoryType"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MemoryMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Metadata used in Neo4J and Pinecone for a memory item"
+          },
+          "context": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ContextItem"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context",
+            "description": "Context can be conversation history or any relevant context for a memory item"
+          },
+          "relationships_json": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/RelationshipItem"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relationships Json",
+            "description": "Array of relationships that we can use in Graph DB (neo4J)"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "content",
+          "type"
+        ],
+        "title": "AddMemoryRequest",
+        "description": "Request model for adding a new memory",
+        "example": {
+          "content": "Meeting notes from the product planning session",
+          "context": [
+            {
+              "content": "Let's discuss the Q2 product roadmap",
+              "role": "user"
+            },
+            {
+              "content": "I'll help you plan the roadmap. What are your key objectives?",
+              "role": "assistant"
+            }
+          ],
+          "metadata": {
+            "conversationId": "conv-123",
+            "createdAt": "2024-03-21T10:00:00Z",
+            "emoji_tags": "\ud83d\udcca,\ud83d\udca1,\ud83d\udcdd",
+            "emotion_tags": "focused, productive",
+            "external_user_id": "external_user_123",
+            "external_user_read_access": [
+              "external_user_123",
+              "external_user_789"
+            ],
+            "external_user_write_access": [
+              "external_user_123"
+            ],
+            "hierarchical_structures": "Business/Planning/Product",
+            "location": "Conference Room A",
+            "sourceUrl": "https://meeting-notes.example.com/123",
+            "topics": "product, planning"
+          },
+          "relationships_json": [
+            {
+              "metadata": {
+                "relevance": "high"
+              },
+              "related_item_id": "previous_memory_item_id",
+              "related_item_type": "TextMemoryItem",
+              "relation_type": "follows"
+            }
+          ],
+          "type": "text"
+        }
+      },
+      "AddMemoryResponse": {
+        "properties": {
+          "code": {
+            "type": "integer",
+            "title": "Code",
+            "description": "HTTP status code",
+            "default": 200
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "'success' or 'error'",
+            "default": "success"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/AddMemoryItem"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data",
+            "description": "List of memory items if successful"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error",
+            "description": "Error message if failed"
+          },
+          "details": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Details",
+            "description": "Additional error details or context"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "AddMemoryResponse",
+        "description": "Unified response model for add_memory API endpoint (success or error)."
+      },
+      "BatchFeedbackRequest": {
+        "properties": {
+          "feedback_items": {
+            "items": {
+              "$ref": "#/components/schemas/FeedbackRequest"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Feedback Items",
+            "description": "List of feedback items to submit"
+          },
+          "session_context": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Context",
+            "description": "Session-level context for batch feedback"
+          }
+        },
+        "type": "object",
+        "required": [
+          "feedback_items"
+        ],
+        "title": "BatchFeedbackRequest",
+        "description": "Request model for submitting multiple feedback items"
+      },
+      "BatchFeedbackResponse": {
+        "properties": {
+          "code": {
+            "type": "integer",
+            "title": "Code",
+            "description": "HTTP status code"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "'success' or 'error'"
+          },
+          "feedback_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Feedback Ids",
+            "description": "List of feedback IDs"
+          },
+          "successful_count": {
+            "type": "integer",
+            "title": "Successful Count",
+            "description": "Number of successfully processed feedback items",
+            "default": 0
+          },
+          "failed_count": {
+            "type": "integer",
+            "title": "Failed Count",
+            "description": "Number of failed feedback items",
+            "default": 0
+          },
+          "errors": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Errors",
+            "description": "List of error details"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "Human-readable message"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error",
+            "description": "Error message if status is 'error'"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "status",
+          "message"
+        ],
+        "title": "BatchFeedbackResponse",
+        "description": "Response model for batch feedback submission"
+      },
+      "BatchMemoryError": {
+        "properties": {
+          "index": {
+            "type": "integer",
+            "title": "Index"
+          },
+          "error": {
+            "type": "string",
+            "title": "Error"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "details": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Details"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "index",
+          "error"
+        ],
+        "title": "BatchMemoryError"
+      },
+      "BatchMemoryRequest": {
+        "properties": {
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id",
+            "description": "Internal user ID for all memories in the batch. If not provided, developer's user ID will be used."
+          },
+          "external_user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External User Id",
+            "description": "External user ID for all memories in the batch. If provided and user_id is not, will be resolved to internal user ID."
+          },
+          "memories": {
+            "items": {
+              "$ref": "#/components/schemas/AddMemoryRequest"
+            },
+            "type": "array",
+            "maxItems": 50,
+            "minItems": 1,
+            "title": "Memories",
+            "description": "List of memory items to add in batch"
+          },
+          "batch_size": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 50.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Batch Size",
+            "description": "Number of items to process in parallel",
+            "default": 10
+          }
+        },
+        "type": "object",
+        "required": [
+          "memories"
+        ],
+        "title": "BatchMemoryRequest",
+        "description": "Request model for batch adding memories",
+        "example": {
+          "batch_size": 10,
+          "external_user_id": "external_user_abcde",
+          "memories": [
+            {
+              "content": "Meeting notes from the product planning session",
+              "metadata": {
+                "createdAt": "2024-03-21T10:00:00Z",
+                "emoji tags": "\ud83d\udcca,\ud83d\udca1,\ud83d\udcdd",
+                "emotion tags": "focused, productive",
+                "hierarchical structures": "Business/Planning/Product",
+                "topics": "product, planning"
+              },
+              "type": "text"
+            },
+            {
+              "content": "Follow-up tasks from the planning meeting",
+              "metadata": {
+                "createdAt": "2024-03-21T11:00:00Z",
+                "emoji tags": "\u2705,\ud83d\udccb",
+                "emotion tags": "organized",
+                "hierarchical structures": "Business/Tasks/Planning",
+                "topics": "tasks, planning"
+              },
+              "type": "text"
+            }
+          ],
+          "user_id": "internal_user_id_12345"
+        }
+      },
+      "BatchMemoryResponse": {
+        "properties": {
+          "code": {
+            "type": "integer",
+            "title": "Code",
+            "description": "HTTP status code for the batch operation",
+            "default": 200
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "'success', 'partial', or 'error'",
+            "default": "success"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message",
+            "description": "Human-readable status message"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error",
+            "description": "Batch-level error message, if any"
+          },
+          "details": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Details",
+            "description": "Additional error details or context"
+          },
+          "successful": {
+            "items": {
+              "$ref": "#/components/schemas/AddMemoryResponse"
+            },
+            "type": "array",
+            "title": "Successful",
+            "description": "List of successful add responses"
+          },
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/BatchMemoryError"
+            },
+            "type": "array",
+            "title": "Errors",
+            "description": "List of errors for failed items"
+          },
+          "total_processed": {
+            "type": "integer",
+            "title": "Total Processed",
+            "default": 0
+          },
+          "total_successful": {
+            "type": "integer",
+            "title": "Total Successful",
+            "default": 0
+          },
+          "total_failed": {
+            "type": "integer",
+            "title": "Total Failed",
+            "default": 0
+          },
+          "total_content_size": {
+            "type": "integer",
+            "title": "Total Content Size",
+            "default": 0
+          },
+          "total_storage_size": {
+            "type": "integer",
+            "title": "Total Storage Size",
+            "default": 0
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "BatchMemoryResponse"
+      },
+      "BatchUserCreateRequest": {
+        "properties": {
+          "users": {
+            "items": {
+              "$ref": "#/components/schemas/CreateUserRequest"
+            },
+            "type": "array",
+            "title": "Users"
+          }
+        },
+        "type": "object",
+        "required": [
+          "users"
+        ],
+        "title": "BatchUserCreateRequest"
+      },
+      "CodeNodeProperties": {
+        "properties": {
+          "user_read_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Read Access"
+          },
+          "user_write_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Write Access"
+          },
+          "workspace_read_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Read Access"
+          },
+          "workspace_write_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Write Access"
+          },
+          "role_read_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role Read Access"
+          },
+          "role_write_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role Write Access"
+          },
+          "external_user_read_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External User Read Access"
+          },
+          "external_user_write_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External User Write Access"
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Id"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "sourceType": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourcetype"
+          },
+          "sourceUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourceurl"
+          },
+          "pageId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pageid"
+          },
+          "conversationId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversationid"
+          },
+          "createdAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Createdat"
+          },
+          "updatedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updatedat"
+          },
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "language": {
+            "type": "string",
+            "title": "Language"
+          },
+          "author": {
+            "type": "string",
+            "title": "Author"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "language",
+          "author"
+        ],
+        "title": "CodeNodeProperties",
+        "description": "Code node properties"
+      },
+      "CompanyNodeProperties": {
+        "properties": {
+          "user_read_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Read Access"
+          },
+          "user_write_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Write Access"
+          },
+          "workspace_read_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Read Access"
+          },
+          "workspace_write_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Write Access"
+          },
+          "role_read_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role Read Access"
+          },
+          "role_write_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role Write Access"
+          },
+          "external_user_read_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External User Read Access"
+          },
+          "external_user_write_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External User Write Access"
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Id"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "sourceType": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourcetype"
+          },
+          "sourceUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourceurl"
+          },
+          "pageId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pageid"
+          },
+          "conversationId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversationid"
+          },
+          "createdAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Createdat"
+          },
+          "updatedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updatedat"
+          },
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "description"
+        ],
+        "title": "CompanyNodeProperties",
+        "description": "Company node properties"
+      },
+      "ContextItem": {
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "user",
+              "assistant"
+            ],
+            "title": "Role"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "role",
+          "content"
+        ],
+        "title": "ContextItem",
+        "description": "Context item for memory request"
+      },
+      "CreateUserRequest": {
+        "properties": {
+          "email": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "email"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "external_id": {
+            "type": "string",
+            "title": "External Id"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata"
+          },
+          "type": {
+            "$ref": "#/components/schemas/UserType",
+            "default": "developerUser"
+          }
+        },
+        "type": "object",
+        "required": [
+          "external_id"
+        ],
+        "title": "CreateUserRequest",
+        "description": "Request model for creating a user",
+        "example": {
+          "email": "user@example.com",
+          "external_id": "user123",
+          "metadata": {
+            "name": "John Doe",
+            "preferences": {
+              "theme": "dark"
+            }
+          },
+          "type": "developerUser"
+        }
+      },
+      "DeleteMemoryResponse": {
+        "properties": {
+          "code": {
+            "type": "integer",
+            "title": "Code",
+            "description": "HTTP status code",
+            "default": 200
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "'success' or 'error'",
+            "default": "success"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "memoryId": {
+            "type": "string",
+            "title": "Memoryid",
+            "default": ""
+          },
+          "objectId": {
+            "type": "string",
+            "title": "Objectid",
+            "default": ""
+          },
+          "deletion_status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DeletionStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "details": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Details"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "DeleteMemoryResponse"
+      },
+      "DeleteUserResponse": {
+        "properties": {
+          "code": {
+            "type": "integer",
+            "title": "Code",
+            "description": "HTTP status code"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "'success' or 'error'"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id",
+            "description": "ID of the user attempted to delete"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message",
+            "description": "Success or error message"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error",
+            "description": "Error message if failed"
+          },
+          "details": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Details",
+            "description": "Additional error details or context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "status"
+        ],
+        "title": "DeleteUserResponse",
+        "example": {
+          "code": 200,
+          "message": "User and association deleted successfully",
+          "status": "success",
+          "user_id": "abc123"
+        }
+      },
+      "DeletionStatus": {
+        "properties": {
+          "pinecone": {
+            "type": "boolean",
+            "title": "Pinecone",
+            "default": false
+          },
+          "neo4j": {
+            "type": "boolean",
+            "title": "Neo4J",
+            "default": false
+          },
+          "parse": {
+            "type": "boolean",
+            "title": "Parse",
+            "default": false
+          },
+          "qdrant": {
+            "type": "boolean",
+            "title": "Qdrant",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "DeletionStatus"
+      },
+      "FeedbackData": {
+        "properties": {
+          "userMessage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ParsePointer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "assistantMessage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ParsePointer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "feedbackType": {
+            "$ref": "#/components/schemas/FeedbackType"
+          },
+          "feedbackValue": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feedbackvalue"
+          },
+          "feedbackScore": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feedbackscore"
+          },
+          "feedbackText": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feedbacktext"
+          },
+          "feedbackSource": {
+            "$ref": "#/components/schemas/FeedbackSource"
+          },
+          "citedMemoryIds": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Citedmemoryids"
+          },
+          "citedNodeIds": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Citednodeids"
+          },
+          "feedbackProcessed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feedbackprocessed"
+          },
+          "feedbackImpact": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feedbackimpact"
+          }
+        },
+        "type": "object",
+        "required": [
+          "feedbackType",
+          "feedbackSource"
+        ],
+        "title": "FeedbackData",
+        "description": "Developer-friendly feedback data model for requests"
+      },
+      "FeedbackRequest": {
+        "properties": {
+          "search_id": {
+            "type": "string",
+            "title": "Search Id",
+            "description": "The search_id from SearchResponse that this feedback relates to"
+          },
+          "feedbackData": {
+            "$ref": "#/components/schemas/FeedbackData",
+            "description": "The feedback data containing all feedback information"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id",
+            "description": "Internal user ID (if not provided, will be resolved from authentication)"
+          },
+          "external_user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External User Id",
+            "description": "External user ID for developer API keys acting on behalf of end users"
+          }
+        },
+        "type": "object",
+        "required": [
+          "search_id",
+          "feedbackData"
+        ],
+        "title": "FeedbackRequest",
+        "description": "Request model for submitting feedback on search results",
+        "example": {
+          "external_user_id": "dev_api_key_123",
+          "feedbackData": {
+            "assistantMessage": {
+              "__type": "Pointer",
+              "className": "PostMessage",
+              "objectId": "abc123def456"
+            },
+            "citedMemoryIds": [
+              "mem_123",
+              "mem_456"
+            ],
+            "citedNodeIds": [
+              "node_123",
+              "node_456"
+            ],
+            "feedbackImpact": "positive",
+            "feedbackProcessed": true,
+            "feedbackScore": 1,
+            "feedbackSource": "inline",
+            "feedbackText": "This answer was very helpful and accurate",
+            "feedbackType": "thumbs_up",
+            "feedbackValue": "helpful",
+            "userMessage": {
+              "__type": "Pointer",
+              "className": "PostMessage",
+              "objectId": "abc123def456"
+            }
+          },
+          "search_id": "abc123def456",
+          "user_id": "abc123def456"
+        }
+      },
+      "FeedbackResponse": {
+        "properties": {
+          "code": {
+            "type": "integer",
+            "title": "Code",
+            "description": "HTTP status code"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "'success' or 'error'"
+          },
+          "feedback_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feedback Id",
+            "description": "Unique feedback ID"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "Human-readable message"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error",
+            "description": "Error message if status is 'error'"
+          },
+          "details": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Details",
+            "description": "Additional error details"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "status",
+          "message"
+        ],
+        "title": "FeedbackResponse",
+        "description": "Response model for feedback submission"
+      },
+      "FeedbackSource": {
+        "type": "string",
+        "enum": [
+          "inline",
+          "post_query",
+          "session_end",
+          "memory_citation",
+          "answer_panel"
+        ],
+        "title": "FeedbackSource",
+        "description": "Where the feedback was provided from"
+      },
+      "FeedbackType": {
+        "type": "string",
+        "enum": [
+          "thumbs_up",
+          "thumbs_down",
+          "rating",
+          "correction",
+          "report",
+          "copy_action",
+          "save_action",
+          "create_document",
+          "memory_relevance",
+          "answer_quality"
+        ],
+        "title": "FeedbackType",
+        "description": "Types of feedback that can be provided"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "InsightNodeProperties": {
+        "properties": {
+          "user_read_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Read Access"
+          },
+          "user_write_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Write Access"
+          },
+          "workspace_read_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Read Access"
+          },
+          "workspace_write_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Write Access"
+          },
+          "role_read_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role Read Access"
+          },
+          "role_write_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role Write Access"
+          },
+          "external_user_read_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External User Read Access"
+          },
+          "external_user_write_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External User Write Access"
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Id"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "sourceType": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourcetype"
+          },
+          "sourceUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourceurl"
+          },
+          "pageId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pageid"
+          },
+          "conversationId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversationid"
+          },
+          "createdAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Createdat"
+          },
+          "updatedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updatedat"
+          },
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "customer_insight",
+              "product_insight",
+              "market_insight",
+              "competitive_insight",
+              "technical_insight",
+              "other"
+            ],
+            "title": "Type"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "description",
+          "source",
+          "type"
+        ],
+        "title": "InsightNodeProperties",
+        "description": "Insight node properties"
+      },
+      "MeetingNodeProperties": {
+        "properties": {
+          "user_read_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Read Access"
+          },
+          "user_write_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Write Access"
+          },
+          "workspace_read_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Read Access"
+          },
+          "workspace_write_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Write Access"
+          },
+          "role_read_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role Read Access"
+          },
+          "role_write_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role Write Access"
+          },
+          "external_user_read_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External User Read Access"
+          },
+          "external_user_write_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External User Write Access"
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Id"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "sourceType": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourcetype"
+          },
+          "sourceUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourceurl"
+          },
+          "pageId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pageid"
+          },
+          "conversationId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversationid"
+          },
+          "createdAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Createdat"
+          },
+          "updatedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updatedat"
+          },
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "agenda": {
+            "type": "string",
+            "title": "Agenda"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "participants": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Participants"
+          },
+          "date": {
+            "type": "string",
+            "title": "Date"
+          },
+          "time": {
+            "type": "string",
+            "title": "Time"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          },
+          "outcome": {
+            "type": "string",
+            "title": "Outcome"
+          },
+          "action_items": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Action Items"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "agenda",
+          "type",
+          "participants",
+          "date",
+          "time",
+          "summary",
+          "outcome",
+          "action_items"
+        ],
+        "title": "MeetingNodeProperties",
+        "description": "Meeting node properties"
+      },
+      "Memory": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata"
+          },
+          "external_user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External User Id"
+          },
+          "customMetadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Custommetadata"
+          },
+          "source_type": {
+            "type": "string",
+            "title": "Source Type",
+            "default": "papr"
+          },
+          "context": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ContextItem"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags"
+          },
+          "hierarchical_structures": {
+            "type": "string",
+            "title": "Hierarchical Structures",
+            "default": ""
+          },
+          "source_url": {
+            "type": "string",
+            "title": "Source Url",
+            "default": ""
+          },
+          "conversation_id": {
+            "type": "string",
+            "title": "Conversation Id",
+            "default": ""
+          },
+          "topics": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Topics"
+          },
+          "steps": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Steps"
+          },
+          "current_step": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Step"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "acl": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "type": "boolean"
+              },
+              "type": "object"
+            },
+            "type": "object",
+            "title": "Acl"
+          },
+          "user_id": {
+            "type": "string",
+            "title": "User Id"
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Id"
+          },
+          "source_document_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Document Id"
+          },
+          "source_message_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Message Id"
+          },
+          "page_number": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page Number"
+          },
+          "total_pages": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Pages"
+          },
+          "file_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Url"
+          },
+          "filename": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filename"
+          },
+          "page": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page"
+          },
+          "external_user_read_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External User Read Access"
+          },
+          "external_user_write_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External User Write Access"
+          },
+          "user_read_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Read Access"
+          },
+          "user_write_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Write Access"
+          },
+          "workspace_read_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Read Access"
+          },
+          "workspace_write_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Write Access"
+          },
+          "role_read_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role Read Access"
+          },
+          "role_write_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role Write Access"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "id",
+          "content",
+          "type",
+          "acl",
+          "user_id"
+        ],
+        "title": "Memory",
+        "description": "A memory item in the knowledge base"
+      },
+      "MemoryMetadata": {
+        "properties": {
+          "hierarchical_structures": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hierarchical Structures",
+            "description": "Hierarchical structures to enable navigation from broad topics to specific ones"
+          },
+          "createdAt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Createdat",
+            "description": "ISO datetime when the memory was created"
+          },
+          "location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location"
+          },
+          "topics": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topics"
+          },
+          "emoji tags": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Emoji Tags"
+          },
+          "emotion tags": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Emotion Tags"
+          },
+          "conversationId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversationid"
+          },
+          "sourceUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourceurl"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "external_user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External User Id"
+          },
+          "external_user_read_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External User Read Access"
+          },
+          "external_user_write_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External User Write Access"
+          },
+          "user_read_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Read Access"
+          },
+          "user_write_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Write Access"
+          },
+          "workspace_read_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Read Access"
+          },
+          "workspace_write_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Write Access"
+          },
+          "role_read_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role Read Access"
+          },
+          "role_write_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role Write Access"
+          },
+          "pageId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pageid"
+          },
+          "sourceType": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourcetype"
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Id"
+          },
+          "sessionId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sessionid"
+          },
+          "post": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Post"
+          },
+          "userMessage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Usermessage"
+          },
+          "assistantMessage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assistantmessage"
+          },
+          "relatedGoals": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relatedgoals"
+          },
+          "relatedUseCases": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relatedusecases"
+          },
+          "relatedSteps": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relatedsteps"
+          },
+          "goalClassificationScores": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Goalclassificationscores"
+          },
+          "useCaseClassificationScores": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Usecaseclassificationscores"
+          },
+          "stepClassificationScores": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stepclassificationscores"
+          },
+          "customMetadata": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    }
+                  ]
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Custommetadata",
+            "description": "Optional object for arbitrary custom metadata fields. Only string, number, boolean, or list of strings allowed. Nested dicts are not allowed."
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "title": "MemoryMetadata",
+        "description": "Metadata for memory request"
+      },
+      "MemoryType": {
+        "type": "string",
+        "enum": [
+          "text",
+          "code_snippet",
+          "document"
+        ],
+        "title": "MemoryType",
+        "description": "Valid memory types"
+      },
+      "Node": {
+        "properties": {
+          "label": {
+            "$ref": "#/components/schemas/NodeLabel"
+          },
+          "properties": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PaprMemoryNodeProperties"
+              },
+              {
+                "$ref": "#/components/schemas/PersonNodeProperties"
+              },
+              {
+                "$ref": "#/components/schemas/CompanyNodeProperties"
+              },
+              {
+                "$ref": "#/components/schemas/ProjectNodeProperties"
+              },
+              {
+                "$ref": "#/components/schemas/TaskNodeProperties"
+              },
+              {
+                "$ref": "#/components/schemas/InsightNodeProperties"
+              },
+              {
+                "$ref": "#/components/schemas/MeetingNodeProperties"
+              },
+              {
+                "$ref": "#/components/schemas/OpportunityNodeProperties"
+              },
+              {
+                "$ref": "#/components/schemas/CodeNodeProperties"
+              }
+            ],
+            "title": "Properties"
+          }
+        },
+        "type": "object",
+        "required": [
+          "label",
+          "properties"
+        ],
+        "title": "Node",
+        "description": "Public-facing node structure matching our internal representation"
+      },
+      "NodeLabel": {
+        "type": "string",
+        "enum": [
+          "Memory",
+          "Person",
+          "Company",
+          "Project",
+          "Task",
+          "Insight",
+          "Meeting",
+          "Opportunity",
+          "Code"
+        ],
+        "title": "NodeLabel"
+      },
+      "OpportunityNodeProperties": {
+        "properties": {
+          "user_read_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Read Access"
+          },
+          "user_write_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Write Access"
+          },
+          "workspace_read_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Read Access"
+          },
+          "workspace_write_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Write Access"
+          },
+          "role_read_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role Read Access"
+          },
+          "role_write_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role Write Access"
+          },
+          "external_user_read_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External User Read Access"
+          },
+          "external_user_write_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External User Write Access"
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Id"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "sourceType": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourcetype"
+          },
+          "sourceUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourceurl"
+          },
+          "pageId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pageid"
+          },
+          "conversationId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversationid"
+          },
+          "createdAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Createdat"
+          },
+          "updatedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updatedat"
+          },
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "value": {
+            "type": "number",
+            "title": "Value"
+          },
+          "stage": {
+            "type": "string",
+            "enum": [
+              "prospect",
+              "lead",
+              "opportunity",
+              "won",
+              "lost"
+            ],
+            "title": "Stage"
+          },
+          "close_date": {
+            "type": "string",
+            "title": "Close Date"
+          },
+          "probability": {
+            "type": "number",
+            "title": "Probability"
+          },
+          "next_steps": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Next Steps"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "description",
+          "value",
+          "stage",
+          "close_date",
+          "probability",
+          "next_steps"
+        ],
+        "title": "OpportunityNodeProperties",
+        "description": "Opportunity node properties"
+      },
+      "PaprMemoryNodeProperties": {
+        "properties": {
+          "user_read_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Read Access"
+          },
+          "user_write_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Write Access"
+          },
+          "workspace_read_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Read Access"
+          },
+          "workspace_write_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Write Access"
+          },
+          "role_read_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role Read Access"
+          },
+          "role_write_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role Write Access"
+          },
+          "external_user_read_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External User Read Access"
+          },
+          "external_user_write_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External User Write Access"
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Id"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "sourceType": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourcetype"
+          },
+          "sourceUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourceurl"
+          },
+          "pageId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pageid"
+          },
+          "conversationId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversationid"
+          },
+          "createdAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Createdat"
+          },
+          "updatedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updatedat"
+          },
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "topics": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Topics"
+          },
+          "emotion_tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Emotion Tags"
+          },
+          "steps": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Steps"
+          },
+          "current_step": {
+            "type": "string",
+            "title": "Current Step",
+            "default": ""
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "emoji_tags": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Emoji Tags"
+          },
+          "hierarchical_structures": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hierarchical Structures",
+            "default": ""
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "content",
+          "type",
+          "topics",
+          "emotion_tags",
+          "steps",
+          "current_step"
+        ],
+        "title": "PaprMemoryNodeProperties",
+        "description": "Memory node properties"
+      },
+      "ParsePointer": {
+        "properties": {
+          "objectId": {
+            "type": "string",
+            "title": "Objectid"
+          },
+          "__type": {
+            "type": "string",
+            "title": "Type",
+            "default": "Pointer"
+          },
+          "className": {
+            "type": "string",
+            "title": "Classname"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "objectId",
+          "className"
+        ],
+        "title": "ParsePointer",
+        "description": "A pointer to a Parse object"
+      },
+      "PersonNodeProperties": {
+        "properties": {
+          "user_read_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Read Access"
+          },
+          "user_write_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Write Access"
+          },
+          "workspace_read_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Read Access"
+          },
+          "workspace_write_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Write Access"
+          },
+          "role_read_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role Read Access"
+          },
+          "role_write_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role Write Access"
+          },
+          "external_user_read_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External User Read Access"
+          },
+          "external_user_write_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External User Write Access"
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Id"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "sourceType": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourcetype"
+          },
+          "sourceUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourceurl"
+          },
+          "pageId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pageid"
+          },
+          "conversationId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversationid"
+          },
+          "createdAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Createdat"
+          },
+          "updatedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updatedat"
+          },
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "role",
+          "description"
+        ],
+        "title": "PersonNodeProperties",
+        "description": "Person node properties"
+      },
+      "ProjectNodeProperties": {
+        "properties": {
+          "user_read_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Read Access"
+          },
+          "user_write_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Write Access"
+          },
+          "workspace_read_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Read Access"
+          },
+          "workspace_write_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Write Access"
+          },
+          "role_read_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role Read Access"
+          },
+          "role_write_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role Write Access"
+          },
+          "external_user_read_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External User Read Access"
+          },
+          "external_user_write_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External User Write Access"
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Id"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "sourceType": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourcetype"
+          },
+          "sourceUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourceurl"
+          },
+          "pageId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pageid"
+          },
+          "conversationId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversationid"
+          },
+          "createdAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Createdat"
+          },
+          "updatedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updatedat"
+          },
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "type",
+          "description"
+        ],
+        "title": "ProjectNodeProperties",
+        "description": "Project node properties"
+      },
+      "RelationshipItem": {
+        "properties": {
+          "relation_type": {
+            "type": "string",
+            "title": "Relation Type"
+          },
+          "related_item_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Related Item Id"
+          },
+          "relationship_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RelationshipType"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "related_item_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Related Item Type",
+            "description": "Legacy field - not used in processing",
+            "default": "Memory"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metadata"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "relation_type"
+        ],
+        "title": "RelationshipItem",
+        "description": "Relationship item for memory request"
+      },
+      "RelationshipType": {
+        "type": "string",
+        "enum": [
+          "previous_memory_item_id",
+          "all_previous_memory_items",
+          "link_to_id"
+        ],
+        "title": "RelationshipType",
+        "description": "Enum for relationship types"
+      },
+      "SearchRequest": {
+        "properties": {
+          "query": {
+            "type": "string",
+            "title": "Query",
+            "description": "Detailed search query describing what you're looking for. For best results, write 2-3 sentences that include specific details, context, and time frame. Examples: 'Find recurring customer complaints about API performance from the last month. Focus on issues where customers specifically mentioned timeout errors or slow response times in their conversations.' 'What are the main issues and blockers in my current projects? Focus on technical challenges and timeline impacts.' 'Find insights about team collaboration and communication patterns from recent meetings and discussions.'",
+            "examples": [
+              "Show me the most critical customer pain points from my recent conversations. Focus on issues that multiple customers have mentioned and any specific feature requests or workflow improvements they've suggested.",
+              "What are the main issues and blockers in my current projects? Focus on technical challenges and timeline impacts.",
+              "Find insights about team collaboration and communication patterns from recent meetings and discussions."
+            ]
+          },
+          "rank_results": {
+            "type": "boolean",
+            "title": "Rank Results",
+            "description": "Whether to enable additional ranking of search results. Default is false because results are already ranked when using an LLM for search (recommended approach). Only enable this if you're not using an LLM in your search pipeline and need additional result ranking.",
+            "default": false
+          },
+          "enable_agentic_graph": {
+            "type": "boolean",
+            "title": "Enable Agentic Graph",
+            "description": "HIGHLY RECOMMENDED: Enable agentic graph search for intelligent, context-aware results. When enabled, the system can understand ambiguous references by first identifying specific entities from your memory graph, then performing targeted searches. Examples: 'customer feedback' \u2192 identifies your customers first, then finds their specific feedback; 'project issues' \u2192 identifies your projects first, then finds related issues; 'team meeting notes' \u2192 identifies team members first, then finds meeting notes. This provides much more relevant and comprehensive results. Set to false only if you need faster, simpler keyword-based search.",
+            "default": false
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id",
+            "description": "Optional internal user ID to filter search results by a specific user. If not provided, results are not filtered by user. If both user_id and external_user_id are provided, user_id takes precedence."
+          },
+          "external_user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External User Id",
+            "description": "Optional external user ID to filter search results by a specific external user. If both user_id and external_user_id are provided, user_id takes precedence."
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MemoryMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional metadata filter. Any field in MemoryMetadata (including custom fields) can be used for filtering."
+          }
+        },
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "title": "SearchRequest",
+        "description": "Search request parameters",
+        "example": {
+          "enable_agentic_graph": true,
+          "external_user_id": "external_abc",
+          "metadata": {
+            "customMetadata": {
+              "priority": "high"
+            },
+            "location": "US",
+            "topics": "API performance"
+          },
+          "query": "Find recurring customer complaints about API performance from the last month. Focus on issues that multiple customers have mentioned and any specific feature requests or workflow improvements they've suggested.",
+          "rank_results": false,
+          "user_id": "user123"
+        }
+      },
+      "SearchResponse": {
+        "properties": {
+          "code": {
+            "type": "integer",
+            "title": "Code",
+            "description": "HTTP status code",
+            "default": 200
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "'success' or 'error'",
+            "default": "success"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SearchResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Search results if successful"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error",
+            "description": "Error message if failed"
+          },
+          "details": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Details",
+            "description": "Additional error details or context"
+          },
+          "search_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Search Id",
+            "description": "Unique identifier for this search query, maps to QueryLog objectId in Parse Server"
+          }
+        },
+        "type": "object",
+        "title": "SearchResponse",
+        "example": {
+          "code": 200,
+          "data": {
+            "memories": [],
+            "nodes": []
+          },
+          "search_id": "abc123def456",
+          "status": "success"
+        }
+      },
+      "SearchResult": {
+        "properties": {
+          "memories": {
+            "items": {
+              "$ref": "#/components/schemas/Memory"
+            },
+            "type": "array",
+            "title": "Memories"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/Node"
+            },
+            "type": "array",
+            "title": "Nodes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "memories",
+          "nodes"
+        ],
+        "title": "SearchResult",
+        "description": "Return type for SearchResult"
+      },
+      "SystemUpdateStatus": {
+        "properties": {
+          "pinecone": {
+            "type": "boolean",
+            "title": "Pinecone",
+            "default": false
+          },
+          "neo4j": {
+            "type": "boolean",
+            "title": "Neo4J",
+            "default": false
+          },
+          "parse": {
+            "type": "boolean",
+            "title": "Parse",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "SystemUpdateStatus",
+        "description": "Status of update operation for each system"
+      },
+      "TaskNodeProperties": {
+        "properties": {
+          "user_read_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Read Access"
+          },
+          "user_write_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Write Access"
+          },
+          "workspace_read_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Read Access"
+          },
+          "workspace_write_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Write Access"
+          },
+          "role_read_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role Read Access"
+          },
+          "role_write_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role Write Access"
+          },
+          "external_user_read_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External User Read Access"
+          },
+          "external_user_write_access": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External User Write Access"
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Id"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "sourceType": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourcetype"
+          },
+          "sourceUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourceurl"
+          },
+          "pageId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pageid"
+          },
+          "conversationId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversationid"
+          },
+          "createdAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Createdat"
+          },
+          "updatedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updatedat"
+          },
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "new",
+              "in_progress",
+              "completed"
+            ],
+            "title": "Status"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "task",
+              "subtask",
+              "bug",
+              "feature_request",
+              "epic",
+              "support_ticket"
+            ],
+            "title": "Type"
+          },
+          "priority": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaskPriority"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "medium"
+          },
+          "date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "format": "date-time",
+            "title": "Date",
+            "description": "Due date for the task in ISO 8601 format"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "description",
+          "status",
+          "type"
+        ],
+        "title": "TaskNodeProperties",
+        "description": "Task node properties"
+      },
+      "TaskPriority": {
+        "type": "string",
+        "enum": [
+          "low",
+          "medium",
+          "high",
+          "urgent"
+        ],
+        "title": "TaskPriority"
+      },
+      "UpdateMemoryItem": {
+        "properties": {
+          "objectId": {
+            "type": "string",
+            "title": "Objectid"
+          },
+          "memoryId": {
+            "type": "string",
+            "title": "Memoryid"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content",
+            "default": ""
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updatedat"
+          },
+          "memoryChunkIds": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memorychunkids",
+            "default": [
+              []
+            ]
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MemoryMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "objectId",
+          "memoryId",
+          "updatedAt"
+        ],
+        "title": "UpdateMemoryItem",
+        "description": "Model for a single updated memory item"
+      },
+      "UpdateMemoryRequest": {
+        "properties": {
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content",
+            "description": "The new content of the memory item"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MemoryType"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Content type of the memory item"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MemoryMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Updated metadata for Neo4J and Pinecone"
+          },
+          "context": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ContextItem"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context",
+            "description": "Updated context for the memory item"
+          },
+          "relationships_json": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/RelationshipItem"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relationships Json",
+            "description": "Updated relationships for Graph DB (neo4J)"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "UpdateMemoryRequest",
+        "description": "Request model for updating an existing memory",
+        "example": {
+          "content": "Updated meeting notes from the product planning session",
+          "context": [
+            {
+              "content": "Let's update the Q2 product roadmap",
+              "role": "user"
+            },
+            {
+              "content": "I'll help you update the roadmap. What changes would you like to make?",
+              "role": "assistant"
+            }
+          ],
+          "metadata": {
+            "emoji tags": "\ud83d\udcca,\ud83d\udca1,\ud83d\udcdd,\u2728",
+            "emotion tags": "focused, productive, satisfied",
+            "hierarchical structures": "Business/Planning/Product/Updates",
+            "topics": "product, planning, updates"
+          },
+          "relationships_json": [
+            {
+              "metadata": {
+                "relevance": "high"
+              },
+              "related_item_id": "previous_memory_item_id",
+              "related_item_type": "TextMemoryItem",
+              "relation_type": "updates"
+            }
+          ],
+          "type": "text"
+        }
+      },
+      "UpdateMemoryResponse": {
+        "properties": {
+          "code": {
+            "type": "integer",
+            "title": "Code",
+            "description": "HTTP status code",
+            "default": 200
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "'success' or 'error'",
+            "default": "success"
+          },
+          "memory_items": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/UpdateMemoryItem"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Items",
+            "description": "List of updated memory items if successful"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error",
+            "description": "Error message if failed"
+          },
+          "details": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Details",
+            "description": "Additional error details or context"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message",
+            "description": "Status message"
+          },
+          "status_obj": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SystemUpdateStatus"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "System update status (pinecone, neo4j, parse)"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "UpdateMemoryResponse",
+        "description": "Unified response model for update_memory API endpoint (success or error)."
+      },
+      "UpdateUserRequest": {
+        "properties": {
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "external_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Id"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UserType"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "UpdateUserRequest",
+        "description": "Request model for updating a user",
+        "example": {
+          "email": "updated.user@example.com",
+          "external_id": "updated_user_123",
+          "metadata": {
+            "name": "Updated User",
+            "preferences": {
+              "theme": "light"
+            }
+          },
+          "type": "developerUser"
+        }
+      },
+      "UserListResponse": {
+        "properties": {
+          "code": {
+            "type": "integer",
+            "title": "Code",
+            "description": "HTTP status code"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "'success' or 'error'"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/UserResponse"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          },
+          "page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page"
+          },
+          "page_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Page Size"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "details": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Details"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "status"
+        ],
+        "title": "UserListResponse",
+        "example": {
+          "code": 200,
+          "data": [
+            {
+              "created_at": "2024-03-20T10:00:00.000Z",
+              "email": "user1@example.com",
+              "external_id": "user123",
+              "metadata": {
+                "name": "John Doe",
+                "preferences": {
+                  "theme": "dark"
+                }
+              },
+              "updated_at": "2024-03-20T10:00:00.000Z",
+              "user_id": "abc123"
+            }
+          ],
+          "page": 1,
+          "page_size": 10,
+          "status": "success",
+          "total": 1
+        }
+      },
+      "UserResponse": {
+        "properties": {
+          "code": {
+            "type": "integer",
+            "title": "Code",
+            "description": "HTTP status code"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "'success' or 'error'"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "external_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Id"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "details": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Details"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "status"
+        ],
+        "title": "UserResponse",
+        "description": "Response model for user operations",
+        "example": {
+          "code": 200,
+          "created_at": "2024-03-20T10:00:00.000Z",
+          "email": "user@example.com",
+          "external_id": "user123",
+          "metadata": {
+            "name": "John Doe",
+            "preferences": {
+              "theme": "dark"
+            }
+          },
+          "status": "success",
+          "updated_at": "2024-03-20T10:00:00.000Z",
+          "user_id": "abc123"
+        }
+      },
+      "UserType": {
+        "type": "string",
+        "enum": [
+          "developerUser",
+          "user",
+          "agent"
+        ],
+        "title": "UserType"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    },
+    "securitySchemes": {
+      "Bearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Bearer token (JWT) from Auth0 OAuth2 or similar"
+      },
+      "X-Session-Token": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Session-Token",
+        "description": "Session token for authentication"
+      },
+      "X-API-Key": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-API-Key",
+        "description": "API key for authentication"
+      },
+      "OAuth2": {
+        "type": "oauth2",
+        "flows": {
+          "authorizationCode": {
+            "authorizationUrl": "https://4e4fc3b78291.ngrok.app/login",
+            "tokenUrl": "https://4e4fc3b78291.ngrok.app/token",
+            "refreshUrl": "https://4e4fc3b78291.ngrok.app/token",
+            "scopes": {
+              "openid": "OpenID",
+              "profile": "Profile access",
+              "email": "Email access",
+              "offline_access": "Offline access"
+            }
+          }
+        }
+      }
+    }
+  },
+  "servers": [
+    {
+      "url": "https://4e4fc3b78291.ngrok.app",
+      "description": "Production server"
+    }
+  ]
+}

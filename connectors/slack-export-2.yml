@@ -1,0 +1,3991 @@
+category: Communications
+configPages:
+  - elements:
+      - type: configVar
+        value: Slack Connection
+      - type: configVar
+        value: User ID
+      - type: configVar
+        value: Tenant ID
+    name: Configuration
+  - elements:
+      - type: configVar
+        value: Slack User Connection
+      - type: configVar
+        value: User ID (User Level)
+    name: User Authentication
+    tagline: ''
+    userLevelConfigured: true
+defaultInstanceProfile: Default Instance Profile
+definitionVersion: 7
+description: >-
+  Connect your Slack workspace to Papr, allowing our AI assistant, Pen, to
+  access messages you have permission to view. 
+documentation: ''
+endpointType: flow_specific
+flows:
+  - description: ''
+    endpointSecurityType: customer_optional
+    isSynchronous: false
+    name: Admin On Deploy
+    steps:
+      - action:
+          key: instanceDeploy
+          component:
+            isPublic: true
+            key: management-triggers
+            version: LATEST
+        description: ''
+        inputs: {}
+        isTrigger: true
+        name: Admin On Deploy Trigger
+      - action:
+          key: runCode
+          component:
+            isPublic: true
+            key: code
+            version: LATEST
+        description: ''
+        inputs:
+          code:
+            type: value
+            value: |
+              /*
+                Access config variables by name through the configVars object. e.g.
+                  const apiEndpoint = `${configVars["App Base URL"]}/api`;
+
+                Access previous steps' results through the stepResults object. Trigger
+                and step names are camelCased. If the step "Get Data from API" returned
+                {"foo": "bar", "baz": 123}, you could destructure that data with:
+                  const { foo, baz } = stepResults.getDataFromApi.results;
+
+                You can return string, number or complex object data. e.g.
+                  return { data: { foo: "Hello", bar: 123.45, baz: true } };
+              */
+
+              module.exports = async ({ logger, configVars }, stepResults) => {
+                return { data: configVars }
+              };
+        name: Code Block
+      - action:
+          key: createObject
+          component:
+            isPublic: true
+            key: collection-tools
+            version: LATEST
+        description: ''
+        inputs:
+          keyValueInput:
+            type: complex
+            value:
+              - name:
+                  type: value
+                  value: event
+                type: value
+                value: register
+              - name:
+                  type: value
+                  value: teamId
+                type: reference
+                value: codeBlock.results.Slack Connection.token.team.id
+              - name:
+                  type: value
+                  value: adminWebhookUrl
+                type: reference
+                value: adminOnDeployTrigger.results.webhookUrls.Admin Webhook Flow
+              - name:
+                  type: value
+                  value: adminApiKey
+                type: reference
+                value: >-
+                  adminOnDeployTrigger.results.webhookApiKeys.Admin Webhook
+                  Flow.0
+              - name:
+                  type: value
+                  value: type
+                type: value
+                value: admin
+        name: Register Instance Object
+      - action:
+          key: httpPost
+          component:
+            isPublic: true
+            key: http
+            version: LATEST
+        description: ''
+        inputs:
+          connection:
+            type: configVar
+            value: ''
+          data:
+            type: reference
+            value: registerInstanceObject.results
+          debugRequest:
+            type: value
+            value: 'false'
+          headers:
+            type: complex
+            value: []
+          ignoreSslErrors:
+            type: value
+            value: 'false'
+          includeFullResponse:
+            type: value
+            value: 'false'
+          maxRetries:
+            type: value
+            value: '0'
+          queryParams:
+            type: complex
+            value: []
+          responseType:
+            type: value
+            value: json
+          retryDelayMS:
+            type: value
+            value: '0'
+          retryOnAllErrors:
+            type: value
+            value: 'false'
+          timeout:
+            type: value
+            value: ''
+          url:
+            type: value
+            value: >-
+              https://hooks.prismatic.io/trigger/SW5zdGFuY2VGbG93Q29uZmlnOmI5MjhmMjQyLTllNTYtNDJkNi1hMWVjLWY1OGMzZjA2ZjhhZQ==
+          useExponentialBackoff:
+            type: value
+            value: 'false'
+        name: POST Request
+      - action:
+          key: listConversations
+          component:
+            isPublic: true
+            key: slack
+            version: LATEST
+        description: ''
+        inputs:
+          connection:
+            type: configVar
+            value: Slack Connection
+          cursor:
+            type: value
+            value: ''
+          debug:
+            type: value
+            value: 'false'
+          excludeArchived:
+            type: value
+            value: 'true'
+          includeImChannels:
+            type: value
+            value: 'false'
+          includeMultiPartyImchannels:
+            type: value
+            value: 'false'
+          includePrivateChannels:
+            type: value
+            value: 'false'
+          includePublicChannels:
+            type: value
+            value: 'true'
+          limit:
+            type: value
+            value: '10'
+          teamId:
+            type: reference
+            value: adminOnDeployTrigger.results
+        name: List Conversations
+      - action:
+          key: loopOverItems
+          component:
+            isPublic: true
+            key: loop
+            version: LATEST
+        description: ''
+        inputs:
+          items:
+            type: reference
+            value: listConversations.results.channels
+        name: Channels
+        steps:
+          - action:
+              key: rawRequest
+              component:
+                isPublic: true
+                key: slack
+                version: LATEST
+            description: ''
+            inputs:
+              connection:
+                type: configVar
+                value: Slack Connection
+              data:
+                type: value
+                value: ''
+              debugRequest:
+                type: value
+                value: 'false'
+              fileData:
+                type: complex
+                value: []
+              fileDataFileNames:
+                type: complex
+                value: []
+              formData:
+                type: complex
+                value:
+                  - name:
+                      type: value
+                      value: channel
+                    type: reference
+                    value: channels.currentItem.id
+              headers:
+                type: complex
+                value: []
+              maxRetries:
+                type: value
+                value: '0'
+              method:
+                type: value
+                value: POST
+              queryParams:
+                type: complex
+                value: []
+              responseType:
+                type: value
+                value: json
+              retryAllErrors:
+                type: value
+                value: 'false'
+              retryDelayMS:
+                type: value
+                value: '0'
+              timeout:
+                type: value
+                value: ''
+              url:
+                type: value
+                value: /conversations.join
+              useExponentialBackoff:
+                type: value
+                value: 'false'
+            name: Raw Request
+          - action:
+              key: getCurrentDateTime
+              component:
+                isPublic: true
+                key: datetime
+                version: LATEST
+            description: ''
+            inputs:
+              displayEpochInSeconds:
+                type: value
+                value: 'false'
+            name: Get Current Date/Time
+          - action:
+              key: adjustDateTime
+              component:
+                isPublic: true
+                key: datetime
+                version: LATEST
+            description: ''
+            inputs:
+              dateTimeInput:
+                type: reference
+                value: getCurrentDateTime.results
+              daysInput:
+                type: value
+                value: '-14'
+              hoursInput:
+                type: value
+                value: ''
+              minutesInput:
+                type: value
+                value: ''
+              secondsInput:
+                type: value
+                value: ''
+            name: Adjust Date/Time
+          - action:
+              key: convertToEpoch
+              component:
+                isPublic: true
+                key: datetime
+                version: LATEST
+            description: ''
+            inputs:
+              dateTimeInput:
+                type: reference
+                value: adjustDateTime.results
+              displayEpochInSeconds:
+                type: value
+                value: 'false'
+            name: Convert Date To Epoch
+          - action:
+              key: getConversationsHistory
+              component:
+                isPublic: true
+                key: slack
+                version: LATEST
+            description: ''
+            inputs:
+              channelName:
+                type: reference
+                value: channels.currentItem.id
+              connection:
+                type: configVar
+                value: Slack Connection
+              cursor:
+                type: value
+                value: ''
+              debug:
+                type: value
+                value: 'false'
+              includeAllMetadata:
+                type: value
+                value: 'true'
+              inclusive:
+                type: value
+                value: 'false'
+              latest:
+                type: value
+                value: ''
+              limit:
+                type: value
+                value: '10'
+              oldest:
+                type: reference
+                value: convertDateToEpoch.results
+            name: Get Conversation History
+          - action:
+              key: branchOnExpression
+              component:
+                isPublic: true
+                key: branch
+                version: LATEST
+            branches:
+              - name: Messages Exists
+                steps:
+                  - action:
+                      key: listConversationMembers
+                      component:
+                        isPublic: true
+                        key: slack
+                        version: LATEST
+                    description: ''
+                    inputs:
+                      channelName:
+                        type: reference
+                        value: channels.currentItem.id
+                      connection:
+                        type: configVar
+                        value: Slack Connection
+                      cursor:
+                        type: value
+                        value: ''
+                      debug:
+                        type: value
+                        value: 'false'
+                      limit:
+                        type: value
+                        value: '100'
+                    name: List Conversation Members
+                  - action:
+                      key: loopOverItems
+                      component:
+                        isPublic: true
+                        key: loop
+                        version: LATEST
+                    description: ''
+                    inputs:
+                      items:
+                        type: reference
+                        value: getConversationHistory.results.messages
+                    name: Messages
+                    steps:
+                      - action:
+                          key: getUserById
+                          component:
+                            isPublic: true
+                            key: slack
+                            version: LATEST
+                        description: ''
+                        inputs:
+                          connection:
+                            type: configVar
+                            value: Slack Connection
+                          debug:
+                            type: value
+                            value: 'false'
+                          user:
+                            type: reference
+                            value: messages.currentItem.user
+                        name: Get User Creator
+                      - action:
+                          key: rawRequest
+                          component:
+                            isPublic: true
+                            key: slack
+                            version: LATEST
+                        description: ''
+                        inputs:
+                          connection:
+                            type: configVar
+                            value: Slack Connection
+                          data:
+                            type: value
+                            value: ''
+                          debugRequest:
+                            type: value
+                            value: 'false'
+                          fileData:
+                            type: complex
+                            value: []
+                          fileDataFileNames:
+                            type: complex
+                            value: []
+                          formData:
+                            type: complex
+                            value: []
+                          headers:
+                            type: complex
+                            value: []
+                          maxRetries:
+                            type: value
+                            value: '0'
+                          method:
+                            type: value
+                            value: GET
+                          queryParams:
+                            type: complex
+                            value:
+                              - name:
+                                  type: value
+                                  value: channel
+                                type: reference
+                                value: channels.currentItem.id
+                              - name:
+                                  type: value
+                                  value: message_ts
+                                type: reference
+                                value: messages.currentItem.ts
+                          responseType:
+                            type: value
+                            value: json
+                          retryAllErrors:
+                            type: value
+                            value: 'false'
+                          retryDelayMS:
+                            type: value
+                            value: '0'
+                          timeout:
+                            type: value
+                            value: ''
+                          url:
+                            type: value
+                            value: 'https://slack.com/api/chat.getPermalink'
+                          useExponentialBackoff:
+                            type: value
+                            value: 'false'
+                        name: Get permalink
+                      - action:
+                          key: branchOnExpression
+                          component:
+                            isPublic: true
+                            key: branch
+                            version: LATEST
+                        branches:
+                          - name: '1:1 direct message'
+                            steps:
+                              - action:
+                                  key: join
+                                  component:
+                                    isPublic: true
+                                    key: text-manipulation
+                                    version: LATEST
+                                description: ''
+                                inputs:
+                                  separator:
+                                    type: value
+                                    value: ''
+                                  strings:
+                                    type: complex
+                                    value:
+                                      - type: reference
+                                        value: getUserCreator.results.user.real_name
+                                      - type: value
+                                        value: ' sent this 1:1 direct message: '
+                                      - type: reference
+                                        value: messages.currentItem.text
+                                name: Join real name & user
+                              - action:
+                                  key: addKey
+                                  component:
+                                    isPublic: true
+                                    key: collection-tools
+                                    version: LATEST
+                                description: ''
+                                inputs:
+                                  key:
+                                    type: value
+                                    value: text
+                                  object:
+                                    type: reference
+                                    value: messages.currentItem
+                                  objectPath:
+                                    type: value
+                                    value: ''
+                                  value:
+                                    type: reference
+                                    value: joinRealNameUser.results
+                                name: Add Key/Value to Object 2
+                              - action:
+                                  key: createObject
+                                  component:
+                                    isPublic: true
+                                    key: collection-tools
+                                    version: LATEST
+                                description: ''
+                                inputs:
+                                  keyValueInput:
+                                    type: complex
+                                    value:
+                                      - name:
+                                          type: value
+                                          value: text
+                                        type: reference
+                                        value: addKeyValueToObject2.results.text
+                                      - name:
+                                          type: value
+                                          value: type
+                                        type: value
+                                        value: message
+                                      - name:
+                                          type: value
+                                          value: subtype
+                                        type: value
+                                        value: message_added
+                                      - name:
+                                          type: value
+                                          value: user
+                                        type: reference
+                                        value: addKeyValueToObject2.results.user
+                                      - name:
+                                          type: value
+                                          value: client_msg_id
+                                        type: reference
+                                        value: >-
+                                          addKeyValueToObject2.results.client_msg_id
+                                      - name:
+                                          type: value
+                                          value: sourceUrl
+                                        type: reference
+                                        value: getPermalink.results.permalink
+                                name: Create Object
+                          - name: Channel
+                            steps:
+                              - action:
+                                  key: join
+                                  component:
+                                    isPublic: true
+                                    key: text-manipulation
+                                    version: LATEST
+                                description: ''
+                                inputs:
+                                  separator:
+                                    type: value
+                                    value: ''
+                                  strings:
+                                    type: complex
+                                    value:
+                                      - type: reference
+                                        value: getUserCreator.results.user.real_name
+                                      - type: value
+                                        value: ' sent this message to the '
+                                      - type: reference
+                                        value: channels.currentItem.name
+                                      - type: value
+                                        value: ' channel: '
+                                      - type: reference
+                                        value: messages.currentItem.text
+                                name: Join channel name and user
+                              - action:
+                                  key: addKey
+                                  component:
+                                    isPublic: true
+                                    key: collection-tools
+                                    version: LATEST
+                                description: ''
+                                inputs:
+                                  key:
+                                    type: value
+                                    value: text
+                                  object:
+                                    type: reference
+                                    value: messages.currentItem
+                                  objectPath:
+                                    type: value
+                                    value: ''
+                                  value:
+                                    type: reference
+                                    value: joinChannelNameAndUser.results
+                                name: Add Key/Value to Object 3
+                              - action:
+                                  key: createObject
+                                  component:
+                                    isPublic: true
+                                    key: collection-tools
+                                    version: LATEST
+                                description: ''
+                                inputs:
+                                  keyValueInput:
+                                    type: complex
+                                    value:
+                                      - name:
+                                          type: value
+                                          value: text
+                                        type: reference
+                                        value: addKeyValueToObject3.results.text
+                                      - name:
+                                          type: value
+                                          value: type
+                                        type: value
+                                        value: message
+                                      - name:
+                                          type: value
+                                          value: subtype
+                                        type: value
+                                        value: message_added
+                                      - name:
+                                          type: value
+                                          value: user
+                                        type: reference
+                                        value: addKeyValueToObject3.results.user
+                                      - name:
+                                          type: value
+                                          value: client_msg_id
+                                        type: reference
+                                        value: >-
+                                          addKeyValueToObject3.results.client_msg_id
+                                      - name:
+                                          type: value
+                                          value: sourceUrl
+                                        type: reference
+                                        value: getPermalink.results.permalink
+                                name: Create Object 2
+                          - name: Else
+                            steps:
+                              - action:
+                                  key: writeLog
+                                  component:
+                                    isPublic: true
+                                    key: log
+                                    version: LATEST
+                                description: ''
+                                inputs:
+                                  level:
+                                    type: value
+                                    value: info
+                                  message:
+                                    type: reference
+                                    value: branchOnChannelType.results
+                                name: Write Log Message 2
+                        description: ''
+                        inputs:
+                          conditions:
+                            type: complex
+                            value:
+                              - name: '1:1 direct message'
+                                type: complex
+                                value:
+                                  - and
+                                  - - isTrue
+                                    - name: ''
+                                      type: reference
+                                      value: channels.currentItem.is_im
+                              - name: Channel
+                                type: complex
+                                value:
+                                  - and
+                                  - - isFalse
+                                    - name: ''
+                                      type: reference
+                                      value: channels.currentItem.is_im
+                        name: Branch on Channel Type
+                  - action:
+                      key: createObject
+                      component:
+                        isPublic: true
+                        key: collection-tools
+                        version: LATEST
+                    description: ''
+                    inputs:
+                      keyValueInput:
+                        type: complex
+                        value:
+                          - name:
+                              type: value
+                              value: type
+                            type: value
+                            value: messageList
+                          - name:
+                              type: value
+                              value: messages
+                            type: reference
+                            value: messages.results
+                          - name:
+                              type: value
+                              value: members
+                            type: reference
+                            value: listConversationMembers.results.members
+                          - name:
+                              type: value
+                              value: authed_user_id
+                            type: reference
+                            value: >-
+                              codeBlock.results.Slack
+                              Connection.token.authed_user.id
+                          - name:
+                              type: value
+                              value: is_private
+                            type: reference
+                            value: channels.currentItem.is_private
+                    name: Add Memories Object
+                  - action:
+                      key: httpPost
+                      component:
+                        isPublic: true
+                        key: customHttp
+                        version: LATEST
+                    description: ''
+                    inputs:
+                      connection:
+                        type: configVar
+                        value: ''
+                      data:
+                        type: reference
+                        value: addMemoriesObject.results
+                      debugRequest:
+                        type: value
+                        value: 'false'
+                      headers:
+                        type: complex
+                        value:
+                          - name:
+                              type: value
+                              value: x-papr-api-key
+                            type: value
+                            value: _yQQ5-6twdUJo-zHDJaydvVKim8Jw7o_qXnFY9qML0M
+                      ignoreSslErrors:
+                        type: value
+                        value: 'false'
+                      includeFullResponse:
+                        type: value
+                        value: 'false'
+                      maxRetries:
+                        type: value
+                        value: '0'
+                      queryParams:
+                        type: complex
+                        value: []
+                      responseType:
+                        type: value
+                        value: json
+                      retryDelayMS:
+                        type: value
+                        value: '0'
+                      retryOnAllErrors:
+                        type: value
+                        value: 'false'
+                      timeout:
+                        type: value
+                        value: ''
+                      url:
+                        type: template
+                        value: >-
+                          https://memoryserver.azurewebsites.net/add_memory/{{#Tenant
+                          ID}}_{{#User ID}}/slack/messages
+                      useExponentialBackoff:
+                        type: value
+                        value: 'false'
+                    name: POST Request 2
+              - name: Else
+                steps:
+                  - action:
+                      key: writeLog
+                      component:
+                        isPublic: true
+                        key: log
+                        version: LATEST
+                    description: ''
+                    inputs:
+                      level:
+                        type: value
+                        value: info
+                      message:
+                        type: reference
+                        value: checkIfMessagesIsEmpty.results
+                    name: Write Log Message
+            description: ''
+            inputs:
+              conditions:
+                type: complex
+                value:
+                  - name: Messages Exists
+                    type: complex
+                    value:
+                      - and
+                      - - isNotEmpty
+                        - name: ''
+                          type: reference
+                          value: getConversationHistory.results.messages
+                        - name: ''
+                          type: value
+                          value: ''
+            name: Check if messages is empty
+  - description: ''
+    endpointSecurityType: customer_optional
+    isSynchronous: false
+    name: Admin Webhook Flow
+    steps:
+      - action:
+          key: webhook
+          component:
+            isPublic: true
+            key: webhook-triggers
+            version: LATEST
+        description: ''
+        inputs:
+          body:
+            type: value
+            value: ''
+          contentType:
+            type: value
+            value: ''
+          headers:
+            type: complex
+            value: []
+          statusCode:
+            type: value
+            value: ''
+        isTrigger: true
+        name: Admin Public Channel Trigger
+      - action:
+          key: branchOnExpression
+          component:
+            isPublic: true
+            key: branch
+            version: LATEST
+        branches:
+          - name: Public channel
+            steps:
+              - action:
+                  key: rawRequest
+                  component:
+                    isPublic: true
+                    key: slack
+                    version: LATEST
+                description: ''
+                inputs:
+                  connection:
+                    type: configVar
+                    value: Slack Connection
+                  data:
+                    type: value
+                    value: ''
+                  debugRequest:
+                    type: value
+                    value: 'false'
+                  fileData:
+                    type: complex
+                    value: []
+                  fileDataFileNames:
+                    type: complex
+                    value: []
+                  formData:
+                    type: complex
+                    value:
+                      - name:
+                          type: value
+                          value: channel
+                        type: reference
+                        value: >-
+                          adminPublicChannelTrigger.results.body.data.event.channel
+                  headers:
+                    type: complex
+                    value: []
+                  maxRetries:
+                    type: value
+                    value: '0'
+                  method:
+                    type: value
+                    value: POST
+                  queryParams:
+                    type: complex
+                    value: []
+                  responseType:
+                    type: value
+                    value: json
+                  retryAllErrors:
+                    type: value
+                    value: 'false'
+                  retryDelayMS:
+                    type: value
+                    value: '0'
+                  timeout:
+                    type: value
+                    value: ''
+                  url:
+                    type: value
+                    value: /conversations.join
+                  useExponentialBackoff:
+                    type: value
+                    value: 'false'
+                name: Add bot to channel
+              - action:
+                  key: rawRequest
+                  component:
+                    isPublic: true
+                    key: slack
+                    version: LATEST
+                description: ''
+                inputs:
+                  connection:
+                    type: configVar
+                    value: Slack Connection
+                  data:
+                    type: value
+                    value: ''
+                  debugRequest:
+                    type: value
+                    value: 'true'
+                  fileData:
+                    type: complex
+                    value: []
+                  fileDataFileNames:
+                    type: complex
+                    value: []
+                  formData:
+                    type: complex
+                    value: []
+                  headers:
+                    type: complex
+                    value:
+                      - name:
+                          type: value
+                          value: channel
+                        type: reference
+                        value: >-
+                          adminPublicChannelTrigger.results.body.data.event.channel
+                  maxRetries:
+                    type: value
+                    value: '0'
+                  method:
+                    type: value
+                    value: GET
+                  queryParams:
+                    type: complex
+                    value:
+                      - name:
+                          type: value
+                          value: channel
+                        type: reference
+                        value: >-
+                          adminPublicChannelTrigger.results.body.data.event.channel
+                  responseType:
+                    type: value
+                    value: json
+                  retryAllErrors:
+                    type: value
+                    value: 'false'
+                  retryDelayMS:
+                    type: value
+                    value: '0'
+                  timeout:
+                    type: value
+                    value: ''
+                  url:
+                    type: value
+                    value: 'https://slack.com/api/conversations.info'
+                  useExponentialBackoff:
+                    type: value
+                    value: 'false'
+                name: Get Conversation Info
+              - action:
+                  key: listConversationMembers
+                  component:
+                    isPublic: true
+                    key: slack
+                    version: LATEST
+                description: ''
+                inputs:
+                  channelName:
+                    type: reference
+                    value: adminPublicChannelTrigger.results.body.data.event.channel
+                  connection:
+                    type: configVar
+                    value: Slack Connection
+                  cursor:
+                    type: value
+                    value: ''
+                  debug:
+                    type: value
+                    value: 'true'
+                  limit:
+                    type: value
+                    value: '100'
+                name: List Conversation Members
+              - action:
+                  key: addKey
+                  component:
+                    isPublic: true
+                    key: collection-tools
+                    version: LATEST
+                description: ''
+                inputs:
+                  key:
+                    type: value
+                    value: members
+                  object:
+                    type: reference
+                    value: adminPublicChannelTrigger.results.body.data.event
+                  objectPath:
+                    type: value
+                    value: ''
+                  value:
+                    type: reference
+                    value: listConversationMembers.results.members
+                name: Add Key/Value to Object 2
+              - action:
+                  key: getUserById
+                  component:
+                    isPublic: true
+                    key: slack
+                    version: LATEST
+                description: ''
+                inputs:
+                  connection:
+                    type: configVar
+                    value: Slack Connection
+                  debug:
+                    type: value
+                    value: 'false'
+                  user:
+                    type: reference
+                    value: adminPublicChannelTrigger.results.body.data.event.user
+                name: Get User By ID
+              - action:
+                  key: rawRequest
+                  component:
+                    isPublic: true
+                    key: slack
+                    version: LATEST
+                description: ''
+                inputs:
+                  connection:
+                    type: configVar
+                    value: Slack Connection
+                  data:
+                    type: value
+                    value: ''
+                  debugRequest:
+                    type: value
+                    value: 'false'
+                  fileData:
+                    type: complex
+                    value: []
+                  fileDataFileNames:
+                    type: complex
+                    value: []
+                  formData:
+                    type: complex
+                    value: []
+                  headers:
+                    type: complex
+                    value: []
+                  maxRetries:
+                    type: value
+                    value: '0'
+                  method:
+                    type: value
+                    value: GET
+                  queryParams:
+                    type: complex
+                    value:
+                      - name:
+                          type: value
+                          value: channel
+                        type: reference
+                        value: >-
+                          adminPublicChannelTrigger.results.body.data.event.channel
+                      - name:
+                          type: value
+                          value: message_ts
+                        type: reference
+                        value: adminPublicChannelTrigger.results.body.data.event.ts
+                  responseType:
+                    type: value
+                    value: json
+                  retryAllErrors:
+                    type: value
+                    value: 'false'
+                  retryDelayMS:
+                    type: value
+                    value: '0'
+                  timeout:
+                    type: value
+                    value: ''
+                  url:
+                    type: value
+                    value: 'https://slack.com/api/chat.getPermalink'
+                  useExponentialBackoff:
+                    type: value
+                    value: 'false'
+                name: Get permalink
+              - action:
+                  key: branchOnExpression
+                  component:
+                    isPublic: true
+                    key: branch
+                    version: LATEST
+                branches:
+                  - name: '1:1 direct message'
+                    steps:
+                      - action:
+                          key: join
+                          component:
+                            isPublic: true
+                            key: text-manipulation
+                            version: LATEST
+                        description: ''
+                        inputs:
+                          separator:
+                            type: value
+                            value: ''
+                          strings:
+                            type: complex
+                            value:
+                              - type: reference
+                                value: getUserById.results.user.real_name
+                              - type: value
+                                value: ' sent this message: '
+                              - type: reference
+                                value: >-
+                                  adminPublicChannelTrigger.results.body.data.event.text
+                        name: Join 2
+                      - action:
+                          key: addKey
+                          component:
+                            isPublic: true
+                            key: collection-tools
+                            version: LATEST
+                        description: ''
+                        inputs:
+                          key:
+                            type: value
+                            value: text
+                          object:
+                            type: reference
+                            value: adminPublicChannelTrigger.results.body.data.event
+                          objectPath:
+                            type: value
+                            value: ''
+                          value:
+                            type: reference
+                            value: join2.results
+                        name: Add Key/Value to Object 3
+                      - action:
+                          key: addKey
+                          component:
+                            isPublic: true
+                            key: collection-tools
+                            version: LATEST
+                        description: ''
+                        inputs:
+                          key:
+                            type: value
+                            value: sourceUrl
+                          object:
+                            type: reference
+                            value: addKeyValueToObject3.results
+                          objectPath:
+                            type: value
+                            value: ''
+                          value:
+                            type: reference
+                            value: getPermalink.results.permalink
+                        name: Add Key/Value to Object
+                      - action:
+                          key: addKey
+                          component:
+                            isPublic: true
+                            key: collection-tools
+                            version: LATEST
+                        description: ''
+                        inputs:
+                          key:
+                            type: value
+                            value: is_private
+                          object:
+                            type: reference
+                            value: addKeyValueToObject.results
+                          objectPath:
+                            type: value
+                            value: ''
+                          value:
+                            type: reference
+                            value: getConversationInfo.results.channel.is_private
+                        name: Add Key/Value to Object 7
+                      - action:
+                          key: httpPost
+                          component:
+                            isPublic: true
+                            key: customHttp
+                            version: LATEST
+                        description: ''
+                        inputs:
+                          connection:
+                            type: configVar
+                            value: ''
+                          data:
+                            type: reference
+                            value: addKeyValueToObject7.results
+                          debugRequest:
+                            type: value
+                            value: 'false'
+                          headers:
+                            type: complex
+                            value:
+                              - name:
+                                  type: value
+                                  value: x-papr-api-key
+                                type: value
+                                value: _yQQ5-6twdUJo-zHDJaydvVKim8Jw7o_qXnFY9qML0M
+                          ignoreSslErrors:
+                            type: value
+                            value: 'false'
+                          includeFullResponse:
+                            type: value
+                            value: 'false'
+                          maxRetries:
+                            type: value
+                            value: '0'
+                          queryParams:
+                            type: complex
+                            value: []
+                          responseType:
+                            type: value
+                            value: json
+                          retryDelayMS:
+                            type: value
+                            value: '0'
+                          retryOnAllErrors:
+                            type: value
+                            value: 'false'
+                          timeout:
+                            type: value
+                            value: ''
+                          url:
+                            type: template
+                            value: >-
+                              https://memoryserver.azurewebsites.net/add_memory/{{#Tenant
+                              ID}}_{{#User ID}}/slack/messages
+                          useExponentialBackoff:
+                            type: value
+                            value: 'false'
+                        name: POST Request
+                  - name: Channel
+                    steps:
+                      - action:
+                          key: join
+                          component:
+                            isPublic: true
+                            key: text-manipulation
+                            version: LATEST
+                        description: ''
+                        inputs:
+                          separator:
+                            type: value
+                            value: ''
+                          strings:
+                            type: complex
+                            value:
+                              - type: reference
+                                value: getUserById.results.user.real_name
+                              - type: value
+                                value: ' sent this message to the '
+                              - type: reference
+                                value: getConversationInfo.results.channel.name
+                              - type: value
+                                value: ' channel: '
+                              - type: reference
+                                value: >-
+                                  adminPublicChannelTrigger.results.body.data.event.text
+                        name: Join 3
+                      - action:
+                          key: addKey
+                          component:
+                            isPublic: true
+                            key: collection-tools
+                            version: LATEST
+                        description: ''
+                        inputs:
+                          key:
+                            type: value
+                            value: text
+                          object:
+                            type: reference
+                            value: adminPublicChannelTrigger.results.body.data.event
+                          objectPath:
+                            type: value
+                            value: ''
+                          value:
+                            type: reference
+                            value: join3.results
+                        name: Add Key/Value to Object 4
+                      - action:
+                          key: addKey
+                          component:
+                            isPublic: true
+                            key: collection-tools
+                            version: LATEST
+                        description: ''
+                        inputs:
+                          key:
+                            type: value
+                            value: sourceUrl
+                          object:
+                            type: reference
+                            value: addKeyValueToObject4.results
+                          objectPath:
+                            type: value
+                            value: ''
+                          value:
+                            type: reference
+                            value: getPermalink.results.permalink
+                        name: Add Key/Value to Object 5
+                      - action:
+                          key: addKey
+                          component:
+                            isPublic: true
+                            key: collection-tools
+                            version: LATEST
+                        description: ''
+                        inputs:
+                          key:
+                            type: value
+                            value: is_private
+                          object:
+                            type: reference
+                            value: addKeyValueToObject5.results
+                          objectPath:
+                            type: value
+                            value: ''
+                          value:
+                            type: reference
+                            value: getConversationInfo.results.channel.is_private
+                        name: Add Key/Value to Object 6
+                      - action:
+                          key: httpPost
+                          component:
+                            isPublic: true
+                            key: customHttp
+                            version: LATEST
+                        description: ''
+                        inputs:
+                          connection:
+                            type: configVar
+                            value: ''
+                          data:
+                            type: reference
+                            value: addKeyValueToObject6.results
+                          debugRequest:
+                            type: value
+                            value: 'false'
+                          headers:
+                            type: complex
+                            value:
+                              - name:
+                                  type: value
+                                  value: x-papr-api-key
+                                type: value
+                                value: _yQQ5-6twdUJo-zHDJaydvVKim8Jw7o_qXnFY9qML0M
+                          ignoreSslErrors:
+                            type: value
+                            value: 'false'
+                          includeFullResponse:
+                            type: value
+                            value: 'false'
+                          maxRetries:
+                            type: value
+                            value: '0'
+                          queryParams:
+                            type: complex
+                            value: []
+                          responseType:
+                            type: value
+                            value: json
+                          retryDelayMS:
+                            type: value
+                            value: '0'
+                          retryOnAllErrors:
+                            type: value
+                            value: 'false'
+                          timeout:
+                            type: value
+                            value: ''
+                          url:
+                            type: template
+                            value: >-
+                              https://memoryserver.azurewebsites.net/add_memory/{{#Tenant
+                              ID}}_{{#User ID}}/slack/messages
+                          useExponentialBackoff:
+                            type: value
+                            value: 'false'
+                        name: POST Request 2
+                  - name: Else
+                    steps:
+                      - action:
+                          key: writeLog
+                          component:
+                            isPublic: true
+                            key: log
+                            version: LATEST
+                        description: ''
+                        inputs:
+                          level:
+                            type: value
+                            value: info
+                          message:
+                            type: reference
+                            value: branchOnExpression.results
+                        name: Write Log Message 3
+                description: ''
+                inputs:
+                  conditions:
+                    type: complex
+                    value:
+                      - name: '1:1 direct message'
+                        type: complex
+                        value:
+                          - and
+                          - - isTrue
+                            - name: ''
+                              type: reference
+                              value: getConversationInfo.results.channel.is_im
+                      - name: Channel
+                        type: complex
+                        value:
+                          - and
+                          - - isFalse
+                            - name: ''
+                              type: reference
+                              value: getConversationInfo.results.channel.is_im
+                name: Branch on Expression
+          - name: Else
+            steps:
+              - action:
+                  key: writeLog
+                  component:
+                    isPublic: true
+                    key: log
+                    version: LATEST
+                description: ''
+                inputs:
+                  level:
+                    type: value
+                    value: info
+                  message:
+                    type: value
+                    value: Private channel or private mpim
+                name: Write Log Message 4
+        description: ''
+        inputs:
+          conditions:
+            type: complex
+            value:
+              - name: Public channel
+                type: complex
+                value:
+                  - and
+                  - - equal
+                    - name: ''
+                      type: reference
+                      value: >-
+                        adminPublicChannelTrigger.results.body.data.event.channel_type
+                    - name: ''
+                      type: value
+                      value: channel
+        name: Public or private
+  - description: ''
+    endpointSecurityType: customer_optional
+    isSynchronous: false
+    name: User Webhook Flow
+    steps:
+      - action:
+          key: webhook
+          component:
+            isPublic: true
+            key: webhook-triggers
+            version: LATEST
+        description: ''
+        inputs:
+          body:
+            type: value
+            value: ''
+          contentType:
+            type: value
+            value: ''
+          headers:
+            type: complex
+            value: []
+          statusCode:
+            type: value
+            value: ''
+        isTrigger: true
+        name: User Webhook Flow (All Private Channels and DMs) Trigger
+      - action:
+          key: branchOnExpression
+          component:
+            isPublic: true
+            key: branch
+            version: LATEST
+        branches:
+          - name: Public
+            steps:
+              - action:
+                  key: writeLog
+                  component:
+                    isPublic: true
+                    key: log
+                    version: LATEST
+                description: ''
+                inputs:
+                  level:
+                    type: value
+                    value: info
+                  message:
+                    type: value
+                    value: >-
+                      Public channel triggered on user-level webhook ignore
+                      since we already add this using admin webhook
+                name: Write Log Message 3
+          - name: Private Channel
+            steps:
+              - action:
+                  key: rawRequest
+                  component:
+                    isPublic: true
+                    key: slack
+                    version: LATEST
+                description: ''
+                inputs:
+                  connection:
+                    type: configVar
+                    value: Slack User Connection
+                  data:
+                    type: value
+                    value: ''
+                  debugRequest:
+                    type: value
+                    value: 'false'
+                  fileData:
+                    type: complex
+                    value: []
+                  fileDataFileNames:
+                    type: complex
+                    value: []
+                  formData:
+                    type: complex
+                    value: []
+                  headers:
+                    type: complex
+                    value: []
+                  maxRetries:
+                    type: value
+                    value: '0'
+                  method:
+                    type: value
+                    value: GET
+                  queryParams:
+                    type: complex
+                    value:
+                      - name:
+                          type: value
+                          value: channel
+                        type: reference
+                        value: >-
+                          userWebhookFlowAllPrivateChannelsAndDmsTrigger.results.body.data.event.channel
+                  responseType:
+                    type: value
+                    value: json
+                  retryAllErrors:
+                    type: value
+                    value: 'false'
+                  retryDelayMS:
+                    type: value
+                    value: '0'
+                  timeout:
+                    type: value
+                    value: ''
+                  url:
+                    type: value
+                    value: 'https://slack.com/api/conversations.info'
+                  useExponentialBackoff:
+                    type: value
+                    value: 'false'
+                name: Get Conversation Info
+              - action:
+                  key: rawRequest
+                  component:
+                    isPublic: true
+                    key: slack
+                    version: LATEST
+                description: ''
+                inputs:
+                  connection:
+                    type: configVar
+                    value: Slack User Connection
+                  data:
+                    type: value
+                    value: ''
+                  debugRequest:
+                    type: value
+                    value: 'false'
+                  fileData:
+                    type: complex
+                    value: []
+                  fileDataFileNames:
+                    type: complex
+                    value: []
+                  formData:
+                    type: complex
+                    value: []
+                  headers:
+                    type: complex
+                    value: []
+                  maxRetries:
+                    type: value
+                    value: '0'
+                  method:
+                    type: value
+                    value: GET
+                  queryParams:
+                    type: complex
+                    value:
+                      - name:
+                          type: value
+                          value: channel
+                        type: reference
+                        value: >-
+                          userWebhookFlowAllPrivateChannelsAndDmsTrigger.results.body.data.event.channel
+                  responseType:
+                    type: value
+                    value: json
+                  retryAllErrors:
+                    type: value
+                    value: 'false'
+                  retryDelayMS:
+                    type: value
+                    value: '0'
+                  timeout:
+                    type: value
+                    value: ''
+                  url:
+                    type: value
+                    value: /conversations.members
+                  useExponentialBackoff:
+                    type: value
+                    value: 'false'
+                name: List Conversation Members
+              - action:
+                  key: addKey
+                  component:
+                    isPublic: true
+                    key: collection-tools
+                    version: LATEST
+                description: ''
+                inputs:
+                  key:
+                    type: value
+                    value: members
+                  object:
+                    type: reference
+                    value: >-
+                      userWebhookFlowAllPrivateChannelsAndDmsTrigger.results.body.data.event
+                  objectPath:
+                    type: value
+                    value: ''
+                  value:
+                    type: reference
+                    value: listConversationMembers.results.members
+                name: Add Key/Value to Object
+              - action:
+                  key: getUserById
+                  component:
+                    isPublic: true
+                    key: slack
+                    version: LATEST
+                description: ''
+                inputs:
+                  connection:
+                    type: configVar
+                    value: Slack User Connection
+                  debug:
+                    type: value
+                    value: 'false'
+                  user:
+                    type: reference
+                    value: >-
+                      userWebhookFlowAllPrivateChannelsAndDmsTrigger.results.body.data.event.user
+                name: Get User By ID
+              - action:
+                  key: rawRequest
+                  component:
+                    isPublic: true
+                    key: slack
+                    version: LATEST
+                description: ''
+                inputs:
+                  connection:
+                    type: configVar
+                    value: Slack User Connection
+                  data:
+                    type: value
+                    value: ''
+                  debugRequest:
+                    type: value
+                    value: 'false'
+                  fileData:
+                    type: complex
+                    value: []
+                  fileDataFileNames:
+                    type: complex
+                    value: []
+                  formData:
+                    type: complex
+                    value: []
+                  headers:
+                    type: complex
+                    value: []
+                  maxRetries:
+                    type: value
+                    value: '0'
+                  method:
+                    type: value
+                    value: GET
+                  queryParams:
+                    type: complex
+                    value:
+                      - name:
+                          type: value
+                          value: channel
+                        type: reference
+                        value: >-
+                          userWebhookFlowAllPrivateChannelsAndDmsTrigger.results.body.data.event.channel
+                      - name:
+                          type: value
+                          value: message_ts
+                        type: reference
+                        value: >-
+                          userWebhookFlowAllPrivateChannelsAndDmsTrigger.results.body.data.event.ts
+                  responseType:
+                    type: value
+                    value: json
+                  retryAllErrors:
+                    type: value
+                    value: 'false'
+                  retryDelayMS:
+                    type: value
+                    value: '0'
+                  timeout:
+                    type: value
+                    value: ''
+                  url:
+                    type: value
+                    value: 'https://slack.com/api/chat.getPermalink'
+                  useExponentialBackoff:
+                    type: value
+                    value: 'false'
+                name: Get Permalink
+              - action:
+                  key: join
+                  component:
+                    isPublic: true
+                    key: text-manipulation
+                    version: LATEST
+                description: ''
+                inputs:
+                  separator:
+                    type: value
+                    value: ''
+                  strings:
+                    type: complex
+                    value:
+                      - type: reference
+                        value: getUserById.results.user.real_name
+                      - type: value
+                        value: ' sent this message to the '
+                      - type: reference
+                        value: getConversationInfo.results.channel.name
+                      - type: value
+                        value: ' channel: '
+                      - type: reference
+                        value: addKeyValueToObject.results.text
+                name: Join
+              - action:
+                  key: addKey
+                  component:
+                    isPublic: true
+                    key: collection-tools
+                    version: LATEST
+                description: ''
+                inputs:
+                  key:
+                    type: value
+                    value: text
+                  object:
+                    type: reference
+                    value: addKeyValueToObject.results
+                  objectPath:
+                    type: value
+                    value: ''
+                  value:
+                    type: reference
+                    value: join.results
+                name: Add Key/Value to Object 4
+              - action:
+                  key: addKey
+                  component:
+                    isPublic: true
+                    key: collection-tools
+                    version: LATEST
+                description: ''
+                inputs:
+                  key:
+                    type: value
+                    value: sourceUrl
+                  object:
+                    type: reference
+                    value: addKeyValueToObject4.results
+                  objectPath:
+                    type: value
+                    value: ''
+                  value:
+                    type: reference
+                    value: getPermalink.results.permalink
+                name: Add Key/Value to Object 7
+              - action:
+                  key: addKey
+                  component:
+                    isPublic: true
+                    key: collection-tools
+                    version: LATEST
+                description: ''
+                inputs:
+                  key:
+                    type: value
+                    value: is_private
+                  object:
+                    type: reference
+                    value: addKeyValueToObject7.results
+                  objectPath:
+                    type: value
+                    value: ''
+                  value:
+                    type: value
+                    value: 'True'
+                name: Add Key/Value to Object 12
+              - action:
+                  key: httpPost
+                  component:
+                    isPublic: true
+                    key: customHttp
+                    version: LATEST
+                description: ''
+                inputs:
+                  connection:
+                    type: configVar
+                    value: ''
+                  data:
+                    type: reference
+                    value: addKeyValueToObject7.results
+                  debugRequest:
+                    type: value
+                    value: 'false'
+                  headers:
+                    type: complex
+                    value:
+                      - name:
+                          type: value
+                          value: x-papr-api-key
+                        type: value
+                        value: _yQQ5-6twdUJo-zHDJaydvVKim8Jw7o_qXnFY9qML0M
+                  ignoreSslErrors:
+                    type: value
+                    value: 'false'
+                  includeFullResponse:
+                    type: value
+                    value: 'false'
+                  maxRetries:
+                    type: value
+                    value: '0'
+                  queryParams:
+                    type: complex
+                    value: []
+                  responseType:
+                    type: value
+                    value: json
+                  retryDelayMS:
+                    type: value
+                    value: '0'
+                  retryOnAllErrors:
+                    type: value
+                    value: 'false'
+                  timeout:
+                    type: value
+                    value: ''
+                  url:
+                    type: template
+                    value: >-
+                      https://memoryserver.azurewebsites.net/add_memory/{{#Tenant
+                      ID}}_{{#User ID}}/slack/messages
+                  useExponentialBackoff:
+                    type: value
+                    value: 'false'
+                name: POST Request
+          - name: mpim
+            steps:
+              - action:
+                  key: rawRequest
+                  component:
+                    isPublic: true
+                    key: slack
+                    version: LATEST
+                description: ''
+                inputs:
+                  connection:
+                    type: configVar
+                    value: Slack User Connection
+                  data:
+                    type: value
+                    value: ''
+                  debugRequest:
+                    type: value
+                    value: 'false'
+                  fileData:
+                    type: complex
+                    value: []
+                  fileDataFileNames:
+                    type: complex
+                    value: []
+                  formData:
+                    type: complex
+                    value: []
+                  headers:
+                    type: complex
+                    value: []
+                  maxRetries:
+                    type: value
+                    value: '0'
+                  method:
+                    type: value
+                    value: GET
+                  queryParams:
+                    type: complex
+                    value:
+                      - name:
+                          type: value
+                          value: channel
+                        type: reference
+                        value: >-
+                          userWebhookFlowAllPrivateChannelsAndDmsTrigger.results.body.data.event.channel
+                  responseType:
+                    type: value
+                    value: json
+                  retryAllErrors:
+                    type: value
+                    value: 'false'
+                  retryDelayMS:
+                    type: value
+                    value: '0'
+                  timeout:
+                    type: value
+                    value: ''
+                  url:
+                    type: value
+                    value: 'https://slack.com/api/conversations.info'
+                  useExponentialBackoff:
+                    type: value
+                    value: 'false'
+                name: Get Conversation Info 2
+              - action:
+                  key: rawRequest
+                  component:
+                    isPublic: true
+                    key: slack
+                    version: LATEST
+                description: ''
+                inputs:
+                  connection:
+                    type: configVar
+                    value: Slack User Connection
+                  data:
+                    type: value
+                    value: ''
+                  debugRequest:
+                    type: value
+                    value: 'false'
+                  fileData:
+                    type: complex
+                    value: []
+                  fileDataFileNames:
+                    type: complex
+                    value: []
+                  formData:
+                    type: complex
+                    value: []
+                  headers:
+                    type: complex
+                    value: []
+                  maxRetries:
+                    type: value
+                    value: '0'
+                  method:
+                    type: value
+                    value: GET
+                  queryParams:
+                    type: complex
+                    value:
+                      - name:
+                          type: value
+                          value: channel
+                        type: reference
+                        value: >-
+                          userWebhookFlowAllPrivateChannelsAndDmsTrigger.results.body.data.event.channel
+                  responseType:
+                    type: value
+                    value: json
+                  retryAllErrors:
+                    type: value
+                    value: 'false'
+                  retryDelayMS:
+                    type: value
+                    value: '0'
+                  timeout:
+                    type: value
+                    value: ''
+                  url:
+                    type: value
+                    value: /conversations.members
+                  useExponentialBackoff:
+                    type: value
+                    value: 'false'
+                name: List Conversation Members 2
+              - action:
+                  key: addKey
+                  component:
+                    isPublic: true
+                    key: collection-tools
+                    version: LATEST
+                description: ''
+                inputs:
+                  key:
+                    type: value
+                    value: members
+                  object:
+                    type: reference
+                    value: >-
+                      userWebhookFlowAllPrivateChannelsAndDmsTrigger.results.body.data.event
+                  objectPath:
+                    type: value
+                    value: ''
+                  value:
+                    type: reference
+                    value: listConversationMembers2.results.members
+                name: Add Key/Value to Object 2
+              - action:
+                  key: getUserById
+                  component:
+                    isPublic: true
+                    key: slack
+                    version: LATEST
+                description: ''
+                inputs:
+                  connection:
+                    type: configVar
+                    value: Slack User Connection
+                  debug:
+                    type: value
+                    value: 'false'
+                  user:
+                    type: reference
+                    value: >-
+                      userWebhookFlowAllPrivateChannelsAndDmsTrigger.results.body.data.event.user
+                name: Get User By ID 2
+              - action:
+                  key: rawRequest
+                  component:
+                    isPublic: true
+                    key: slack
+                    version: LATEST
+                description: ''
+                inputs:
+                  connection:
+                    type: configVar
+                    value: Slack User Connection
+                  data:
+                    type: value
+                    value: ''
+                  debugRequest:
+                    type: value
+                    value: 'false'
+                  fileData:
+                    type: complex
+                    value: []
+                  fileDataFileNames:
+                    type: complex
+                    value: []
+                  formData:
+                    type: complex
+                    value: []
+                  headers:
+                    type: complex
+                    value: []
+                  maxRetries:
+                    type: value
+                    value: '0'
+                  method:
+                    type: value
+                    value: GET
+                  queryParams:
+                    type: complex
+                    value:
+                      - name:
+                          type: value
+                          value: channel
+                        type: reference
+                        value: >-
+                          userWebhookFlowAllPrivateChannelsAndDmsTrigger.results.body.data.event.channel
+                      - name:
+                          type: value
+                          value: message_ts
+                        type: reference
+                        value: >-
+                          userWebhookFlowAllPrivateChannelsAndDmsTrigger.results.body.data.event.ts
+                  responseType:
+                    type: value
+                    value: json
+                  retryAllErrors:
+                    type: value
+                    value: 'false'
+                  retryDelayMS:
+                    type: value
+                    value: '0'
+                  timeout:
+                    type: value
+                    value: ''
+                  url:
+                    type: value
+                    value: 'https://slack.com/api/chat.getPermalink'
+                  useExponentialBackoff:
+                    type: value
+                    value: 'false'
+                name: Get Permalink 2
+              - action:
+                  key: join
+                  component:
+                    isPublic: true
+                    key: text-manipulation
+                    version: LATEST
+                description: ''
+                inputs:
+                  separator:
+                    type: value
+                    value: ''
+                  strings:
+                    type: complex
+                    value:
+                      - type: reference
+                        value: getUserById2.results.user.real_name
+                      - type: value
+                        value: ' sent this direct message: '
+                      - type: reference
+                        value: addKeyValueToObject2.results.text
+                name: Join 2
+              - action:
+                  key: addKey
+                  component:
+                    isPublic: true
+                    key: collection-tools
+                    version: LATEST
+                description: ''
+                inputs:
+                  key:
+                    type: value
+                    value: text
+                  object:
+                    type: reference
+                    value: addKeyValueToObject2.results
+                  objectPath:
+                    type: value
+                    value: ''
+                  value:
+                    type: reference
+                    value: join2.results
+                name: Add Key/Value to Object 5
+              - action:
+                  key: addKey
+                  component:
+                    isPublic: true
+                    key: collection-tools
+                    version: LATEST
+                description: ''
+                inputs:
+                  key:
+                    type: value
+                    value: sourceUrl
+                  object:
+                    type: reference
+                    value: addKeyValueToObject5.results
+                  objectPath:
+                    type: value
+                    value: ''
+                  value:
+                    type: reference
+                    value: getPermalink2.results.permalink
+                name: Add Key/Value to Object 8
+              - action:
+                  key: addKey
+                  component:
+                    isPublic: true
+                    key: collection-tools
+                    version: LATEST
+                description: ''
+                inputs:
+                  key:
+                    type: value
+                    value: is_private
+                  object:
+                    type: reference
+                    value: addKeyValueToObject8.results
+                  objectPath:
+                    type: value
+                    value: ''
+                  value:
+                    type: value
+                    value: 'True'
+                name: Add Key/Value to Object 11
+              - action:
+                  key: httpPost
+                  component:
+                    isPublic: true
+                    key: customHttp
+                    version: LATEST
+                description: ''
+                inputs:
+                  connection:
+                    type: configVar
+                    value: ''
+                  data:
+                    type: reference
+                    value: addKeyValueToObject8.results
+                  debugRequest:
+                    type: value
+                    value: 'false'
+                  headers:
+                    type: complex
+                    value:
+                      - name:
+                          type: value
+                          value: x-papr-api-key
+                        type: value
+                        value: _yQQ5-6twdUJo-zHDJaydvVKim8Jw7o_qXnFY9qML0M
+                  ignoreSslErrors:
+                    type: value
+                    value: 'false'
+                  includeFullResponse:
+                    type: value
+                    value: 'false'
+                  maxRetries:
+                    type: value
+                    value: '0'
+                  queryParams:
+                    type: complex
+                    value: []
+                  responseType:
+                    type: value
+                    value: json
+                  retryDelayMS:
+                    type: value
+                    value: '0'
+                  retryOnAllErrors:
+                    type: value
+                    value: 'false'
+                  timeout:
+                    type: value
+                    value: ''
+                  url:
+                    type: template
+                    value: >-
+                      https://memoryserver.azurewebsites.net/add_memory/{{#Tenant
+                      ID}}_{{#User ID}}/slack/messages
+                  useExponentialBackoff:
+                    type: value
+                    value: 'false'
+                name: POST Request 2
+          - name: im
+            steps:
+              - action:
+                  key: rawRequest
+                  component:
+                    isPublic: true
+                    key: slack
+                    version: LATEST
+                description: ''
+                inputs:
+                  connection:
+                    type: configVar
+                    value: Slack User Connection
+                  data:
+                    type: value
+                    value: ''
+                  debugRequest:
+                    type: value
+                    value: 'false'
+                  fileData:
+                    type: complex
+                    value: []
+                  fileDataFileNames:
+                    type: complex
+                    value: []
+                  formData:
+                    type: complex
+                    value: []
+                  headers:
+                    type: complex
+                    value: []
+                  maxRetries:
+                    type: value
+                    value: '0'
+                  method:
+                    type: value
+                    value: GET
+                  queryParams:
+                    type: complex
+                    value:
+                      - name:
+                          type: value
+                          value: channel
+                        type: reference
+                        value: >-
+                          userWebhookFlowAllPrivateChannelsAndDmsTrigger.results.body.data.event.channel
+                  responseType:
+                    type: value
+                    value: json
+                  retryAllErrors:
+                    type: value
+                    value: 'false'
+                  retryDelayMS:
+                    type: value
+                    value: '0'
+                  timeout:
+                    type: value
+                    value: ''
+                  url:
+                    type: value
+                    value: 'https://slack.com/api/conversations.info'
+                  useExponentialBackoff:
+                    type: value
+                    value: 'false'
+                name: Get Conversation Info 3
+              - action:
+                  key: rawRequest
+                  component:
+                    isPublic: true
+                    key: slack
+                    version: LATEST
+                description: ''
+                inputs:
+                  connection:
+                    type: configVar
+                    value: Slack User Connection
+                  data:
+                    type: value
+                    value: ''
+                  debugRequest:
+                    type: value
+                    value: 'false'
+                  fileData:
+                    type: complex
+                    value: []
+                  fileDataFileNames:
+                    type: complex
+                    value: []
+                  formData:
+                    type: complex
+                    value: []
+                  headers:
+                    type: complex
+                    value: []
+                  maxRetries:
+                    type: value
+                    value: '0'
+                  method:
+                    type: value
+                    value: GET
+                  queryParams:
+                    type: complex
+                    value:
+                      - name:
+                          type: value
+                          value: channel
+                        type: reference
+                        value: >-
+                          userWebhookFlowAllPrivateChannelsAndDmsTrigger.results.body.data.event.channel
+                  responseType:
+                    type: value
+                    value: json
+                  retryAllErrors:
+                    type: value
+                    value: 'false'
+                  retryDelayMS:
+                    type: value
+                    value: '0'
+                  timeout:
+                    type: value
+                    value: ''
+                  url:
+                    type: value
+                    value: /conversations.members
+                  useExponentialBackoff:
+                    type: value
+                    value: 'false'
+                name: List Conversation Members 3
+              - action:
+                  key: addKey
+                  component:
+                    isPublic: true
+                    key: collection-tools
+                    version: LATEST
+                description: ''
+                inputs:
+                  key:
+                    type: value
+                    value: members
+                  object:
+                    type: reference
+                    value: >-
+                      userWebhookFlowAllPrivateChannelsAndDmsTrigger.results.body.data.event
+                  objectPath:
+                    type: value
+                    value: ''
+                  value:
+                    type: reference
+                    value: listConversationMembers3.results.members
+                name: Add Key/Value to Object 3
+              - action:
+                  key: getUserById
+                  component:
+                    isPublic: true
+                    key: slack
+                    version: LATEST
+                description: ''
+                inputs:
+                  connection:
+                    type: configVar
+                    value: Slack User Connection
+                  debug:
+                    type: value
+                    value: 'false'
+                  user:
+                    type: reference
+                    value: >-
+                      userWebhookFlowAllPrivateChannelsAndDmsTrigger.results.body.data.event.user
+                name: Get User By ID 3
+              - action:
+                  key: rawRequest
+                  component:
+                    isPublic: true
+                    key: slack
+                    version: LATEST
+                description: ''
+                inputs:
+                  connection:
+                    type: configVar
+                    value: Slack User Connection
+                  data:
+                    type: value
+                    value: ''
+                  debugRequest:
+                    type: value
+                    value: 'false'
+                  fileData:
+                    type: complex
+                    value: []
+                  fileDataFileNames:
+                    type: complex
+                    value: []
+                  formData:
+                    type: complex
+                    value: []
+                  headers:
+                    type: complex
+                    value: []
+                  maxRetries:
+                    type: value
+                    value: '0'
+                  method:
+                    type: value
+                    value: GET
+                  queryParams:
+                    type: complex
+                    value:
+                      - name:
+                          type: value
+                          value: channel
+                        type: reference
+                        value: >-
+                          userWebhookFlowAllPrivateChannelsAndDmsTrigger.results.body.data.event.channel
+                      - name:
+                          type: value
+                          value: message_ts
+                        type: reference
+                        value: >-
+                          userWebhookFlowAllPrivateChannelsAndDmsTrigger.results.body.data.event.ts
+                  responseType:
+                    type: value
+                    value: json
+                  retryAllErrors:
+                    type: value
+                    value: 'false'
+                  retryDelayMS:
+                    type: value
+                    value: '0'
+                  timeout:
+                    type: value
+                    value: ''
+                  url:
+                    type: value
+                    value: 'https://slack.com/api/chat.getPermalink'
+                  useExponentialBackoff:
+                    type: value
+                    value: 'false'
+                name: Get Permalink 3
+              - action:
+                  key: join
+                  component:
+                    isPublic: true
+                    key: text-manipulation
+                    version: LATEST
+                description: ''
+                inputs:
+                  separator:
+                    type: value
+                    value: ''
+                  strings:
+                    type: complex
+                    value:
+                      - type: reference
+                        value: getUserById3.results.user.real_name
+                      - type: value
+                        value: ' sent this direct message: '
+                      - type: reference
+                        value: addKeyValueToObject3.results.text
+                name: Join 3
+              - action:
+                  key: addKey
+                  component:
+                    isPublic: true
+                    key: collection-tools
+                    version: LATEST
+                description: ''
+                inputs:
+                  key:
+                    type: value
+                    value: text
+                  object:
+                    type: reference
+                    value: addKeyValueToObject3.results
+                  objectPath:
+                    type: value
+                    value: ''
+                  value:
+                    type: reference
+                    value: join3.results
+                name: Add Key/Value to Object 6
+              - action:
+                  key: addKey
+                  component:
+                    isPublic: true
+                    key: collection-tools
+                    version: LATEST
+                description: ''
+                inputs:
+                  key:
+                    type: value
+                    value: sourceUrl
+                  object:
+                    type: reference
+                    value: addKeyValueToObject6.results
+                  objectPath:
+                    type: value
+                    value: ''
+                  value:
+                    type: reference
+                    value: getPermalink3.results.permalink
+                name: Add Key/Value to Object 9
+              - action:
+                  key: addKey
+                  component:
+                    isPublic: true
+                    key: collection-tools
+                    version: LATEST
+                description: ''
+                inputs:
+                  key:
+                    type: value
+                    value: is_private
+                  object:
+                    type: reference
+                    value: addKeyValueToObject9.results
+                  objectPath:
+                    type: value
+                    value: ''
+                  value:
+                    type: value
+                    value: 'True'
+                name: Add Key/Value to Object 10
+              - action:
+                  key: httpPost
+                  component:
+                    isPublic: true
+                    key: customHttp
+                    version: LATEST
+                description: ''
+                inputs:
+                  connection:
+                    type: configVar
+                    value: ''
+                  data:
+                    type: reference
+                    value: addKeyValueToObject9.results
+                  debugRequest:
+                    type: value
+                    value: 'false'
+                  headers:
+                    type: complex
+                    value:
+                      - name:
+                          type: value
+                          value: x-papr-api-key
+                        type: value
+                        value: _yQQ5-6twdUJo-zHDJaydvVKim8Jw7o_qXnFY9qML0M
+                  ignoreSslErrors:
+                    type: value
+                    value: 'false'
+                  includeFullResponse:
+                    type: value
+                    value: 'false'
+                  maxRetries:
+                    type: value
+                    value: '0'
+                  queryParams:
+                    type: complex
+                    value: []
+                  responseType:
+                    type: value
+                    value: json
+                  retryDelayMS:
+                    type: value
+                    value: '0'
+                  retryOnAllErrors:
+                    type: value
+                    value: 'false'
+                  timeout:
+                    type: value
+                    value: ''
+                  url:
+                    type: template
+                    value: >-
+                      https://memoryserver.azurewebsites.net/add_memory/{{#Tenant
+                      ID}}_{{#User ID}}/slack/messages
+                  useExponentialBackoff:
+                    type: value
+                    value: 'false'
+                name: POST Request 3
+          - name: Else
+            steps:
+              - action:
+                  key: writeLog
+                  component:
+                    isPublic: true
+                    key: log
+                    version: LATEST
+                description: ''
+                inputs:
+                  level:
+                    type: value
+                    value: info
+                  message:
+                    type: value
+                    value: channel type not supported
+                name: Write Log Message 4
+        description: ''
+        inputs:
+          conditions:
+            type: complex
+            value:
+              - name: Public
+                type: complex
+                value:
+                  - and
+                  - - equal
+                    - name: ''
+                      type: reference
+                      value: >-
+                        userWebhookFlowAllPrivateChannelsAndDmsTrigger.results.body.data.event.channel_type
+                    - name: ''
+                      type: value
+                      value: channel
+              - name: Private Channel
+                type: complex
+                value:
+                  - and
+                  - - equal
+                    - name: ''
+                      type: reference
+                      value: >-
+                        userWebhookFlowAllPrivateChannelsAndDmsTrigger.results.body.data.event.channel_type
+                    - name: ''
+                      type: value
+                      value: group
+              - name: mpim
+                type: complex
+                value:
+                  - and
+                  - - equal
+                    - name: ''
+                      type: reference
+                      value: >-
+                        userWebhookFlowAllPrivateChannelsAndDmsTrigger.results.body.data.event.channel_type
+                    - name: ''
+                      type: value
+                      value: mpim
+              - name: im
+                type: complex
+                value:
+                  - and
+                  - - equal
+                    - name: ''
+                      type: reference
+                      value: >-
+                        userWebhookFlowAllPrivateChannelsAndDmsTrigger.results.body.data.event.channel_type
+                    - name: ''
+                      type: value
+                      value: im
+        name: Public or private
+  - description: ''
+    endpointSecurityType: customer_optional
+    isSynchronous: false
+    name: User On Deploy
+    steps:
+      - action:
+          key: userLevelConfigDeploy
+          component:
+            isPublic: true
+            key: management-triggers
+            version: LATEST
+        description: ''
+        inputs: {}
+        isTrigger: true
+        name: User On Deploy Trigger
+      - action:
+          key: runCode
+          component:
+            isPublic: true
+            key: code
+            version: LATEST
+        description: ''
+        inputs:
+          code:
+            type: value
+            value: |
+              /*
+                Access config variables by name through the configVars object. e.g.
+                  const apiEndpoint = `${configVars["App Base URL"]}/api`;
+
+                Access previous steps' results through the stepResults object. Trigger
+                and step names are camelCased. If the step "Get Data from API" returned
+                {"foo": "bar", "baz": 123}, you could destructure that data with:
+                  const { foo, baz } = stepResults.getDataFromApi.results;
+
+                You can return string, number or complex object data. e.g.
+                  return { data: { foo: "Hello", bar: 123.45, baz: true } };
+              */
+
+              module.exports = async ({ configVars }) => {
+                return { data: configVars }
+              };
+        name: Code Block
+      - action:
+          key: createObject
+          component:
+            isPublic: true
+            key: collection-tools
+            version: LATEST
+        description: ''
+        inputs:
+          keyValueInput:
+            type: complex
+            value:
+              - name:
+                  type: value
+                  value: event
+                type: value
+                value: register
+              - name:
+                  type: value
+                  value: teamId
+                type: reference
+                value: codeBlock.results.Slack User Connection.token.team.id
+              - name:
+                  type: value
+                  value: authed_user
+                type: reference
+                value: codeBlock.results.Slack Connection.token.authed_user.id
+              - name:
+                  type: value
+                  value: userWebhookUrl
+                type: reference
+                value: userOnDeployTrigger.results.webhookUrls.User Webhook Flow
+              - name:
+                  type: value
+                  value: userApiKey
+                type: reference
+                value: userOnDeployTrigger.results.webhookApiKeys.User Webhook Flow.0
+              - name:
+                  type: value
+                  value: type
+                type: value
+                value: user
+        name: Register user Instance Object
+      - action:
+          key: httpPost
+          component:
+            isPublic: true
+            key: http
+            version: LATEST
+        description: ''
+        inputs:
+          connection:
+            type: configVar
+            value: ''
+          data:
+            type: reference
+            value: registerUserInstanceObject.results
+          debugRequest:
+            type: value
+            value: 'false'
+          headers:
+            type: complex
+            value: []
+          ignoreSslErrors:
+            type: value
+            value: 'false'
+          includeFullResponse:
+            type: value
+            value: 'false'
+          maxRetries:
+            type: value
+            value: '0'
+          queryParams:
+            type: complex
+            value: []
+          responseType:
+            type: value
+            value: json
+          retryDelayMS:
+            type: value
+            value: '0'
+          retryOnAllErrors:
+            type: value
+            value: 'false'
+          timeout:
+            type: value
+            value: ''
+          url:
+            type: value
+            value: >-
+              https://hooks.prismatic.io/trigger/SW5zdGFuY2VGbG93Q29uZmlnOmI5MjhmMjQyLTllNTYtNDJkNi1hMWVjLWY1OGMzZjA2ZjhhZQ==
+          useExponentialBackoff:
+            type: value
+            value: 'false'
+        name: POST Request
+      - action:
+          key: listConversations
+          component:
+            isPublic: true
+            key: slack
+            version: LATEST
+        description: ''
+        inputs:
+          connection:
+            type: configVar
+            value: Slack User Connection
+          cursor:
+            type: value
+            value: ''
+          debug:
+            type: value
+            value: 'false'
+          excludeArchived:
+            type: value
+            value: 'true'
+          includeImChannels:
+            type: value
+            value: 'true'
+          includeMultiPartyImchannels:
+            type: value
+            value: 'true'
+          includePrivateChannels:
+            type: value
+            value: 'true'
+          includePublicChannels:
+            type: value
+            value: 'true'
+          limit:
+            type: value
+            value: '10'
+          teamId:
+            type: reference
+            value: userOnDeployTrigger.results
+        name: List Conversations
+      - action:
+          key: loopOverItems
+          component:
+            isPublic: true
+            key: loop
+            version: LATEST
+        description: ''
+        inputs:
+          items:
+            type: reference
+            value: listConversations.results.channels
+        name: Channels
+        steps:
+          - action:
+              key: getCurrentDateTime
+              component:
+                isPublic: true
+                key: datetime
+                version: LATEST
+            description: ''
+            inputs:
+              displayEpochInSeconds:
+                type: value
+                value: 'false'
+            name: Get Current Date/Time
+          - action:
+              key: adjustDateTime
+              component:
+                isPublic: true
+                key: datetime
+                version: LATEST
+            description: ''
+            inputs:
+              dateTimeInput:
+                type: reference
+                value: getCurrentDateTime.results
+              daysInput:
+                type: value
+                value: '-14'
+              hoursInput:
+                type: value
+                value: ''
+              minutesInput:
+                type: value
+                value: ''
+              secondsInput:
+                type: value
+                value: ''
+            name: Adjust Date/Time
+          - action:
+              key: convertToEpoch
+              component:
+                isPublic: true
+                key: datetime
+                version: LATEST
+            description: ''
+            inputs:
+              dateTimeInput:
+                type: reference
+                value: adjustDateTime.results
+              displayEpochInSeconds:
+                type: value
+                value: 'false'
+            name: Convert Date To Epoch
+          - action:
+              key: getConversationsHistory
+              component:
+                isPublic: true
+                key: slack
+                version: LATEST
+            description: ''
+            inputs:
+              channelName:
+                type: reference
+                value: channels.currentItem.id
+              connection:
+                type: configVar
+                value: Slack User Connection
+              cursor:
+                type: value
+                value: ''
+              debug:
+                type: value
+                value: 'false'
+              includeAllMetadata:
+                type: value
+                value: 'true'
+              inclusive:
+                type: value
+                value: 'false'
+              latest:
+                type: value
+                value: ''
+              limit:
+                type: value
+                value: '10'
+              oldest:
+                type: reference
+                value: convertDateToEpoch.results
+            name: Get Conversation History
+          - action:
+              key: branchOnExpression
+              component:
+                isPublic: true
+                key: branch
+                version: LATEST
+            branches:
+              - name: Messages Exists
+                steps:
+                  - action:
+                      key: listConversationMembers
+                      component:
+                        isPublic: true
+                        key: slack
+                        version: LATEST
+                    description: ''
+                    inputs:
+                      channelName:
+                        type: reference
+                        value: channels.currentItem.id
+                      connection:
+                        type: configVar
+                        value: Slack User Connection
+                      cursor:
+                        type: value
+                        value: ''
+                      debug:
+                        type: value
+                        value: 'false'
+                      limit:
+                        type: value
+                        value: '100'
+                    name: List Conversation Members
+                  - action:
+                      key: loopOverItems
+                      component:
+                        isPublic: true
+                        key: loop
+                        version: LATEST
+                    description: ''
+                    inputs:
+                      items:
+                        type: reference
+                        value: getConversationHistory.results.messages
+                    name: Messages
+                    steps:
+                      - action:
+                          key: getUserById
+                          component:
+                            isPublic: true
+                            key: slack
+                            version: LATEST
+                        description: ''
+                        inputs:
+                          connection:
+                            type: configVar
+                            value: Slack User Connection
+                          debug:
+                            type: value
+                            value: 'false'
+                          user:
+                            type: reference
+                            value: messages.currentItem.user
+                        name: Get Message Creator
+                      - action:
+                          key: rawRequest
+                          component:
+                            isPublic: true
+                            key: slack
+                            version: LATEST
+                        description: ''
+                        inputs:
+                          connection:
+                            type: configVar
+                            value: Slack User Connection
+                          data:
+                            type: value
+                            value: ''
+                          debugRequest:
+                            type: value
+                            value: 'false'
+                          fileData:
+                            type: complex
+                            value: []
+                          fileDataFileNames:
+                            type: complex
+                            value: []
+                          formData:
+                            type: complex
+                            value: []
+                          headers:
+                            type: complex
+                            value: []
+                          maxRetries:
+                            type: value
+                            value: '0'
+                          method:
+                            type: value
+                            value: GET
+                          queryParams:
+                            type: complex
+                            value:
+                              - name:
+                                  type: value
+                                  value: channel
+                                type: reference
+                                value: channels.currentItem.id
+                              - name:
+                                  type: value
+                                  value: message_ts
+                                type: reference
+                                value: messages.currentItem.ts
+                          responseType:
+                            type: value
+                            value: json
+                          retryAllErrors:
+                            type: value
+                            value: 'false'
+                          retryDelayMS:
+                            type: value
+                            value: '0'
+                          timeout:
+                            type: value
+                            value: ''
+                          url:
+                            type: value
+                            value: 'https://slack.com/api/chat.getPermalink'
+                          useExponentialBackoff:
+                            type: value
+                            value: 'false'
+                        name: Get permalink
+                      - action:
+                          key: branchOnExpression
+                          component:
+                            isPublic: true
+                            key: branch
+                            version: LATEST
+                        branches:
+                          - name: '1:1 direct message'
+                            steps:
+                              - action:
+                                  key: join
+                                  component:
+                                    isPublic: true
+                                    key: text-manipulation
+                                    version: LATEST
+                                description: ''
+                                inputs:
+                                  separator:
+                                    type: value
+                                    value: ''
+                                  strings:
+                                    type: complex
+                                    value:
+                                      - type: reference
+                                        value: getMessageCreator.results.user.real_name
+                                      - type: value
+                                        value: ' sent a direct message: '
+                                      - type: reference
+                                        value: messages.currentItem.text
+                                name: Direct Message
+                              - action:
+                                  key: addKey
+                                  component:
+                                    isPublic: true
+                                    key: collection-tools
+                                    version: LATEST
+                                description: ''
+                                inputs:
+                                  key:
+                                    type: value
+                                    value: text
+                                  object:
+                                    type: reference
+                                    value: messages.currentItem
+                                  objectPath:
+                                    type: value
+                                    value: ''
+                                  value:
+                                    type: reference
+                                    value: directMessage.results
+                                name: Add Key/Value to Object
+                              - action:
+                                  key: createObject
+                                  component:
+                                    isPublic: true
+                                    key: collection-tools
+                                    version: LATEST
+                                description: ''
+                                inputs:
+                                  keyValueInput:
+                                    type: complex
+                                    value:
+                                      - name:
+                                          type: value
+                                          value: text
+                                        type: reference
+                                        value: addKeyValueToObject.results.text
+                                      - name:
+                                          type: value
+                                          value: type
+                                        type: value
+                                        value: message
+                                      - name:
+                                          type: value
+                                          value: subtype
+                                        type: value
+                                        value: message_added
+                                      - name:
+                                          type: value
+                                          value: user
+                                        type: reference
+                                        value: addKeyValueToObject.results.user
+                                      - name:
+                                          type: value
+                                          value: client_msg_id
+                                        type: reference
+                                        value: >-
+                                          addKeyValueToObject.results.client_msg_id
+                                      - name:
+                                          type: value
+                                          value: sourceUrl
+                                        type: reference
+                                        value: getPermalink.results.permalink
+                                name: Create Object
+                          - name: Channel
+                            steps:
+                              - action:
+                                  key: join
+                                  component:
+                                    isPublic: true
+                                    key: text-manipulation
+                                    version: LATEST
+                                description: ''
+                                inputs:
+                                  separator:
+                                    type: value
+                                    value: ''
+                                  strings:
+                                    type: complex
+                                    value:
+                                      - type: reference
+                                        value: getMessageCreator.results.user.real_name
+                                      - type: value
+                                        value: ' sent a message in the '
+                                      - type: reference
+                                        value: channels.currentItem.name
+                                      - type: value
+                                        value: ' channel: '
+                                      - type: reference
+                                        value: messages.currentItem.text
+                                name: Channel Message
+                              - action:
+                                  key: addKey
+                                  component:
+                                    isPublic: true
+                                    key: collection-tools
+                                    version: LATEST
+                                description: ''
+                                inputs:
+                                  key:
+                                    type: value
+                                    value: text
+                                  object:
+                                    type: reference
+                                    value: messages.currentItem
+                                  objectPath:
+                                    type: value
+                                    value: ''
+                                  value:
+                                    type: reference
+                                    value: channelMessage.results
+                                name: Add Key/Value to Object 2
+                              - action:
+                                  key: createObject
+                                  component:
+                                    isPublic: true
+                                    key: collection-tools
+                                    version: LATEST
+                                description: ''
+                                inputs:
+                                  keyValueInput:
+                                    type: complex
+                                    value:
+                                      - name:
+                                          type: value
+                                          value: text
+                                        type: reference
+                                        value: addKeyValueToObject2.results.text
+                                      - name:
+                                          type: value
+                                          value: type
+                                        type: value
+                                        value: message
+                                      - name:
+                                          type: value
+                                          value: subtype
+                                        type: value
+                                        value: message_added
+                                      - name:
+                                          type: value
+                                          value: user
+                                        type: reference
+                                        value: addKeyValueToObject2.results.user
+                                      - name:
+                                          type: value
+                                          value: client_msg_id
+                                        type: reference
+                                        value: >-
+                                          addKeyValueToObject2.results.client_msg_id
+                                      - name:
+                                          type: value
+                                          value: sourceUrl
+                                        type: reference
+                                        value: getPermalink.results.permalink
+                                name: Create Object 2
+                          - name: Else
+                            steps:
+                              - action:
+                                  key: writeLog
+                                  component:
+                                    isPublic: true
+                                    key: log
+                                    version: LATEST
+                                description: ''
+                                inputs:
+                                  level:
+                                    type: value
+                                    value: info
+                                  message:
+                                    type: reference
+                                    value: branchOnChannelType.results
+                                name: Write Log Message 2
+                        description: ''
+                        inputs:
+                          conditions:
+                            type: complex
+                            value:
+                              - name: '1:1 direct message'
+                                type: complex
+                                value:
+                                  - and
+                                  - - isTrue
+                                    - name: ''
+                                      type: reference
+                                      value: channels.currentItem.is_im
+                              - name: Channel
+                                type: complex
+                                value:
+                                  - and
+                                  - - isFalse
+                                    - name: ''
+                                      type: reference
+                                      value: channels.currentItem.is_im
+                        name: Branch on Channel Type
+                  - action:
+                      key: createObject
+                      component:
+                        isPublic: true
+                        key: collection-tools
+                        version: LATEST
+                    description: ''
+                    inputs:
+                      keyValueInput:
+                        type: complex
+                        value:
+                          - name:
+                              type: value
+                              value: type
+                            type: value
+                            value: messageList
+                          - name:
+                              type: value
+                              value: messages
+                            type: reference
+                            value: messages.results
+                          - name:
+                              type: value
+                              value: members
+                            type: reference
+                            value: listConversationMembers.results.members
+                          - name:
+                              type: value
+                              value: authed_user_id
+                            type: reference
+                            value: >-
+                              codeBlock.results.Slack User
+                              Connection.token.authed_user.id
+                          - name:
+                              type: value
+                              value: is_private
+                            type: reference
+                            value: channels.currentItem.is_private
+                    name: Add Memories Object
+                  - action:
+                      key: httpPost
+                      component:
+                        isPublic: true
+                        key: customHttp
+                        version: LATEST
+                    description: ''
+                    inputs:
+                      connection:
+                        type: configVar
+                        value: ''
+                      data:
+                        type: reference
+                        value: addMemoriesObject.results
+                      debugRequest:
+                        type: value
+                        value: 'false'
+                      headers:
+                        type: complex
+                        value:
+                          - name:
+                              type: value
+                              value: x-papr-api-key
+                            type: value
+                            value: _yQQ5-6twdUJo-zHDJaydvVKim8Jw7o_qXnFY9qML0M
+                      ignoreSslErrors:
+                        type: value
+                        value: 'false'
+                      includeFullResponse:
+                        type: value
+                        value: 'false'
+                      maxRetries:
+                        type: value
+                        value: '0'
+                      queryParams:
+                        type: complex
+                        value: []
+                      responseType:
+                        type: value
+                        value: json
+                      retryDelayMS:
+                        type: value
+                        value: '0'
+                      retryOnAllErrors:
+                        type: value
+                        value: 'false'
+                      timeout:
+                        type: value
+                        value: ''
+                      url:
+                        type: template
+                        value: >-
+                          https://memoryserver.azurewebsites.net/add_memory/{{#Tenant
+                          ID}}_{{#User ID (User Level)}}/slack/messages
+                      useExponentialBackoff:
+                        type: value
+                        value: 'false'
+                    name: POST/PUT Form Data Request
+              - name: Else
+                steps:
+                  - action:
+                      key: writeLog
+                      component:
+                        isPublic: true
+                        key: log
+                        version: LATEST
+                    description: ''
+                    inputs:
+                      level:
+                        type: value
+                        value: info
+                      message:
+                        type: reference
+                        value: checkIfMessagesIsEmpty.results
+                    name: Write Log Message
+            description: ''
+            inputs:
+              conditions:
+                type: complex
+                value:
+                  - name: Messages Exists
+                    type: complex
+                    value:
+                      - and
+                      - - isNotEmpty
+                        - name: ''
+                          type: reference
+                          value: getConversationHistory.results.messages
+                        - name: ''
+                          type: value
+                          value: ''
+            name: Check if messages is empty
+  - description: ''
+    endpointSecurityType: customer_optional
+    isSynchronous: false
+    name: Admin Remove
+    steps:
+      - action:
+          key: instanceRemove
+          component:
+            isPublic: true
+            key: management-triggers
+            version: LATEST
+        description: ''
+        inputs: {}
+        isTrigger: true
+        name: Admin Remove
+      - action:
+          key: runCode
+          component:
+            isPublic: true
+            key: code
+            version: LATEST
+        description: ''
+        inputs:
+          code:
+            type: value
+            value: |
+              /*
+                Access config variables by name through the configVars object. e.g.
+                  const apiEndpoint = `${configVars["App Base URL"]}/api`;
+
+                Access previous steps' results through the stepResults object. Trigger
+                and step names are camelCased. If the step "Get Data from API" returned
+                {"foo": "bar", "baz": 123}, you could destructure that data with:
+                  const { foo, baz } = stepResults.getDataFromApi.results;
+
+                You can return string, number or complex object data. e.g.
+                  return { data: { foo: "Hello", bar: 123.45, baz: true } };
+              */
+
+              module.exports = async ({ logger, configVars }, stepResults) => {
+                return { data: configVars }
+              };
+        name: Code Block
+      - action:
+          key: createObject
+          component:
+            isPublic: true
+            key: collection-tools
+            version: LATEST
+        description: ''
+        inputs:
+          keyValueInput:
+            type: complex
+            value:
+              - name:
+                  type: value
+                  value: event
+                type: value
+                value: deregister
+              - name:
+                  type: value
+                  value: teamId
+                type: reference
+                value: codeBlock.results.Slack Connection.token.team.id
+              - name:
+                  type: value
+                  value: adminWebhookUrl
+                type: reference
+                value: adminRemove.results.webhookUrls.Admin Webhook Flow
+              - name:
+                  type: value
+                  value: adminApiKey
+                type: reference
+                value: adminRemove.results.webhookApiKeys.User Webhook Flow.0
+              - name:
+                  type: value
+                  value: type
+                type: value
+                value: admin
+        name: De-register Admin Instance
+      - action:
+          key: httpPost
+          component:
+            isPublic: true
+            key: http
+            version: LATEST
+        description: ''
+        inputs:
+          connection:
+            type: configVar
+            value: ''
+          data:
+            type: reference
+            value: deRegisterAdminInstance.results
+          debugRequest:
+            type: value
+            value: 'false'
+          headers:
+            type: complex
+            value: []
+          ignoreSslErrors:
+            type: value
+            value: 'false'
+          includeFullResponse:
+            type: value
+            value: 'false'
+          maxRetries:
+            type: value
+            value: '0'
+          queryParams:
+            type: complex
+            value: []
+          responseType:
+            type: value
+            value: json
+          retryDelayMS:
+            type: value
+            value: '0'
+          retryOnAllErrors:
+            type: value
+            value: 'false'
+          timeout:
+            type: value
+            value: ''
+          url:
+            type: value
+            value: >-
+              https://hooks.prismatic.io/trigger/SW5zdGFuY2VGbG93Q29uZmlnOmI5MjhmMjQyLTllNTYtNDJkNi1hMWVjLWY1OGMzZjA2ZjhhZQ==
+          useExponentialBackoff:
+            type: value
+            value: 'false'
+        name: POST Request
+  - description: ''
+    endpointSecurityType: customer_optional
+    isSynchronous: false
+    name: User Remove
+    steps:
+      - action:
+          key: userLevelConfigRemove
+          component:
+            isPublic: true
+            key: management-triggers
+            version: LATEST
+        description: ''
+        inputs: {}
+        isTrigger: true
+        name: User Remove
+      - action:
+          key: runCode
+          component:
+            isPublic: true
+            key: code
+            version: LATEST
+        description: ''
+        inputs:
+          code:
+            type: value
+            value: |
+              /*
+                Access config variables by name through the configVars object. e.g.
+                  const apiEndpoint = `${configVars["App Base URL"]}/api`;
+
+                Access previous steps' results through the stepResults object. Trigger
+                and step names are camelCased. If the step "Get Data from API" returned
+                {"foo": "bar", "baz": 123}, you could destructure that data with:
+                  const { foo, baz } = stepResults.getDataFromApi.results;
+
+                You can return string, number or complex object data. e.g.
+                  return { data: { foo: "Hello", bar: 123.45, baz: true } };
+              */
+
+              module.exports = async ({ configVars }) => {
+                return { data: configVars }
+              };
+        name: Code Block
+      - action:
+          key: createObject
+          component:
+            isPublic: true
+            key: collection-tools
+            version: LATEST
+        description: ''
+        inputs:
+          keyValueInput:
+            type: complex
+            value:
+              - name:
+                  type: value
+                  value: event
+                type: value
+                value: deregister
+              - name:
+                  type: value
+                  value: teamId
+                type: reference
+                value: codeBlock.results.Slack Connection.token.team.id
+              - name:
+                  type: value
+                  value: authed_user
+                type: reference
+                value: codeBlock.results.Slack Connection.token.authed_user.id
+              - name:
+                  type: value
+                  value: userWebhookUrl
+                type: reference
+                value: userRemove.results.webhookUrls.User Webhook Flow
+              - name:
+                  type: value
+                  value: userApiKey
+                type: reference
+                value: userRemove.results.webhookApiKeys.User Webhook Flow.0
+              - name:
+                  type: value
+                  value: type
+                type: value
+                value: user
+        name: De-register User Instance
+      - action:
+          key: httpPost
+          component:
+            isPublic: true
+            key: http
+            version: LATEST
+        description: ''
+        inputs:
+          connection:
+            type: configVar
+            value: ''
+          data:
+            type: reference
+            value: deRegisterUserInstance.results
+          debugRequest:
+            type: value
+            value: 'false'
+          headers:
+            type: complex
+            value: []
+          ignoreSslErrors:
+            type: value
+            value: 'false'
+          includeFullResponse:
+            type: value
+            value: 'false'
+          maxRetries:
+            type: value
+            value: '0'
+          queryParams:
+            type: complex
+            value: []
+          responseType:
+            type: value
+            value: json
+          retryDelayMS:
+            type: value
+            value: '0'
+          retryOnAllErrors:
+            type: value
+            value: 'false'
+          timeout:
+            type: value
+            value: ''
+          url:
+            type: value
+            value: >-
+              https://hooks.prismatic.io/trigger/SW5zdGFuY2VGbG93Q29uZmlnOmI5MjhmMjQyLTllNTYtNDJkNi1hMWVjLWY1OGMzZjA2ZjhhZQ==
+          useExponentialBackoff:
+            type: value
+            value: 'false'
+        name: POST Request
+labels:
+  - messaging
+name: Slack
+requiredConfigVars:
+  - connection:
+      key: oauth2
+      component:
+        isPublic: true
+        key: slack
+        version: LATEST
+    dataType: connection
+    inputs:
+      authorizeUrl:
+        meta:
+          orgOnly: true
+          visibleToCustomerDeployer: false
+          visibleToOrgDeployer: true
+        type: value
+        value: 'https://slack.com/oauth/v2/authorize?'
+      clientId:
+        meta:
+          orgOnly: true
+          visibleToCustomerDeployer: false
+          visibleToOrgDeployer: false
+        type: value
+        value: '42826205351.56522542725'
+      clientSecret:
+        meta:
+          orgOnly: true
+          visibleToCustomerDeployer: false
+          visibleToOrgDeployer: false
+        type: value
+        value: 9a16b74973d3ff521ca7c9ea42885388
+      isUser:
+        meta:
+          orgOnly: true
+          visibleToCustomerDeployer: false
+          visibleToOrgDeployer: false
+        type: value
+        value: 'false'
+      revokeUrl:
+        meta:
+          orgOnly: true
+          visibleToCustomerDeployer: false
+          visibleToOrgDeployer: false
+        type: value
+        value: 'https://slack.com/api/auth.revoke'
+      scopes:
+        meta:
+          orgOnly: true
+          visibleToCustomerDeployer: false
+          visibleToOrgDeployer: true
+        type: value
+        value: >-
+          channels:read groups:read im:read mpim:read im:history groups:history
+          mpim:history app_mentions:read channels:history users:read
+          channels:join
+      signingSecret:
+        meta:
+          orgOnly: true
+          visibleToCustomerDeployer: false
+          visibleToOrgDeployer: false
+        type: value
+        value: bcd007eb70eb1b4954ae6a3e826c2b13
+      tokenUrl:
+        meta:
+          orgOnly: true
+          visibleToCustomerDeployer: false
+          visibleToOrgDeployer: false
+        type: value
+        value: 'https://slack.com/api/oauth.v2.access'
+    key: Slack Connection
+    meta:
+      visibleToCustomerDeployer: true
+      visibleToOrgDeployer: true
+    onPremiseConnectionConfig: disallowed
+    orgOnly: false
+  - dataType: string
+    defaultValue: ''
+    key: User ID
+    meta:
+      visibleToCustomerDeployer: false
+      visibleToOrgDeployer: true
+    orgOnly: false
+  - connection:
+      key: oauth2
+      component:
+        isPublic: true
+        key: slack
+        version: LATEST
+    dataType: connection
+    inputs:
+      authorizeUrl:
+        meta:
+          orgOnly: true
+          visibleToCustomerDeployer: false
+          visibleToOrgDeployer: true
+          writeOnly: false
+        type: value
+        value: >-
+          https://slack.com/oauth/v2/authorize?user_scope=channels:read,groups:read,im:read,mpim:read,im:history,groups:history,mpim:history,channels:history,users:read
+      clientId:
+        meta:
+          orgOnly: true
+          visibleToCustomerDeployer: false
+          visibleToOrgDeployer: false
+        type: value
+        value: '42826205351.56522542725'
+      clientSecret:
+        meta:
+          orgOnly: true
+          visibleToCustomerDeployer: false
+          visibleToOrgDeployer: false
+        type: value
+        value: 9a16b74973d3ff521ca7c9ea42885388
+      isUser:
+        meta:
+          orgOnly: true
+          visibleToCustomerDeployer: false
+          visibleToOrgDeployer: false
+        type: value
+        value: 'true'
+      revokeUrl:
+        meta:
+          orgOnly: true
+          visibleToCustomerDeployer: false
+          visibleToOrgDeployer: false
+        type: value
+        value: 'https://slack.com/api/auth.revoke'
+      scopes:
+        meta:
+          orgOnly: true
+          visibleToCustomerDeployer: false
+          visibleToOrgDeployer: true
+          writeOnly: false
+        type: value
+        value: ''
+      signingSecret:
+        meta:
+          orgOnly: true
+          visibleToCustomerDeployer: false
+          visibleToOrgDeployer: false
+        type: value
+        value: bcd007eb70eb1b4954ae6a3e826c2b13
+      tokenUrl:
+        meta:
+          orgOnly: true
+          visibleToCustomerDeployer: false
+          visibleToOrgDeployer: false
+        type: value
+        value: 'https://slack.com/api/oauth.v2.access'
+    key: Slack User Connection
+    meta:
+      visibleToCustomerDeployer: true
+      visibleToOrgDeployer: true
+    onPremiseConnectionConfig: disallowed
+    orgOnly: false
+  - dataType: string
+    defaultValue: ''
+    key: User ID (User Level)
+    meta:
+      visibleToCustomerDeployer: false
+      visibleToOrgDeployer: true
+    orgOnly: false
+  - dataType: string
+    defaultValue: ''
+    key: Tenant ID
+    meta:
+      visibleToCustomerDeployer: false
+      visibleToOrgDeployer: true
+    orgOnly: false

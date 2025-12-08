@@ -1,0 +1,61 @@
+[
+    [],
+    null,
+    {
+      "hierarchical_structures": null,
+      "createdAt": "2025-11-16T17:21:38.004524+00:00",
+      "location": null,
+      "topics": null,
+      "emoji tags": null,
+      "emotion tags": null,
+      "conversationId": null,
+      "sourceUrl": null,
+      "role": null,
+      "category": null,
+      "user_id": "mhnkVbAdgG",
+      "external_user_id": null,
+      "external_user_read_access": [],
+      "external_user_write_access": [],
+      "user_read_access": [
+        "mhnkVbAdgG"
+      ],
+      "user_write_access": [
+        "mhnkVbAdgG"
+      ],
+      "workspace_read_access": [],
+      "workspace_write_access": [],
+      "role_read_access": [],
+      "role_write_access": [],
+      "pageId": null,
+      "sourceType": null,
+      "workspace_id": null,
+      "upload_id": null,
+      "organization_id": "Ky6jxP0yxI",
+      "namespace_id": "MwnkcNiGZU",
+      "sessionId": null,
+      "post": null,
+      "userMessage": null,
+      "assistantMessage": null,
+      "relatedGoals": [],
+      "relatedUseCases": [],
+      "relatedSteps": [],
+      "goalClassificationScores": [],
+      "useCaseClassificationScores": [],
+      "stepClassificationScores": [],
+      "customMetadata": {
+        "test_id": "62b26bc0-9624-4ee2-8b1e-f022ad3516fb",
+        "schema_id": "Dh6EivRmo8",
+        "organization_id": "Ky6jxP0yxI",
+        "namespace_id": "MwnkcNiGZU",
+        "file_url": "https://parseserverstoragewest.blob.core.windows.net/parse/fd7274554cad87e451d9148d226775d5_c2502e0c-7274-438b-87fa-2d0ff162d34d_QPNC83-106 Instruction Manual.pdf",
+        "file_name": "QPNC83-106 Instruction Manual.pdf",
+        "upload_id": "c2502e0c-7274-438b-87fa-2d0ff162d34d"
+      },
+      "source": "test_upload_with_custom_schema"
+    },
+    "Ky6jxP0yxI",
+    "XhnQ7Y762d",
+    true,
+    "G5WELDfPmv",
+    true
+  ]

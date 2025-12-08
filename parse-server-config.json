@@ -1,0 +1,19 @@
+{
+  "appId": "papr-oss-app-id",
+  "masterKey": "papr-oss-master-key",
+  "databaseURI": "mongodb://admin:password@mongodb:27017/papr_memory?authSource=admin",
+  "serverURL": "http://parse-server:1337/parse",
+  "publicServerURL": "http://localhost:1337/parse",
+  "mountPath": "/parse",
+  "port": 1337,
+  "allowOrigin": "*",
+  "appName": "Papr Memory",
+  "enableExperimentalDirectAccess": true,
+  "allowClientClassCreation": true,
+  "enablePrivateUsers": true,
+  "allowInsecureHTTP": true,
+  "enableCheckLog": false,
+  "masterKeyIps": ["0.0.0.0/0", "::/0"],
+  "mountGraphQL": true,
+  "mountPlayground": true
+}

@@ -1,0 +1,163 @@
+V1 ENDPOINTS SEQUENTIAL TEST REPORT (OPEN SOURCE EDITION)
+==================================================
+
+Timestamp: 2025-12-05T10:34:19.728140
+Edition: Open Source
+Total Tests: 73
+Passed: 68
+Failed: 2
+Skipped: 3
+Success Rate: 93.2%
+Total Duration: 4937.42s
+
+DETAILED RESULTS:
+------------------------------
+✅ Add Memory - Basic (326.85s)
+
+✅ Add Memory - API Key (205.89s)
+
+✅ Add Memory - External User ID + Custom Metadata (105.36s)
+
+✅ Add Memory - External User ID Only (126.17s)
+
+✅ Add Memory - External User ID + ACL (92.35s)
+
+✅ Add Memory - User ID from Created User (67.05s)
+
+✅ Batch Add Memory - Basic (175.13s)
+
+✅ Batch Add Memory - User ID (312.47s)
+
+✅ Batch Add Memory - External User ID (565.47s)
+
+✅ Batch Add Memory - Webhook Success (209.07s)
+
+✅ Batch Add Memory - Webhook Partial Success (91.49s)
+
+✅ Batch Add Memory - Webhook No URL (80.44s)
+   
+✅ Batch Add Memory - Webhook Azure Fallback (88.59s)
+
+✅ Batch Add Memory - Webhook Payload Structure (86.19s)
+
+✅ Batch Add Memory - Webhook Immediate (skip_background=True) (1.00s)
+
+✅ Batch Add Memory - Webhook With Background Processing (211.51s)
+
+✅ Update Memory - Basic (1.06s)
+
+✅ Update Memory - API Key (11.57s)
+
+✅ Update Memory - ACL with Real Users (1.69s)
+
+✅ Get Memory - Basic (131.76s)
+
+✅ Search Memory - Basic (24.15s)
+
+✅ Search Memory - User ID ACL (99.28s)
+
+✅ Search Memory - External User ID ACL (139.12s)
+
+✅ Search Memory - New User Qwen Route (1.57s)
+
+✅ Search Memory - Custom Metadata Filter (Qwen Only) (209.75s)
+
+✅ Search Memory - Numeric Custom Metadata Filter (243.65s)
+
+✅ Search Memory - List Custom Metadata Filter (219.67s)
+
+✅ Search Memory - Boolean Custom Metadata Filter (171.50s)
+
+✅ Search Memory - Mixed Custom Metadata Types (193.86s)
+
+✅ Search Memory - Organization and Namespace Filter (214.28s)
+
+✅ Search Memory - Agentic Graph (132.75s)
+
+✅ Search Memory - Predicted Grouping Logging (41.79s)
+
+✅ Search Memory - Fixed User Cache Test (1.82s)
+
+✅ Search Memory - Low-similarity Performance (41.93s)
+
+✅ Auth/Dev Marking - APIKey Sets Developer (0.38s)
+
+⏭️ Auth/Dev Marking - Bearer Only Does Not Set Developer (0.35s)
+    Skipped: No valid Bearer token available for testing
+
+✅ Auth/Dev Marking - Anon End-User Not Marked Developer When Dev API Key Used (68.50s)
+
+✅ Delete Memory - Basic (0.95s)
+
+✅ Delete Memory - API Key (0.83s)
+
+✅ Delete All Memories - Complete Workflow (9.58s)
+
+✅ Delete All Memories - External User ID (1.16s)
+
+✅ Delete All Memories - No Memories Found (0.60s)
+
+✅ Create User - Basic (0.26s)
+
+✅ Create User - Anonymous (0.25s)
+
+✅ Create User - Batch (0.48s)
+
+✅ Get User - Basic (0.29s)
+
+✅ Update User - Basic (0.31s)
+
+✅ Delete User - Basic (0.25s)
+
+✅ Delete User - By External ID (0.28s)
+
+✅ List Users - Basic (0.55s)
+
+✅ Feedback - End to End (17.06s)
+
+✅ Feedback - Get by ID (28.32s)
+
+✅ QueryLog - Memory Metadata with Query Log Fields (0.00s)
+
+✅ QueryLog - Classification Data Detection (0.00s)
+
+✅ QueryLog - Search with Query Log Integration (0.00s)
+
+✅ QueryLog - Agentic Graph Log Model Creation (0.00s)
+
+✅ QueryLog - User Feedback Log Model Creation (0.00s)
+
+✅ QueryLog - Agentic Graph Log with Relations (0.00s)
+
+✅ QueryLog - User Feedback Log Minimal (0.00s)
+
+✅ QueryLog - Agentic Graph Log Storage Function (0.00s)
+
+✅ QueryLog - User Feedback Log Storage Function (0.00s)
+
+✅ QueryLog - Agentic Graph Log Data Preparation (0.00s)
+
+✅ QueryLog - User Feedback Log Data Preparation (0.00s)
+
+⏭️ QueryLog - Memory Retrieval Log Predicted Grouping (0.00s)
+    Skipped: Requires monkeypatch fixture
+
+✅ QueryLog - Persisted with Classification (20.75s)
+
+✅ QueryLog - Real creation and memory increment (22.43s)
+
+✅ QueryLog - Cache hits increment on repeated search (45.00s)
+
+⏭️ QueryLog - Fused confidence matches weight delta (46.87s)
+    Skipped: No overlapping memory between first and second retrievals; rerun may yield overlap
+
+✅ QueryLog - Backfill Retrieval Counters Small Batch (45.70s)
+
+✅ Multi-Tenant - Auth Models (0.00s)
+
+✅ Multi-Tenant - Memory Models Fields (0.00s)
+
+✅ Multi-Tenant - Batch Memory Scoping (0.00s)
+
+✅ Multi-Tenant - Backward Compatibility (0.00s)
+

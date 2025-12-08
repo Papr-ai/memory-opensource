@@ -1,0 +1,60 @@
+# Base configuration shared by all editions
+# DO NOT put edition-specific settings here
+
+app:
+  name: "Papr Memory"
+  description: "Predictive Memory Layer for AI Agents"
+  docs_url: "/docs"
+  redoc_url: "/redoc"
+  
+server:
+  host: "0.0.0.0"
+  workers: 4
+  timeout: 60
+  max_request_size: 10485760  # 10MB
+  
+logging:
+  format: "json"
+  level: "INFO"
+  structured: true
+  
+cors:
+  allow_credentials: true
+  allow_methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
+  allow_headers: ["*"]
+  
+rate_limiting:
+  enabled: true
+  window_seconds: 60
+  max_requests: 100
+  
+database:
+  connection_pool_size: 10
+  connection_timeout: 30
+  retry_attempts: 3
+  
+vector_search:
+  default_top_k: 20
+  max_top_k: 100
+  min_score: 0.7
+  
+graph:
+  max_depth: 3
+  max_nodes: 50
+  relationship_types:
+    - "RELATED_TO"
+    - "REFERENCES"
+    - "FOLLOWS"
+    - "MENTIONS"
+    
+memory:
+  max_batch_size: 100
+  background_processing: true
+  auto_relationships: true
+  
+security:
+  require_auth: true
+  api_key_header: "X-API-Key"
+  session_token_header: "X-Session-Token"
+  bearer_token_header: "Authorization"
+

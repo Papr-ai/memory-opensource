@@ -1,0 +1,21 @@
+
+# Ignore node_modules
+node_modules/
+__pycache__/findrelatedmemory.cpython-311.pyc
+__pycache__/findrelatedmemory.cpython-311.pyc
+__pycache__/findrelatedmemory.cpython-311.pyc
+*.pyc
+models/__pycache__/structured_outputs.cpython-311.pyc
+logs/
+server_logs/
+*.log
+__pycache__/findrelatedmemory.cpython-311.pyc
+__pycache__/findrelatedmemory.cpython-311.pyc
+__pycache__/main.cpython-311.pyc
+*.pyc
+# Environment files (add these lines)
+.env*
+.env.local
+.env.development  
+.env.production
+keys/jwt-private.pem

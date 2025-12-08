@@ -1,0 +1,140 @@
+# yaml-language-server: $schema=https://app.stainless.com/config.schema.json
+
+organization:
+  # Name of your organization or company, used to determine the name of the client
+  # and headings.
+  name: Papr
+  # Link to your API documentation.
+  docs: 'https://platform.papr.ai'
+  # Contact email for bug reports, questions, and support requests.
+  contact: 'support@papr.ai'
+
+openapi:
+  code_samples: 'redocly'
+
+# `targets` define the output targets and their customization options, such as
+# whether to emit the Node SDK and what it's package name should be.
+targets:
+  python:
+    package_name: papr_memory
+    production_repo: Papr-ai/papr-pythonSDK
+    publish:
+      pypi: true
+    project_name: papr_memory
+  typescript:
+    package_name: "@papr/memory"
+    production_repo: Papr-ai/papr-TypescriptSDK
+    publish:
+      npm: true
+
+# `environments` are a map of the name of the environment (e.g. "sandbox",
+# "production") to the corresponding url to use.
+environments:
+  production: https://memory.papr.ai
+
+# `resources` define the structure and organization for your API, such as how
+# methods and models are grouped together and accessed. See the [configuration
+# guide] for more information.
+#
+# [configuration guide]: https://app.stainless.com/docs/guides/configure#resources
+resources:
+  user:
+    # Configure the methods defined in this resource. Each key in the object is the
+    # name of the method and the value is either an endpoint (for example, `get /foo`)
+    # or an object with more detail.
+    #
+    # [reference]: https://app.stainless.com/docs/reference/config#method
+    # Configure the models--named types--defined in the resource. Each key in the
+    # object is the name of the model and the value is either the name of a schema in
+    # `#/components/schemas` or an object with more detail.
+    #
+    # [reference]: https://app.stainless.com/docs/reference/config#model
+    models:
+      user_response: '#/components/schemas/UserResponse'
+      user_type: '#/components/schemas/UserType'
+    methods:
+      create: post /v1/user
+      list: get /v1/user
+      get: get /v1/user/{user_id}
+      update: put /v1/user/{user_id}
+      delete: delete /v1/user/{user_id}
+      create_batch: post /v1/user/batch
+
+  memory:
+    models:
+      add_memory: '#/components/schemas/AddMemoryRequest'
+      add_memory_response: '#/components/schemas/AddMemoryResponse'
+      context_item: '#/components/schemas/ContextItem'
+      memory_metadata: '#/components/schemas/MemoryMetadata'
+      memory_type: '#/components/schemas/MemoryType'
+      relationship_item: '#/components/schemas/RelationshipItem'
+      search_response: '#/components/schemas/SearchResponse'
+    methods:
+      add: post /v1/memory
+      update: put /v1/memory/{memory_id}
+      delete: delete /v1/memory/{memory_id}
+      get: get /v1/memory/{memory_id}
+      add_batch: post /v1/memory/batch
+      search: post /v1/memory/search
+    
+  feedback:
+    models:
+      feedback_request: '#/components/schemas/FeedbackRequest'
+      feedback_response: '#/components/schemas/FeedbackResponse'
+      batch_request: '#/components/schemas/BatchFeedbackRequest'
+      batch_response: '#/components/schemas/BatchFeedbackResponse'
+    methods:
+      submit: post /v1/feedback
+      submitBatch: post /v1/feedback/batch
+      getById: get /v1/feedback/{feedback_id}
+
+settings:
+  # All generated integration tests that hit the prism mock http server are marked
+  # as skipped. Removing this setting or setting it to false enables tests, but
+  # doing so may result in test failures due to bugs in the test server.
+  #
+  # [prism mock http server]: https://stoplight.io/open-source/prism
+  disable_mock_tests: true
+  license: Apache-2.0
+
+# `client_settings` define settings for the API client, such as extra constructor
+# arguments (used for authentication), retry behavior, idempotency, etc.
+client_settings:
+  opts:
+    api_key:
+      type: string
+      nullable: false
+      auth:
+        security_scheme: X-API-Key
+      read_env: PAPR_MEMORY_API_KEY
+    X-Session-Token:
+      type: string
+      nullable: true
+      auth:
+        security_scheme: X-Session-Token 
+      read_env: PAPR_MEMORY_Session_Token
+    bearer_token:
+      type: string
+      nullable: true
+      auth:
+        security_scheme: Bearer
+      read_env: PAPR_MEMORY_BEARER_TOKEN
+
+security:
+  - X-API-Key: []
+  - X-Session-Token: []
+  - Bearer: []
+
+# `readme` is used to configure the code snippets that will be rendered in the
+# README.md of various SDKs. In particular, you can change the `headline`
+# snippet's endpoint and the arguments to call it with.
+readme:
+  example_requests:
+    default:
+      type: request
+      endpoint: post /v1/user
+      params: {}
+    headline:
+      type: request
+      endpoint: post /v1/user
+      params: {}

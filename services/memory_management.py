@@ -1,0 +1,8206 @@
+import requests
+import os
+import json
+from dotenv import find_dotenv, load_dotenv
+from os import environ as env
+from datetime import datetime, timezone, UTC, timedelta
+from concurrent.futures import ThreadPoolExecutor, as_completed  # Ensure as_completed is imported
+from memory.memory_item import MemoryItem
+from services.logging_config import get_logger
+from services.url_utils import clean_url, get_parse_server_url
+from models.parse_server import (
+    ParseStoredMemory, Memory, MemoryRetrievalResult, ParseUserPointer, UpdateMemoryItem, UpdateMemoryResponse, 
+    SystemUpdateStatus, ErrorResponse, MemoryParseServer, ParsePointer, MemoryParseServerUpdate, DocumentUploadStatus, DocumentUploadStatusResponse, ParseFileUploadResponse, QueryLog, MemoryRetrievalLog,
+    OrganizationPointer, NamespacePointer, PostParseServer, PostWithProviderResult, ParseFile, BatchMemoryRequestParse
+)
+from models.shared_types import MemoryMetadata
+import asyncio
+import uuid
+from typing import Dict, Any, List, Optional, Union, Tuple, TYPE_CHECKING
+from fastapi import APIRouter, BackgroundTasks, Depends
+import httpx
+from pydantic import ValidationError
+from models.parse_server import DocumentUploadStatusType
+from models.parse_server import DeveloperUserPointer
+from services.logger_singleton import LoggerSingleton
+import copy
+from models.shared_types import ContextItem
+from services.context_utils import parse_context
+from models.parse_server import MemoryPredictionLog
+from models.parse_server import AgenticGraphLog, UserFeedbackLog
+from services.user_utils import PARSE_APPLICATION_ID, PARSE_MASTER_KEY, PARSE_SERVER_URL
+from services.user_utils import get_parse_headers
+import math
+import gzip
+
+if TYPE_CHECKING:
+    from memory.memory_graph import MemoryGraph
+
+
+# Create a logger instance for this module
+logger = LoggerSingleton.get_logger(__name__)
+
+# Comprehensive list of all Memory fields to fetch from Parse Server
+# This ensures we get all ACL fields, multi-tenant fields, and metadata
+MEMORY_KEYS = (
+    "objectId,createdAt,updatedAt,content,type,topics,metadata,memoryId,title,location,emojiTags,"
+    "hierarchicalStructures,conversationId,sourceUrl,customMetadata,sourceType,context,"
+    # Access control fields
+    "ACL,user,developerUser,workspace,post,postMessage,"
+    # ACL arrays
+    "external_user_read_access,external_user_write_access,"
+    "user_read_access,user_write_access,"
+    "workspace_read_access,workspace_write_access,"
+    "role_read_access,role_write_access,"
+    "namespace_read_access,namespace_write_access,"
+    "organization_read_access,organization_write_access,"
+    # Multi-tenant fields
+    "organization,namespace,organization_id,namespace_id,"
+    # Role and category
+    "role,category,"
+    # Document-specific fields
+    "page_number,total_pages,upload_id,extract_mode,file_url,filename,page,"
+    # Analytics fields (for tier1 ranking)
+    "cacheHitTotal,cacheHitEma30d,cacheConfidenceWeighted30d,"
+    "citationHitTotal,citationHitEma30d,citationConfidenceWeighted30d,"
+    # Steps for workflow memories
+    "steps,current_step,"
+    # Memory chunk IDs (used to track chunk IDs in Qdrant)
+    "memoryChunkIds,"
+    # Source context
+    "source_document_id,source_message_id"
+)
+
+
+def compress_extraction(extraction_data: Dict[str, Any]) -> Tuple[bytes, float]:
+    """
+    Compress extraction data using gzip.
+    
+    Args:
+        extraction_data: Dictionary containing extraction data to compress
+        
+    Returns:
+        Tuple of (compressed_bytes, compression_ratio)
+        compression_ratio is the percentage of original size (e.g., 0.15 = 15%)
+    """
+    json_str = json.dumps(extraction_data, ensure_ascii=False)
+    json_bytes = json_str.encode('utf-8')
+    compressed_bytes = gzip.compress(json_bytes, compresslevel=6)
+    
+    original_size = len(json_bytes)
+    compressed_size = len(compressed_bytes)
+    compression_ratio = (compressed_size / original_size * 100) if original_size > 0 else 0
+    
+    logger.debug(
+        f"Compressed extraction: {original_size} bytes → {compressed_size} bytes "
+        f"({compression_ratio:.1f}%)"
+    )
+    
+    return compressed_bytes, compression_ratio
+
+ENV_FILE = find_dotenv()
+if ENV_FILE:
+    load_dotenv(ENV_FILE)
+
+# Initialize Parse client
+PARSE_SERVER_URL = clean_url(env.get("PARSE_SERVER_URL"))
+PARSE_APPLICATION_ID = clean_url(env.get("PARSE_APPLICATION_ID"))
+PARSE_REST_API_KEY = clean_url(env.get("PARSE_REST_API_KEY"))
+PARSE_MASTER_KEY = clean_url(env.get("PARSE_MASTER_KEY"))
+
+def create_usecase(user_id: str, session_token: str, name: str, description: str) -> dict:
+    url = f"{PARSE_SERVER_URL}/parse/classes/Usecase"
+    data = {
+        "user": {
+            "__type": "Pointer",
+            "className": "_User",
+            "objectId": user_id
+        },
+        "name": name,
+        "description": description
+    }
+    HEADERS = {
+            "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+            "X-Parse-REST-API-Key": PARSE_REST_API_KEY,
+            "X-Parse-Master-Key": PARSE_MASTER_KEY,
+            "Content-Type": "application/json"
+    }
+    response = requests.post(url, headers=HEADERS, data=json.dumps(data))
+    if response.status_code != 201:
+        logger.error(f"Failed to create usecase: {response.text}")
+        return None
+    return response.json()
+
+def add_list_of_usecases(user_id: str, session_token: str, use_cases: List[dict]):
+    for use_case in use_cases:
+        if not use_case.get('name') or not use_case.get('description'):
+            logger.info(f"Invalid use case: {use_case}")
+            continue
+        response = create_usecase(user_id, session_token, use_case['name'], use_case['description'])
+        if response is not None:
+            logger.info(f"Use case added successfully: {use_case['name']}")
+        else:
+            logger.info(f"Failed to add use case: {use_case['name']}")
+
+
+def create_goal(user_id: str, session_token: str, title: str, description: str=None, key_results=None):
+    url = f"{PARSE_SERVER_URL}/parse/classes/Goal"
+    data = {
+        "user": {
+            "__type": "Pointer",
+            "className": "_User",
+            "objectId": user_id
+        },
+        "title": title
+    }
+
+    # Add description and keyResults to data dictionary if they are provided
+    if description is not None:
+        data["description"] = description
+    else:
+        data["description"] = ""  # or any default value you see fit
+    
+    if key_results is not None:
+        data["keyResults"] = key_results
+    else:
+        data["keyResults"] = []  # or any default value you see fit
+
+
+    HEADERS = {
+            "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+            "X-Parse-REST-API-Key": PARSE_REST_API_KEY,
+            "X-Parse-Master-Key": PARSE_MASTER_KEY,
+            "Content-Type": "application/json"
+    }
+    response = requests.post(url, headers=HEADERS, data=json.dumps(data))
+    if response.status_code != 201:
+        logger.error(f"Failed to create goal: {response.text}")
+        return None
+    return response.json()
+
+def add_list_of_goals(user_id: str, session_token: str, goals: List[dict]):
+    for goal in goals:
+        key_results = goal.get('key_results', [])
+        description = goal.get('description', [])
+        title = goal.get('title', [])
+        response = create_goal(user_id, session_token, title, description, key_results)
+        if response is not None:
+            logger.info(f"Goal added successfully: {goal['title']}")
+        else:
+            logger.info(f"Failed to add goal: {goal['title']}")
+
+
+def create_memory_graph_node(user_id: str, session_token: str, name: str) -> str:
+    # Endpoint for querying MemoryGraphNode
+    query_url = f"{PARSE_SERVER_URL}/parse/classes/MemoryGraphNode"
+    
+    # Query to check if a MemoryGraphNode with the same name and user_id already exists
+    query_params = {
+        "where": json.dumps({
+            "name": name,
+            "user": {
+                "__type": "Pointer",
+                "className": "_User",
+                "objectId": user_id
+            }
+        })
+    }
+    HEADERS = {
+        "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+        "X-Parse-REST-API-Key": PARSE_REST_API_KEY,
+        "X-Parse-Master-Key": PARSE_MASTER_KEY,
+        "Content-Type": "application/json"
+    }
+    
+    # Send the GET request to check for existing MemoryGraphNode
+    response = requests.get(query_url, headers=HEADERS, params=query_params)
+    
+    # Check the response
+    if response.status_code == 200:
+        data = response.json()
+        if data['results']:
+            # If a node with the same name exists, return its objectId
+            logger.info(f"MemoryGraphNode with name '{name}' already exists.")
+            return data['results'][0]['objectId']
+    else:
+        logger.error(f"Failed to query memory graph node: {response.text}")
+        return None
+    
+    # If no existing node is found, create a new MemoryGraphNode
+    create_url = f"{PARSE_SERVER_URL}/parse/classes/MemoryGraphNode"
+    data = {
+        "name": name,
+        "user": {
+            "__type": "Pointer",
+            "className": "_User",
+            "objectId": user_id
+        },
+    }
+    
+    # Send the POST request to create a new MemoryGraphNode
+    response = requests.post(create_url, headers=HEADERS, data=json.dumps(data))
+    
+    # Check the response
+    if response.status_code != 201:
+        logger.error(f"Failed to create memory graph node: {response.text}")
+        return None
+    
+    # Return the objectId of the new MemoryGraphNode
+    return response.json()['objectId']
+
+def create_memory_graph_relationship(user_id: str, session_token: str, name: str) -> str:
+    # Endpoint for querying MemoryGraphRelationship
+    query_url = f"{PARSE_SERVER_URL}/parse/classes/MemoryGraphRelationship"
+    
+    # Query to check if a MemoryGraphRelationship with the same name and user_id already exists
+    query_params = {
+        "where": json.dumps({
+            "name": name,
+            "user": {
+                "__type": "Pointer",
+                "className": "_User",
+                "objectId": user_id
+            }
+        })
+    }
+    HEADERS = {
+        "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+        "X-Parse-REST-API-Key": PARSE_REST_API_KEY,
+        "X-Parse-Master-Key": PARSE_MASTER_KEY,
+        "Content-Type": "application/json"
+    }
+    
+    # Send the GET request to check for existing MemoryGraphRelationship
+    response = requests.get(query_url, headers=HEADERS, params=query_params)
+    
+    # Check the response
+    if response.status_code == 200:
+        data = response.json()
+        if data['results']:
+            # If a relationship with the same name exists, return its objectId
+            logger.info(f"MemoryGraphRelationship with name '{name}' already exists.")
+            return data['results'][0]['objectId']
+    else:
+        logger.error(f"Failed to query memory graph relationship: {response.text}")
+        return None
+    
+    # If no existing relationship is found, create a new MemoryGraphRelationship
+    create_url = f"{PARSE_SERVER_URL}/parse/classes/MemoryGraphRelationship"
+    data = {
+        "name": name,
+        "user": {
+            "__type": "Pointer",
+            "className": "_User",
+            "objectId": user_id
+        }
+    }
+    
+    # Send the POST request to create a new MemoryGraphRelationship
+    response = requests.post(create_url, headers=HEADERS, data=json.dumps(data))
+    
+    # Check the response
+    if response.status_code != 201:
+        logger.error(f"Failed to create memory graph relationship: {response.text}")
+        return None
+    
+    # Return the objectId of the new MemoryGraphRelationship
+    return response.json()['objectId']
+
+def create_memory_graph(user_id: str, session_token: str, schema: dict, nodes: List[dict], relationships: List[dict]) -> str:
+    # First, create MemoryGraphNodes and MemoryGraphRelationships
+    node_ids = [create_memory_graph_node(user_id, session_token, node['name']) for node in nodes]
+    relationship_ids = [create_memory_graph_relationship(user_id, session_token, rel['name']) for rel in relationships]
+
+    # Endpoint for creating a new MemoryGraph
+    url = f"{PARSE_SERVER_URL}/parse/classes/MemoryGraph"
+    
+    # Data for the new MemoryGraph
+    data = {
+        "user": {
+            "__type": "Pointer",
+            "className": "_User",
+            "objectId": user_id
+        },
+        "schema": schema,
+        "nodes": [
+            {
+                "__type": "Pointer",
+                "className": "MemoryGraphNode",
+                "objectId": node_id
+            } for node_id in node_ids if node_id is not None
+        ],
+        "relationships": [
+            {
+                "__type": "Pointer",
+                "className": "MemoryGraphRelationship",
+                "objectId": relationship_id
+            } for relationship_id in relationship_ids if relationship_id is not None
+        ]
+    }
+    HEADERS = {
+        "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+        "X-Parse-REST-API-Key": PARSE_REST_API_KEY,
+        "X-Parse-Master-Key": PARSE_MASTER_KEY,
+        "Content-Type": "application/json"
+    }
+    
+    # Send the POST request to create a new MemoryGraph
+    response = requests.post(url, headers=HEADERS, data=json.dumps(data))
+    
+    # Check the response
+    if response.status_code != 201:
+        logger.error(f"Failed to create memory graph: {response.text}")
+        return None
+    
+    # Return the objectId of the new MemoryGraph
+    return response.json()['objectId']
+# ... The rest of the CRUD functions for MemoryGraphNode and MemoryGraphRelationship would follow the same pattern ...
+
+def get_user_usecases(user_id: str, session_token: str) -> List[dict]:
+    # Endpoint for fetching Usecases
+    url = f"{PARSE_SERVER_URL}/parse/classes/Usecase"
+    
+    # Query parameters with sorting and limit
+    params = {
+        "where": json.dumps({
+            "user": {
+                "__type": "Pointer",
+                "className": "_User",
+                "objectId": user_id
+            }
+        }),
+        "keys": "name,description,createdAt",  # Include createdAt
+        "order": "-createdAt",  # Sort by createdAt in descending order
+        "limit": 10  # Limit to 10 results
+    }
+
+    HEADERS = {
+        "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+        "X-Parse-REST-API-Key": PARSE_REST_API_KEY,
+        "X-Parse-Master-Key": PARSE_MASTER_KEY,
+        "Content-Type": "application/json"
+    }
+    
+    # Send the GET request to fetch Usecases
+    response = requests.get(url, headers=HEADERS, params=params)
+    
+    # Check the response
+    if response.status_code != 200:
+        logger.error(f"Failed to fetch usecases: {response.text}")
+        return None
+    
+    # Return the list of usecases
+    return response.json().get('results', [])
+
+def extract_usecases(existing_usecases: List[dict]) -> List[dict]:
+    """Extract usecase names and descriptions from the list of usecases."""
+    # Initialize an empty list to hold the usecases
+    usecases = []
+
+    # Check if existing_usecases is None
+    if existing_usecases is None:
+        logger.info("No usecases found. The usecases parameter is None.")
+        return usecases  # Return an empty list
+
+    # Sort usecases by createdAt date (assuming it exists in the data)
+    sorted_usecases = sorted(existing_usecases, key=lambda x: x.get('createdAt', ''), reverse=True)
+
+    # Take only the first 10 usecases
+    for usecase in sorted_usecases[:10]:
+        # Extract name and description
+        name = usecase.get('name')
+        description = usecase.get('description')
+        
+        if name:  # Only add if name exists
+            usecase_info = {
+                'name': name,
+                'description': description or '',  # Use empty string if description is None
+                'status': 'existing'  # Mark as existing usecase
+            }
+            usecases.append(usecase_info)
+    
+    return usecases
+
+def extract_goal_titles(existing_goals: List[dict]) -> List[str]:
+    # Initialize an empty list to hold the goal titles
+    goal_titles = []
+
+    # Check if existing_goals is None
+    if existing_goals is None:
+        logger.info("No goals found. The existing_goals parameter is None.")
+        return goal_titles  # Return an empty list
+
+    # Sort goals by createdAt date (assuming it exists in the data)
+    sorted_goals = sorted(existing_goals, key=lambda x: x.get('createdAt', ''), reverse=True)
+
+    # Take only the first 10 goals
+    for goal in sorted_goals[:10]:
+        goal_titles.append(goal['title'])
+    return goal_titles
+
+
+def get_user_goals(user_id: str, session_token: str) -> List[dict]:
+    # Endpoint for fetching Goals
+    url = f"{PARSE_SERVER_URL}/parse/classes/Goal"
+    
+    # Query parameters to filter goals by user and sort by createdAt
+    params = {
+        "where": json.dumps({
+            "user": {
+                "__type": "Pointer",
+                "className": "_User",
+                "objectId": user_id
+            }
+        }),
+        "keys": "title,description,createdAt",  # Include createdAt
+        "order": "-createdAt",  # Sort by createdAt in descending order
+        "limit": 10  # Limit to 10 results
+    }
+
+    HEADERS = {
+        "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+        "X-Parse-REST-API-Key": PARSE_REST_API_KEY,
+        "X-Parse-Master-Key": PARSE_MASTER_KEY,
+        "Content-Type": "application/json"
+    }
+    
+    # Send the GET request to fetch Goals
+    response = requests.get(url, headers=HEADERS, params=params)
+    
+    # Check the response status
+    if response.status_code != 200:
+        logger.error(f"Failed to fetch goals: {response.text}")
+        return None
+    
+    # Return the list of goals on successful fetch
+    return response.json().get('results', [])
+
+def get_user_memGraph_schema(user_id: str, session_token: str) -> dict:
+    # Endpoint for fetching MemoryGraph
+    url = f"{PARSE_SERVER_URL}/parse/classes/MemoryGraph"
+    
+    # Query parameters to filter by user and sort by createdAt
+    params = {
+        "where": json.dumps({
+            "user": {
+                "__type": "Pointer",
+                "className": "_User",
+                "objectId": user_id
+            }
+        }),
+        "order": "-createdAt"  # Sort by createdAt in descending order
+    }
+
+    HEADERS = {
+        "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+        "X-Parse-REST-API-Key": PARSE_REST_API_KEY,
+        "X-Parse-Master-Key": PARSE_MASTER_KEY,
+        "Content-Type": "application/json"
+    }
+    
+    response = requests.get(url, headers=HEADERS, params=params)
+    
+    if response.status_code != 200:
+        logger.error(f"Failed to fetch memory graph schema: {response.text}")
+        return None
+
+    data = response.json().get('results', [])
+
+    # Temporary storage for nodes and relationships to deduplicate them
+    temp_nodes = {}
+    temp_relationships = {}
+    
+    for item in data:
+        schema = item.get('schema', {})
+        nodes = schema.get('nodes', [])
+        relationships = schema.get('relationships', [])
+        
+        for node in nodes:
+            # Use node name as the key for deduplication
+            temp_nodes[node['name']] = node
+        
+        for relationship in relationships:
+            # Use relationship type as the key for deduplication
+            rel_type = relationship.get('type') or relationship.get('relation_type')
+            if rel_type:
+                temp_relationships[rel_type] = relationship
+            else:
+                logger.warning(f"Relationship without type found: {relationship}")
+   
+    # Convert to lists and limit to 10 items each
+    nodes_list = list(temp_nodes.values())
+    relationships_list = list(temp_relationships.values())
+    
+    # Sort by name/type to ensure consistent results
+    nodes_list.sort(key=lambda x: x.get('name', ''))
+    relationships_list.sort(key=lambda x: x.get('type', '') or x.get('relation_type', ''))
+    
+    combined_schema = {
+        'nodes': nodes_list[:10],  # Limit to 10 nodes
+        'relationships': relationships_list[:10]  # Limit to 10 relationships
+    }
+    
+    return combined_schema
+
+def extract_node_names(nodes: List[dict]) -> List[str]:
+    """
+    Extracts the names of nodes from the list of node dictionaries.
+
+    Parameters:
+    - nodes (list of dict): List of node dictionaries, each containing a 'name' key.
+
+    Returns:
+    - list of str: List of node names.
+    """
+    return [node['name'] for node in nodes]
+
+def extract_relationship_types(relationships: List[dict]) -> List[str]:
+    """
+    Extracts the types of relationships from the list of relationship dictionaries,
+    preferring the 'name' key if available, otherwise the 'type' key.
+
+    Parameters:
+    - relationships (list of dict): List of relationship dictionaries, each containing either a 'name' or 'type' key.
+
+    Returns:
+    - list of str: List of relationship types.
+    """
+    extracted_types = []
+    for relationship in relationships:
+        # Check if 'name' key exists and use it; otherwise, fall back to 'type' if it exists
+        if 'name' in relationship:
+            extracted_types.append(relationship['name'])
+        elif 'type' in relationship:
+            extracted_types.append(relationship['type'])
+        # Optional: Handle the case where neither 'name' nor 'type' exists
+        # else:
+        #     extracted_types.append('Unknown')  # Or any other default value or handling logic
+    return extracted_types
+
+def convert_acl(metadata: dict) -> dict:
+    """Convert custom ACL to Parse ACL format."""
+    acl = {}
+    
+    # Handle user read/write access
+    user_read = metadata.get('user_read_access', [])
+    user_write = metadata.get('user_write_access', [])
+    
+    if isinstance(user_read, str):
+        user_read = json.loads(user_read.replace("'", '"'))
+    if isinstance(user_write, str):
+        user_write = json.loads(user_write.replace("'", '"'))
+    
+    for user_id in set(user_read + user_write):
+        acl[user_id] = {
+            'read': user_id in user_read,
+            'write': user_id in user_write
+        }
+    
+    # Handle role read/write access
+    role_read = metadata.get('role_read_access', [])
+    role_write = metadata.get('role_write_access', [])
+    
+    if isinstance(role_read, str):
+        role_read = json.loads(role_read.replace("'", '"'))
+    if isinstance(role_write, str):
+        role_write = json.loads(role_write.replace("'", '"'))
+    
+    for role in set(role_read + role_write):
+        role_key = f'role:{role}'
+        acl[role_key] = {
+            'read': role in role_read,
+            'write': role in role_write
+        }
+    
+    # Handle workspace read/write access
+    workspace_read = metadata.get('workspace_read_access', [])
+    workspace_write = metadata.get('workspace_write_access', [])
+    
+    if isinstance(workspace_read, str):
+        workspace_read = json.loads(workspace_read.replace("'", '"'))
+    if isinstance(workspace_write, str):
+        workspace_write = json.loads(workspace_write.replace("'", '"'))
+    
+    for workspace in set(workspace_read + workspace_write):
+        workspace_key = f'workspace:{workspace}'
+        acl[workspace_key] = {
+            'read': workspace in workspace_read,
+            'write': workspace in workspace_write
+        }
+    
+    # Note: organization_read_access, organization_write_access, namespace_read_access, 
+    # and namespace_write_access are stored as separate fields in Parse Server (like workspace_read_access),
+    # NOT converted to ACL format. They are handled separately in the MemoryParseServer model.
+    
+    return acl
+
+
+async def update_memory_item_parse(
+    session_token: str, 
+    object_id: str, 
+    update_data: Dict[str, Any],
+    api_key: Optional[str] = None
+) -> bool:
+    """
+    Asynchronously updates an existing memory item in Parse Server.
+
+    Args:
+        session_token (str): The session token for authentication.
+        object_id (str): The ObjectId of the memory item in Parse Server.
+        update_data (Dict[str, Any]): The data to update.
+        api_key (Optional[str]): The API key for authentication.
+    Returns:
+        bool: True if update was successful, False otherwise.
+    """
+    url = f"{PARSE_SERVER_URL}/parse/classes/Memory/{object_id}"
+    
+    try:
+        # Remove empty lists and None values before validation
+        update_data = {k: v for k, v in update_data.items() 
+                      if v is not None and (not isinstance(v, list) or len(v) > 0)}
+        # Also drop empty dicts (but keep operator payloads later)
+        update_data = {
+            k: v for k, v in update_data.items()
+            if not (isinstance(v, dict) and len(v) == 0)
+        }
+        
+        # Fix workspace pointer format if present
+        if 'workspace' in update_data and isinstance(update_data['workspace'], dict):
+            update_data['workspace'] = {
+                "__type": "Pointer",
+                "className": "WorkSpace",
+                "objectId": update_data['workspace'].get('objectId')
+            }
+
+        # Separate Parse operator fields (e.g., {"__op": "Increment", ...}) so Pydantic doesn't strip them
+        operator_fields: Dict[str, Any] = {
+            k: v for k, v in update_data.items()
+            if isinstance(v, dict) and v.get('__op') is not None
+        }
+        non_operator_fields: Dict[str, Any] = {
+            k: v for k, v in update_data.items() if k not in operator_fields
+        }
+
+        # Validate non-operator data using MemoryParseServerUpdate
+        parse_memory = MemoryParseServerUpdate(**non_operator_fields)
+        
+        # Get validated data, excluding None values, empty lists, and fields not explicitly set
+        validated_data: Dict[str, Any] = {
+            k: v for k, v in parse_memory.model_dump(
+                exclude={'createdAt', 'updatedAt'},
+                exclude_none=True,
+                exclude_unset=True,
+            ).items()
+            if v is not None and (not isinstance(v, list) or len(v) > 0)
+        }
+        # Also drop empty dicts that may come from defaults
+        validated_data = {k: v for k, v in validated_data.items() if not (isinstance(v, dict) and len(v) == 0)}
+        # Merge operator fields back (bypass schema intentionally)
+        validated_data.update(operator_fields)
+
+        # Recursively convert datetime objects to Parse Date dicts {"__type":"Date","iso":...}
+        import datetime as _dt
+        def _convert_dt(obj):
+            if isinstance(obj, dict):
+                return {k: _convert_dt(v) for k, v in obj.items()}
+            if isinstance(obj, list):
+                return [_convert_dt(v) for v in obj]
+            if isinstance(obj, _dt.datetime):
+                return {"__type": "Date", "iso": obj.isoformat()}
+            return obj
+        validated_data = _convert_dt(validated_data)
+
+        logger.info(f"Data to update in Parse Server inside update_memory_item_parse: {validated_data}")
+
+        headers = {
+            "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+            "X-Parse-Master-Key": PARSE_MASTER_KEY,
+            "Content-Type": "application/json"
+        }
+        
+        # Retry with exponential backoff for transient errors
+        import asyncio as _asyncio
+        max_attempts = 3
+        backoffs = [0.5, 1.0, 2.0]
+        attempt = 0
+        while attempt < max_attempts:
+            try:
+                async with httpx.AsyncClient() as client:
+                    response = await client.put(
+                        url,
+                        headers=headers,
+                        json=validated_data,
+                        timeout=30.0
+                    )
+                    response.raise_for_status()
+                    if response.status_code in [200, 201]:
+                        logger.info(f"Successfully updated memory item with ObjectId: {object_id}")
+                        return True
+                    logger.error(f"Failed to update memory item {object_id}: {response.status_code} - {response.text}")
+                    return False
+            except httpx.HTTPStatusError as he:
+                status = getattr(he.response, "status_code", None)
+                body = getattr(he.response, "text", "")
+                logger.error(f"HTTP status error updating memory item {object_id}: {status} - {body}")
+                # Retry on transient errors
+                if status in {408, 429, 500, 502, 503, 504} and attempt < max_attempts - 1:
+                    await _asyncio.sleep(backoffs[attempt])
+                    attempt += 1
+                    continue
+                return False
+            except (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.ConnectError, httpx.RemoteProtocolError, httpx.RequestError) as re:
+                logger.error(f"HTTP request error updating memory item {object_id}: {re}")
+                if attempt < max_attempts - 1:
+                    await _asyncio.sleep(backoffs[attempt])
+                    attempt += 1
+                    continue
+                return False
+            except Exception as e:
+                logger.error(f"Unexpected error updating memory item {object_id}: {e}")
+                return False
+                
+    except ValidationError as ve:
+        logger.error(f"Validation error with update data: {ve}")
+        return False
+    except httpx.HTTPError as e:
+        logger.error(f"HTTP error updating memory item {object_id}: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"Error updating memory item: {e}")
+        return False
+
+async def store_memory_item(user_id: str, session_token: str, memory_item: MemoryItem, api_key: Optional[str] = None, developer_user_object_id: Optional[str] = None) -> Optional[ParseStoredMemory]:
+    """
+    Asynchronously store a memory item based on its type.
+    """
+    if memory_item.type == "IssueMemoryItem":
+        return await store_issue_memory_item(user_id, session_token, memory_item, api_key=api_key)
+    else:
+        return await store_generic_memory_item(user_id, session_token, memory_item, api_key=api_key, developer_user_object_id=developer_user_object_id)
+
+def convert_comma_string_to_list(value: Union[str, List, None]) -> List[str]:
+    """Convert a comma-separated string to a list of strings."""
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str):
+        return [item.strip() for item in value.split(',') if item.strip()]
+    return []
+
+def remove_none_recursive(obj):
+    if isinstance(obj, dict):
+        return {k: remove_none_recursive(v) for k, v in obj.items() if v is not None}
+    elif isinstance(obj, list):
+        return [remove_none_recursive(v) for v in obj if v is not None]
+    else:
+        return obj
+
+async def store_generic_memory_item(
+    user_id: str, 
+    session_token: str, 
+    memory_item: MemoryItem,
+    api_key: Optional[str] = None,
+    developer_user_object_id: Optional[str] = None
+) -> Optional[ParseStoredMemory]:
+    # At the start of the function
+    metadata = None
+    custom_metadata = None
+    logger.info(f"Entering store_generic_memory_item with memory_item metadata: {memory_item.metadata}")
+    logger.info(f"session_token: {session_token}")
+    
+    # Define the fields we want Parse to return based on ParseStoredMemory model
+    fields_param = (
+        "objectId,createdAt,updatedAt,ACL,content,metadata,sourceType,context,"
+        "title,location,emojiTags,hierarchicalStructures,type,sourceUrl,"
+        "conversationId,memoryId,topics,steps,current_step,memoryChunkIds,"
+        "user.objectId,user.displayName,user.fullname,user.profileimage,user.title,user.isOnline,"
+        "workspace,post,postMessage,organization,namespace,customMetadata,role,category,"
+        ""
+        "external_user_read_access,external_user_write_access,user_read_access,user_write_access,"
+        "workspace_read_access,workspace_write_access,role_read_access,role_write_access,"
+        "namespace_read_access,namespace_write_access,organization_read_access,organization_write_access"
+    )
+    # Note: keys parameter is only for GET/query requests, not POST/create requests
+    # Use runtime function to get URL (applies localhost override for open-source local testing)
+    parse_url = get_parse_server_url()
+    url = f"{parse_url}/parse/classes/Memory"
+    logger.info(f"URL: {url}")
+
+    # Extract metadata
+    metadata = memory_item.metadata
+    if isinstance(metadata, str):
+        try:
+            metadata = json.loads(metadata)
+        except json.JSONDecodeError:
+            metadata = {}
+    
+    # After extracting metadata
+    logger.info(f"Extracted metadata: {metadata}")
+    developer_user_pointer = None
+    # Option 1: If you store just the external_user_id in metadata
+    external_user_id = metadata.get('external_user_id')
+    if external_user_id and developer_user_object_id:
+        developer_user_pointer = DeveloperUserPointer(
+            objectId=developer_user_object_id,
+            className='DeveloperUser',
+            external_id=external_user_id
+        )
+    # Option 2: If you store a full developerUser dict in metadata
+    elif isinstance(metadata.get('developerUser'), dict) and developer_user_object_id:
+        dev = metadata['developerUser']
+        developer_user_pointer = DeveloperUserPointer(
+            objectId=developer_user_object_id,
+            className='DeveloperUser',
+            external_id=dev.get('external_id'),
+            metadata=dev.get('metadata'),
+            email=dev.get('email')
+        )
+        # Ensure memoryChunkIds is a proper array
+    memory_chunk_ids = metadata.get('memoryChunkIds', [])
+    if isinstance(memory_chunk_ids, str):
+        try:
+            memory_chunk_ids = json.loads(memory_chunk_ids)
+        except json.JSONDecodeError:
+            memory_chunk_ids = [id.strip() for id in memory_chunk_ids.strip('[]').split(',') if id.strip()]
+    
+    # After processing memoryChunkIds
+    logger.info(f"Processed memoryChunkIds from metadata: {memory_chunk_ids}")
+    logger.info(f"Type of memoryChunkIds: {type(memory_chunk_ids)}")
+    
+    # Ensure memory_chunk_ids is a list of strings
+    if isinstance(memory_chunk_ids, list):
+        memory_chunk_ids = [str(id).strip() for id in memory_chunk_ids if id]
+    else:
+        memory_chunk_ids = []
+    
+    metadata['memoryChunkIds'] = memory_chunk_ids
+    logger.info(f"memoryChunkIds in metadata in store_generic_memory_item: {memory_chunk_ids}")
+
+    memory_id_str = str(memory_item.id)
+    logger.info(f"Memory item ID: {memory_id_str}")
+    # --- Ensure context is always a list for Parse Server ---
+    if memory_item.context is None:
+        context = []
+    elif isinstance(memory_item.context, list):
+        context = memory_item.context
+    elif isinstance(memory_item.context, str):
+        try:
+            context = json.loads(memory_item.context)
+            if not isinstance(context, list):
+                context = [context]
+        except Exception:
+            context = [memory_item.context]
+    else:
+        context = [memory_item.context]
+    logger.info(f"Context (as list): {context}")
+    # Convert custom ACL to Parse ACL
+    parse_acl = convert_acl(metadata)
+
+    try:
+       # Pre-process list fields to ensure proper format before Pydantic validation
+        emoji_tags = convert_comma_string_to_list(
+            metadata.get('emojiTags') or 
+            metadata.get('emoji_tags') or 
+            metadata.get('emoji tags')
+        )
+        emotion_tags = convert_comma_string_to_list(
+            metadata.get('emotionTags') or 
+            metadata.get('emotion_tags') or 
+            metadata.get('emotion tags')
+        )
+        topics = convert_comma_string_to_list(metadata.get('topics'))
+        steps = convert_comma_string_to_list(metadata.get('steps'))
+
+        # --- Clean metadata and customMetadata before sending to Parse Server ---
+        if metadata:
+            # Extract customMetadata before cleaning
+            custom_metadata = metadata.get('customMetadata')
+            metadata = remove_none_recursive(metadata)
+            # Remove 'customMetadata' key from metadata if present
+            if 'customMetadata' in metadata:
+                del metadata['customMetadata']
+            
+        if custom_metadata:
+            custom_metadata = remove_none_recursive(custom_metadata)
+
+        logger.info(f"custom_metadata inside store_generic_memory_item: {custom_metadata}")
+
+        # Create base arguments dictionary
+        parse_memory_args = {
+            "ACL": parse_acl,
+            "user": ParsePointer(
+                __type="Pointer",
+                className="_User",
+                objectId=user_id
+            ),
+            "content": memory_item.content,
+            "sourceType": metadata.get('sourceType', ""),
+            "context": context,
+            "title": metadata.get("title", ""),
+            "location": metadata.get("location", ""),
+            "emojiTags": emoji_tags,
+            "emotionTags": emotion_tags,
+            "hierarchicalStructures": (
+                metadata.get('hierarchicalStructures') or 
+                metadata.get('hierarchical_structures') or 
+                metadata.get('hierarchical structures') or 
+                ""
+            ),
+            "type": memory_item.type,
+            "sourceUrl": metadata.get('sourceUrl', ""),
+            "conversationId": metadata.get("conversationId", ""),
+            "role": metadata.get('role'),
+            "category": metadata.get('category'),
+            "memoryId": memory_id_str,
+            "topics": topics,
+            "steps": steps,
+            "current_step": metadata.get('current_step'),
+            "memoryChunkIds": memory_chunk_ids,
+            "metrics": metadata.get('metrics', {}),
+            "external_user_read_access": metadata.get('external_user_read_access', []),
+            "external_user_write_access": metadata.get('external_user_write_access', []),
+            "user_read_access": metadata.get('user_read_access', []),
+            "user_write_access": metadata.get('user_write_access', []),
+            "workspace_read_access": metadata.get('workspace_read_access', []),
+            "workspace_write_access": metadata.get('workspace_write_access', []),
+            "role_read_access": metadata.get('role_read_access', []),
+            "role_write_access": metadata.get('role_write_access', []),
+            "namespace_read_access": metadata.get('namespace_read_access', []),
+            "namespace_write_access": metadata.get('namespace_write_access', []),
+            "organization_read_access": metadata.get('organization_read_access', []),
+            "organization_write_access": metadata.get('organization_write_access', [])
+        }
+
+        # Add document-specific fields only if type is DocumentMemoryItem
+        if memory_item.type == "DocumentMemoryItem":
+            document_fields = {
+                "page_number": metadata.get('page_number'),
+                "total_pages": metadata.get('total_pages'),
+                "upload_id": metadata.get('upload_id'),
+                "filename": metadata.get('filename'),
+                "page": metadata.get('page'),
+                "file_url": metadata.get('file_url')
+            }
+            # Use file_url as sourceUrl if sourceUrl is empty string and file_url exists
+            if parse_memory_args["sourceUrl"].strip() == "" and document_fields.get("file_url"):
+                parse_memory_args["sourceUrl"] = document_fields["file_url"]
+            parse_memory_args.update(document_fields)
+
+        # Prepare developerUser pointer for Parse Server
+        developer_user_pointer_dict = None
+        if developer_user_pointer:
+            developer_user_pointer_dict = {
+                "__type": "Pointer",
+                "className": "DeveloperUser",
+                "objectId": developer_user_object_id
+            }
+
+        # Create MemoryParseServer object with all fields
+        parse_server_kwargs = dict(parse_memory_args)
+        if isinstance(custom_metadata, dict) and custom_metadata:
+            parse_server_kwargs["customMetadata"] = custom_metadata
+        if developer_user_pointer_dict and developer_user_pointer_dict["objectId"]:
+            parse_server_kwargs["developerUser"] = developer_user_pointer_dict
+        parse_memory = MemoryParseServer(
+            **parse_server_kwargs
+        )
+
+        logger.info(f"parse_memory: {parse_memory}")
+
+        # Add workspace pointer if available
+        workspace_id = metadata.get("workspace_id")
+        if workspace_id and workspace_id.strip() and workspace_id.lower() != "none":
+            parse_memory.workspace = ParsePointer(
+                __type="Pointer",
+                className="WorkSpace",
+                objectId=workspace_id
+            )
+
+        # Set multi-tenant pointers (organization, namespace) if IDs present in metadata
+        org_id = metadata.get("organization_id")
+        ns_id = metadata.get("namespace_id")
+        if org_id and str(org_id).strip().lower() != "none":
+            parse_memory.organization = OrganizationPointer(objectId=str(org_id))
+        if ns_id and str(ns_id).strip().lower() != "none":
+            parse_memory.namespace = NamespacePointer(objectId=str(ns_id))
+
+        # Add post pointer if available
+        page_id = metadata.get("pageId")
+        if page_id and str(page_id).lower() != "none" and page_id.strip():
+            parse_memory.post = ParsePointer(
+                __type="Pointer",
+                className="Post",
+                objectId=page_id
+            )
+
+        # Add postMessage pointer if available
+        post_message_id = metadata.get("postMessageId")
+        if post_message_id and str(post_message_id).lower() != "none" and post_message_id.strip():
+            parse_memory.postMessage = ParsePointer(
+                __type="Pointer",
+                className="PostMessage",
+                objectId=post_message_id
+            )
+
+        # Before creating parse_memory
+        logger.info(f"Creating ParseMemoryServer with memoryChunkIds: {memory_chunk_ids}")
+        
+        # Convert to dict and remove None values
+        logger.info(f"parse_memory before model_dump: {parse_memory}")
+        data = parse_memory.model_dump(exclude_none=True)
+        logger.info(f"data after model_dump: {data}")
+        
+        # After creating parse_memory
+        logger.info(f"Created parse_memory object with memoryChunkIds: {parse_memory.memoryChunkIds}")
+        
+        # Before converting to dict
+        logger.info(f"Final parse_memory object before dict conversion: {parse_memory}")
+        
+        # Log the final data structure
+        logger.info(f"Final data structure before sending to Parse Server: {json.dumps(data, indent=2)}")
+        logger.info(f"Type of memoryChunkIds in data: {type(data.get('memoryChunkIds'))}")
+        logger.info(f"Value of memoryChunkIds in data: {data.get('memoryChunkIds')}")
+        logger.info(f"Actual JSON string for memoryChunkIds: {json.dumps(data.get('memoryChunkIds'))}")
+
+        # Always use master key for server-to-server writes (avoids auth errors)
+        headers = {
+            "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+            "X-Parse-Master-Key": PARSE_MASTER_KEY,
+            "Content-Type": "application/json"
+        }
+
+        async with httpx.AsyncClient() as client:
+            # Prepare the data dict
+            data = parse_memory.model_dump()
+            # Ensure all pointer fields use '__type': 'Pointer'
+            for pointer_field in [
+                "user",
+                "workspace",
+                "developerUser",
+                "node",
+                "postMessage",
+                "post",
+                # Multi-tenant pointers
+                "organization",
+                "namespace",
+            ]:
+                if pointer_field in data and isinstance(data[pointer_field], dict):
+                    if 'type' in data[pointer_field]:
+                        data[pointer_field]['__type'] = data[pointer_field].pop('type')
+            # Remove all None fields recursively
+            data = remove_none_recursive(data)
+
+            # Remove empty lists, empty dicts, and empty strings (except for required fields)
+            required_fields = {"content", "type", "user"}
+            def is_not_empty(key, value):
+                if key in required_fields:
+                    return True
+                if value is None:
+                    return False
+                if isinstance(value, (list, dict)) and not value:
+                    return False
+                if isinstance(value, str) and value.strip() == "":
+                    return False
+                return True
+            data = {k: v for k, v in data.items() if is_not_empty(k, v)}
+
+            # Special: remove 'context' if it's an empty list
+            if 'context' in data and isinstance(data['context'], list) and not data['context']:
+                del data['context']
+            # Special: remove 'metadata' and 'metrics' if they are empty dicts
+            for field in ['metadata', 'metrics']:
+                if field in data and isinstance(data[field], dict) and not data[field]:
+                    del data[field]
+
+            # Log the final data
+            logger.info(f"Final data structure before sending to Parse Server (no None/empty fields): {json.dumps(data, indent=2)}")
+
+            # Log URL and headers for debugging
+            logger.info(f"Parse Server URL: {url}")
+            logger.info(f"Parse Server headers: {json.dumps(headers, indent=2)}")
+
+            # Send to Parse Server
+            response = await client.post(
+                url,
+                headers=headers,
+                json=data,
+                timeout=30.0
+            )
+
+            # Log the response details for debugging
+            logger.info(f"Parse Server response status: {response.status_code}")
+            logger.info(f"Parse Server response headers: {dict(response.headers)}")
+
+            # Read response text safely once
+            try:
+                response_text = response.text
+                logger.info(f"Parse Server response text: {response_text}")
+            except Exception as e:
+                logger.error(f"Could not read response text: {e}")
+
+            # If the server rejects org/namespace pointer schema, retry without them to avoid blocking quick-add
+            if response.status_code == 400 and isinstance(response_text, str) and (
+                "schema mismatch for Memory.organization" in response_text or
+                "schema mismatch for Memory.namespace" in response_text
+            ):
+                logger.warning("Parse schema mismatch for organization/namespace detected; retrying without these pointers")
+                retry_data = dict(data)
+                retry_data.pop("organization", None)
+                retry_data.pop("namespace", None)
+                response = await client.post(
+                    url,
+                    headers=headers,
+                    json=retry_data,
+                    timeout=30.0
+                )
+                logger.info(f"Retry Parse response status: {response.status_code}")
+                try:
+                    logger.info(f"Retry Parse response text: {response.text}")
+                except Exception:
+                    pass
+
+            response.raise_for_status()
+
+            if response.status_code == 201:
+                logger.info("Memory item successfully stored.")
+                response_data = response.json()
+                logger.info(f"Parse Server response data: {json.dumps(response_data, indent=2)}")
+                logger.info(f"memoryChunkIds in Parse response: {response_data.get('memoryChunkIds')}")
+                
+                # Get user data from Parse response or create minimal user object
+                user_data = response_data.get("user", {})
+                user = {
+                    "objectId": user_id,
+                    "__type": "Pointer",  
+                    "className": "_User", 
+                    "displayName": user_data.get("displayName"),
+                    "fullname": user_data.get("fullname"),
+                    "profileimage": user_data.get("profileimage"),
+                    "title": user_data.get("title"),
+                    "isOnline": user_data.get("isOnline")
+                }
+
+                # Log the values we'll use for memoryChunkIds
+                logger.info(f"memory_chunk_ids from local: {memory_chunk_ids}")
+                logger.info(f"memoryChunkIds from response: {response_data.get('memoryChunkIds')}")
+                logger.info(f"Will use: {response_data.get('memoryChunkIds', memory_chunk_ids)}")
+
+                # Create base arguments dictionary for ParseStoredMemory
+                stored_memory_args = {
+                    "objectId": response_data["objectId"],
+                    "createdAt": response_data.get("createdAt"),
+                    "updatedAt": response_data.get("updatedAt"),
+                    "ACL": parse_acl,
+                    "content": memory_item.content,
+                    "sourceType": metadata.get('sourceType', ""),
+                    "context": context,
+                    "title": metadata.get("title"),
+                    "location": metadata.get("location"),
+                    # Use data from the validated MemoryParseServer object
+                    "emojiTags": data.get("emojiTags", []),
+                    "emotionTags": data.get("emotionTags", []),
+                    "hierarchicalStructures": data.get("hierarchicalStructures", ""),
+                    "type": memory_item.type,
+                    "sourceUrl": data.get("sourceUrl", ""),
+                    "conversationId": data.get("conversationId", ""),
+                    "memoryId": memory_id_str,
+                    "topics": data.get("topics", []),
+                    "steps": data.get("steps", []),
+                    "current_step": data.get("current_step"),
+                    # Use memoryChunkIds from Parse response instead of local variable
+                    "memoryChunkIds": response_data.get("memoryChunkIds", memory_chunk_ids),
+                    "user": ParseUserPointer(**user),
+                    # Add optional pointers if they exist in data
+                    "workspace": data.get("workspace"),
+                    "post": data.get("post"),
+                    "postMessage": data.get("postMessage"),
+                    # Include multi-tenant pointers if present
+                    "organization": data.get("organization"),
+                    "namespace": data.get("namespace"),
+                    "external_user_read_access": data.get("external_user_read_access", []),
+                    "external_user_write_access": data.get("external_user_write_access", []),
+                    "user_read_access": data.get("user_read_access", []),
+                    "user_write_access": data.get("user_write_access", []),
+                    "workspace_read_access": data.get("workspace_read_access", []),
+                    "workspace_write_access": data.get("workspace_write_access", []),
+                    "role_read_access": data.get("role_read_access", []),
+                    "role_write_access": data.get("role_write_access", []),
+                    "namespace_read_access": data.get("namespace_read_access", []),
+                    "namespace_write_access": data.get("namespace_write_access", []),
+                    "organization_read_access": data.get("organization_read_access", []),
+                    "organization_write_access": data.get("organization_write_access", []),
+                    # Add role and category as primary fields
+                    "role": metadata.get("role"),
+                    "category": metadata.get("category")
+                }
+
+                # Add developerUser pointer if present
+                if developer_user_pointer is not None:
+                    stored_memory_args["developerUser"] = developer_user_pointer
+
+                # Add customMetadata if present and not None
+                if custom_metadata is not None:
+                    stored_memory_args["customMetadata"] = custom_metadata
+
+                # Add document-specific fields if type is DocumentMemoryItem
+                if memory_item.type == "DocumentMemoryItem":
+                    document_fields = {
+                        "page_number": metadata.get('page_number'),
+                        "total_pages": metadata.get('total_pages'),
+                        "upload_id": metadata.get('upload_id'),
+                        "filename": metadata.get('filename'),
+                        "page": metadata.get('page'),
+                        "file_url": metadata.get('file_url')
+                    }
+                    stored_memory_args.update(document_fields)
+
+                # Remove customMetadata from stored_memory_args if present and None
+                if 'customMetadata' in stored_memory_args and stored_memory_args['customMetadata'] is None:
+                    stored_memory_args.pop('customMetadata')
+
+                # Remove all other keys with None values
+                stored_memory_args = {k: v for k, v in stored_memory_args.items() if v is not None}
+
+                # Only add customMetadata if it's a dict (not None)
+                if isinstance(custom_metadata, dict):
+                    stored_memory_args['customMetadata'] = custom_metadata
+
+                stored_memory = ParseStoredMemory(**stored_memory_args)
+                
+                logger.info(f"Created ParseStoredMemory with memoryChunkIds: {stored_memory.memoryChunkIds}")
+                logger.info("Successfully created ParseStoredMemory object")
+                return stored_memory
+            else:
+                logger.error(f"Failed to store memory item: {response.text}")
+                return None
+
+    except ValidationError as ve:
+        logger.error(f"Validation error creating MemoryParseServer object: {ve}")
+        return None
+    except httpx.HTTPError as e:
+        logger.error(f"HTTP error storing memory item: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Error storing memory item: {e}")
+        return None
+
+def convert_neo_item_to_memory_item(neo_item: dict) -> dict:
+    """
+    Converts a Neo4j memory item dictionary into a MemoryItem dictionary with metadata.
+
+    Args:
+        neo_item (dict): The memory item fetched from Neo4j.
+
+    Returns:
+        MemoryItem: A MemoryItem dictionary with all required fields, including metadata.
+    """
+    # Extract metadata fields from neo_item, providing defaults if necessary
+    metadata = {
+        'workspace_id': neo_item.get('workspace_id', ''),
+        'title': neo_item.get('title', 'Untitled'),
+        'location': neo_item.get('location', 'online'),
+        'hierarchical_structures': neo_item.get('hierarchical_structures', 'general'),
+        'sourceType': neo_item.get('sourceType', 'papr'),
+        'sourceUrl': neo_item.get('sourceUrl', ''),
+        'current_step': neo_item.get('current_step', ''),
+        'steps': neo_item.get('steps', []),
+        'emoji_tags': neo_item.get('emoji_tags', ''),
+        'topics': neo_item.get('topics', ''),
+        'type': neo_item.get('type', 'text'),  # Add type field with default 'text'
+        'memoryChunkIds': neo_item.get('memoryChunkIds', []),
+        # Add role and category from Neo4j properties
+        'role': neo_item.get('memory_role'),
+        'category': neo_item.get('memory_category')
+
+        # Add other necessary fields as required
+    }
+
+    # Handle ACL-related fields if they exist
+    acl_fields = {
+        'user_read_access': neo_item.get('user_read_access', [neo_item.get('user_id')]),
+        'user_write_access': neo_item.get('user_write_access', [neo_item.get('user_id')]),
+        'workspace_read_access': neo_item.get('workspace_read_access', []),
+        'workspace_write_access': neo_item.get('workspace_write_access', []),
+        'role_read_access': neo_item.get('role_read_access', []),
+        'role_write_access': neo_item.get('role_write_access', []),
+        'namespace_read_access': neo_item.get('namespace_read_access', []),
+        'namespace_write_access': neo_item.get('namespace_write_access', []),
+        'organization_read_access': neo_item.get('organization_read_access', []),
+        'organization_write_access': neo_item.get('organization_write_access', []),
+    }
+
+    # Incorporate ACL fields into metadata
+    metadata.update(acl_fields)
+
+    # Assign the constructed metadata to the neo_item
+    neo_item['metadata'] = metadata
+
+    # Optionally, remove fields from neo_item that are now part of metadata to avoid redundancy
+    fields_to_remove = [
+        'workspace_id',
+        'title',
+        'location',
+        'hierarchical structures',
+        'sourceType',
+        'sourceUrl',
+        'current_step',
+        'steps',
+        'emoji_tags',
+        'topics',
+        'user_read_access',
+        'user_write_access',
+        'workspace_read_access',
+        'workspace_write_access',
+        'role_read_access',
+        'role_write_access',
+    ]
+
+    for field in fields_to_remove:
+        neo_item.pop(field, None)
+
+    return neo_item
+
+def flatten_neo_item_to_parse_item(neo_item: dict) -> dict:
+    """
+    Flattens a Neo4j memory item by merging metadata into the top level and adjusting field formats.
+
+    Args:
+        neo_item (dict): The memory item fetched from Neo4j, potentially containing a 'metadata' dict.
+
+    Returns:
+        dict: A flattened memory item dictionary formatted for Parse Server.
+    """
+    if not isinstance(neo_item, dict):
+        raise ValueError("Input neo_item must be a dictionary.")
+
+    # Create a copy to avoid mutating the original neo_item
+    parse_item = neo_item.copy()
+
+    # Extract and remove 'metadata' from the neo_item
+    metadata = parse_item.pop('metadata', {})
+
+    if not isinstance(metadata, dict):
+        logger.warning("Metadata is not a dictionary. Skipping flattening metadata.")
+        metadata = {}
+
+    # Define key mappings: Neo4j keys to Parse Server keys
+    key_mappings = {
+        'emoji_tags': 'emojiTags',
+        'hierarchical_structures': 'hierarchicalStructures',
+        'id': 'memoryId',
+        # Add more mappings as needed
+    }
+
+    # Define fields to remove from the parse_item
+    fields_to_remove = [
+        'workspace_write_access',
+        'workspace_read_access',
+        'user_write_access',
+        'user_read_access',
+        'hierarchicalStructures',
+        'role_read_access',
+        'role_write_access',
+        'namespace_read_access',
+        'namespace_write_access',
+        'organization_read_access',
+        'organization_write_access'
+    ]
+
+    # Flatten metadata into parse_item with key renaming and data type conversions
+    for key, value in metadata.items():
+        parse_key = key_mappings.get(key, key)
+        
+        # Handle specific fields
+        if parse_key == 'emojiTags':
+            parse_item[parse_key] = [tag.strip() for tag in value.split(',') if tag.strip()] if isinstance(value, str) else (value if isinstance(value, list) else [])
+        elif parse_key == 'hierarchicalStructures':
+            # Rename and keep as string without converting to list
+            parse_item[parse_key] = value.strip() if isinstance(value, str) else ""
+        else:
+            parse_item[parse_key] = value
+
+    # Remove unnecessary fields after mapping
+    for field in fields_to_remove:
+        parse_item.pop(field, None)  # Use pop with default to avoid KeyError if field is not present
+
+    return parse_item
+
+def store_issue_memory_item(user_id: str, session_token: str, memory_item: MemoryItem):
+    url = f"{PARSE_SERVER_URL}/parse/classes/Issue"
+    logger.info(f"URL: {url}")
+
+    memory_id_str = str(memory_item.id)
+    metadata = str(memory_item.metadata)
+    sourceType = memory_item.metadata.get('sourceType')
+    sourceUrl = memory_item.metadata.get('sourceUrl')
+
+    # Get memoryChunkIds from metadata if available
+    memoryChunkIds = memory_item.metadata.get('memoryChunkIds', [])
+
+    acl = {
+        user_id: {
+            "read": True,
+            "write": True
+        },
+        "*": {
+            "read": False,
+            "write": False
+        }
+    }
+
+    data = {
+        "ACL": acl,
+        "user": {
+            "__type": "Pointer",
+            "className": "_User",
+            "objectId": user_id
+        },
+        "content": memory_item.content,
+        "metadata": metadata,
+        "sourceType": sourceType,
+        "sourceUrl": sourceUrl, 
+        "workspace": {
+            "__type": "Pointer",
+            "className": "WorkSpace",
+            "objectId": memory_item.metadata.get("workspace_id")
+        },
+        "title": memory_item.metadata.get("title"),
+        "url": memory_item.metadata.get("url"),
+        "updatedAt": convert_to_parse_date(memory_item.metadata.get("updatedAt")),
+        "creator": memory_item.metadata.get("creator"),
+        "assignee": memory_item.metadata.get("assignee"),
+        "project": memory_item.metadata.get("project"),
+        "team": memory_item.metadata.get("team"),
+        "tenant": memory_item.metadata.get("tenant"),
+        "stream": memory_item.metadata.get("stream"),
+        "status": memory_item.metadata.get("status"),
+        "hierarchicalStructures": memory_item.metadata.get("hierarchical structures"),
+        "type": memory_item.type,
+        "linearId": memory_item.metadata.get("linear-id"),
+        "connector": memory_item.metadata.get("connector"),
+        "memoryId": memory_id_str,
+        "topics": memory_item.metadata.get("topics"),
+        "memoryChunkIds": memoryChunkIds  # Add pinecone chunk IDs
+    }
+
+    HEADERS = {
+        "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+        "X-Parse-REST-API-Key": PARSE_REST_API_KEY,
+        "X-Parse-Master-Key": PARSE_REST_API_KEY,   
+        "Content-Type": "application/json"
+    }
+
+    data = {k: v for k, v in data.items() if v is not None}
+    response = requests.post(url, headers=HEADERS, data=json.dumps(data))
+
+    if response.status_code != 201:
+        logger.error(f"Failed to store issue memory item: {response.text}")
+        return None
+
+    logger.info("Issue memory item successfully stored.")
+    return response.json()
+
+def convert_to_parse_date(date_string: str) -> dict:
+    try:
+        dt = datetime.fromisoformat(date_string.replace("Z", "+00:00"))
+        return {
+            "__type": "Date",
+            "iso": dt.isoformat()
+        }
+    except ValueError:
+        logger.error(f"Invalid date format: {date_string}")
+        return None
+    
+def map_metadata_to_parse_fields(metadata: dict, node_name: str = None, relationships_json: dict = None) -> dict:
+       """
+       Maps specific metadata fields to Parse Server's expected fields.
+
+       Parameters:
+           metadata (dict): The original metadata dictionary.
+           node_name (str): The name of the node.
+           relationships_json (dict): The relationships in JSON format.
+
+       Returns:
+           dict: A dictionary containing only the fields relevant to Parse Server.
+       """
+       data = {}
+
+       if 'title' in metadata:
+           data["title"] = metadata["title"]
+
+       if 'location' in metadata:
+           data["location"] = metadata["location"]
+
+       if 'emoji tags' in metadata:
+           emoji_tags = metadata.get('emoji tags', [])
+           if isinstance(emoji_tags, str):
+               # Split the string by commas and strip whitespace
+               emoji_tags = [tag.strip() for tag in emoji_tags.split(',')]
+           data["emojiTags"] = emoji_tags
+
+       if 'hierarchical structures' in metadata:
+           data["hierarchicalStructures"] = metadata.get("hierarchical structures")
+
+       if 'type' in metadata:
+           data["type"] = metadata.get("type")
+
+       if 'sourceUrl' in metadata:
+           data["sourceUrl"] = metadata.get("sourceUrl")
+
+       if 'conversationId' in metadata:
+           data["conversationId"] = metadata.get("conversationId")
+
+       if 'topics' in metadata:
+           topics = metadata.get('topics', [])
+           if isinstance(topics, str):
+               # Split the string by commas and strip whitespace
+               topics = [topic.strip() for topic in topics.split(',')]
+           data["topics"] = topics
+
+       if 'role' in metadata:
+           data["role"] = metadata.get("role")
+       
+       if 'category' in metadata:
+           data["category"] = metadata.get("category")
+
+       # ACL fields for fine-grained access control
+       if 'user_read_access' in metadata:
+           data["user_read_access"] = metadata.get("user_read_access", [])
+       if 'user_write_access' in metadata:
+           data["user_write_access"] = metadata.get("user_write_access", [])
+       if 'workspace_read_access' in metadata:
+           data["workspace_read_access"] = metadata.get("workspace_read_access", [])
+       if 'workspace_write_access' in metadata:
+           data["workspace_write_access"] = metadata.get("workspace_write_access", [])
+       if 'role_read_access' in metadata:
+           data["role_read_access"] = metadata.get("role_read_access", [])
+       if 'role_write_access' in metadata:
+           data["role_write_access"] = metadata.get("role_write_access", [])
+       if 'namespace_read_access' in metadata:
+           data["namespace_read_access"] = metadata.get("namespace_read_access", [])
+       if 'namespace_write_access' in metadata:
+           data["namespace_write_access"] = metadata.get("namespace_write_access", [])
+       if 'organization_read_access' in metadata:
+           data["organization_read_access"] = metadata.get("organization_read_access", [])
+       if 'organization_write_access' in metadata:
+           data["organization_write_access"] = metadata.get("organization_write_access", [])
+
+       if 'memoryChunkIds' in metadata:
+           memory_chunk_ids = metadata.get('memoryChunkIds', [])
+           if isinstance(memory_chunk_ids, str):
+               try:
+                   memory_chunk_ids = json.loads(memory_chunk_ids)
+               except json.JSONDecodeError:
+                   memory_chunk_ids = [id.strip() for id in memory_chunk_ids.strip('[]').split(',') if id.strip()]
+           data["memoryChunkIds"] = memory_chunk_ids
+
+       # Add other fields if necessary
+       if node_name:
+           data["node_name"] = node_name
+
+       if relationships_json:
+           data["relationship_json"] = relationships_json
+
+       return data
+
+async def delete_memory_item_parse(
+    memory_item_id: str
+) -> bool:
+    """
+    Asynchronously deletes a memory item from Parse Server.
+    
+    Args:
+        memory_item_id (str): The objectId of the memory item to delete
+    
+    Returns:
+        bool: True if deletion was successful, False otherwise
+    """
+    if not memory_item_id:
+        logger.error("Memory item ID is required for deletion.")
+        return False
+
+    url = f"{PARSE_SERVER_URL}/parse/classes/Memory/{memory_item_id}"
+    logger.info(f"Attempting to delete memory item with ID {memory_item_id}")
+    logger.info(f"Delete URL: {url}")
+    logger.info(f"Parse Server URL: {PARSE_SERVER_URL}")
+    logger.info(f"Parse Application ID: {PARSE_APPLICATION_ID[:10]}...")
+    logger.info(f"Parse Master Key: {PARSE_MASTER_KEY[:10]}...")
+
+    headers = {
+        "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+        "X-Parse-Master-Key": PARSE_MASTER_KEY,
+        "Content-Type": "application/json"
+    }
+    
+    logger.info(f"Request headers: {headers}")
+
+    try:
+        logger.info(f"Creating httpx client for Parse Server deletion...")
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            logger.info(f"Sending DELETE request to {url}")
+            response = await client.delete(
+                url, 
+                headers=headers, 
+                timeout=30.0
+            )
+            
+            # Log the response for debugging
+            logger.info(f"Delete response status code: {response.status_code}")
+            logger.info(f"Delete response headers: {dict(response.headers)}")
+            if response.text:  # Some DELETE responses might be empty
+                logger.info(f"Delete response text: {response.text}")
+            else:
+                logger.info("Delete response text: (empty)")
+
+            if response.status_code == 200:
+                logger.info(f"Successfully deleted memory item with ID: {memory_item_id}")
+                return True
+            else:
+                logger.error(f"Failed to delete memory item. Status code: {response.status_code}")
+                logger.error(f"Error response: {response.text}")
+                return False
+
+    except httpx.TimeoutException as e:
+        logger.error(f"Timeout while deleting memory item: {memory_item_id}")
+        logger.error(f"Timeout error details: {e}")
+        return False
+    except httpx.ConnectError as e:
+        logger.error(f"Connection error while deleting memory item: {memory_item_id}")
+        logger.error(f"Connection error details: {e}")
+        return False
+    except httpx.HTTPError as e:
+        logger.error(f"HTTP error while deleting memory item: {str(e)}")
+        logger.error(f"HTTP error details: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"Unexpected error while deleting memory item: {str(e)}")
+        logger.error("Full traceback:", exc_info=True)
+        return False
+
+async def batch_store_memories_async(
+    user_id: str,
+    session_token: str, 
+    memory_items: List[MemoryItem],
+    api_key: Optional[str] = None,
+    developer_user_object_id: Optional[str] = None
+) -> List[ParseStoredMemory]:
+    """
+    Async version of batch_store_memories that uses Parse Server's /batch endpoint.
+    
+    Parse Server limits:
+    - Max 20 operations per batch (official limit)
+    - Payload size typically limited to 1MB by body parser
+    
+    We dynamically split batches based on BOTH operation count and payload size.
+    
+    Args:
+        user_id: User ID for ACL
+        session_token: Session token for authentication
+        memory_items: List of MemoryItem objects to store
+        api_key: Optional API key for authentication
+        developer_user_object_id: Optional developer user object ID
+        
+    Returns:
+        List of ParseStoredMemory objects with object IDs and created timestamps
+    """
+    # Parse Server limits
+    MAX_OPERATIONS_PER_BATCH = 10  # Conservative: Parse allows 20, we use 10 for safety
+    MAX_PAYLOAD_SIZE_BYTES = 800_000  # Conservative: 800KB (under 1MB limit)
+    
+    # Check if we need to split
+    if len(memory_items) <= MAX_OPERATIONS_PER_BATCH:
+        # Small batch - check payload size
+        test_payload_size = _estimate_payload_size(memory_items, user_id, developer_user_object_id)
+        
+        if test_payload_size <= MAX_PAYLOAD_SIZE_BYTES:
+            # Both checks pass - process as single batch
+            logger.info(f"📦 Processing {len(memory_items)} memories in single batch (est. {test_payload_size/1024:.1f}KB)")
+            return await _batch_store_single_request(
+                user_id=user_id,
+                session_token=session_token,
+                memory_items=memory_items,
+                api_key=api_key,
+                developer_user_object_id=developer_user_object_id
+            )
+    
+    # Need to split - use intelligent batching
+    logger.info(f"📦 Splitting {len(memory_items)} memories into sub-batches (max {MAX_OPERATIONS_PER_BATCH} ops, max {MAX_PAYLOAD_SIZE_BYTES/1024:.0f}KB per batch)")
+    
+    all_stored_memories = []
+    current_batch = []
+    current_batch_size = 0
+    batch_num = 1
+    
+    for idx, memory_item in enumerate(memory_items):
+        # Estimate size of adding this item
+        item_size = _estimate_single_item_size(memory_item, user_id, developer_user_object_id)
+        
+        # Check if adding this item would exceed limits
+        would_exceed_ops = len(current_batch) >= MAX_OPERATIONS_PER_BATCH
+        would_exceed_size = (current_batch_size + item_size) > MAX_PAYLOAD_SIZE_BYTES
+        
+        if current_batch and (would_exceed_ops or would_exceed_size):
+            # Process current batch
+            logger.info(f"  Sub-batch {batch_num}: {len(current_batch)} memories ({current_batch_size/1024:.1f}KB)")
+            
+            stored = await _batch_store_single_request(
+                user_id=user_id,
+                session_token=session_token,
+                memory_items=current_batch,
+                api_key=api_key,
+                developer_user_object_id=developer_user_object_id
+            )
+            all_stored_memories.extend(stored)
+            
+            # Start new batch
+            current_batch = [memory_item]
+            current_batch_size = item_size
+            batch_num += 1
+        else:
+            # Add to current batch
+            current_batch.append(memory_item)
+            current_batch_size += item_size
+    
+    # Process remaining batch
+    if current_batch:
+        logger.info(f"  Sub-batch {batch_num}: {len(current_batch)} memories ({current_batch_size/1024:.1f}KB)")
+        stored = await _batch_store_single_request(
+            user_id=user_id,
+            session_token=session_token,
+            memory_items=current_batch,
+            api_key=api_key,
+            developer_user_object_id=developer_user_object_id
+        )
+        all_stored_memories.extend(stored)
+    
+    logger.info(f"✅ All sub-batches completed: {len(all_stored_memories)}/{len(memory_items)} memories stored")
+    return all_stored_memories
+
+
+def _estimate_single_item_size(
+    memory_item: MemoryItem,
+    user_id: str,
+    developer_user_object_id: Optional[str]
+) -> int:
+    """Estimate the JSON payload size for a single memory item."""
+    # Rough estimate: content + metadata + overhead
+    size = len(str(memory_item.content)) if memory_item.content else 0
+    size += len(json.dumps(memory_item.metadata)) if memory_item.metadata else 0
+    size += len(str(memory_item.context)) if memory_item.context else 0
+    size += 500  # Overhead for structure, IDs, pointers, etc.
+    return size
+
+
+def _estimate_payload_size(
+    memory_items: List[MemoryItem],
+    user_id: str,
+    developer_user_object_id: Optional[str]
+) -> int:
+    """Estimate total JSON payload size for a batch of memory items."""
+    return sum(_estimate_single_item_size(item, user_id, developer_user_object_id) for item in memory_items)
+
+
+async def _batch_store_single_request(
+    user_id: str,
+    session_token: str, 
+    memory_items: List[MemoryItem],
+    api_key: Optional[str] = None,
+    developer_user_object_id: Optional[str] = None
+) -> List[ParseStoredMemory]:
+    """Internal function to handle a single Parse Server batch request."""
+    url = f"{PARSE_SERVER_URL}/parse/batch"
+    logger.info(f"📦 Batch storing {len(memory_items)} memories to Parse Server")
+
+    requests_data = []
+
+    for memory_item in memory_items:
+        # Extract metadata fields
+        topics = memory_item.metadata.get('topics')
+        emoji_tags = memory_item.metadata.get('emoji tags')
+        
+        # Convert UUID to string
+        memory_id_str = str(memory_item.id)
+        
+        # Serialize context
+        if isinstance(memory_item.context, str):
+            context = memory_item.context
+        elif isinstance(memory_item.context, list):
+            context = json.dumps(memory_item.context)
+        else:
+            context = json.dumps([])
+        
+        # Serialize metadata
+        if isinstance(memory_item.metadata, dict):
+            metadata_str = json.dumps(memory_item.metadata)
+        else:
+            metadata_str = str(memory_item.metadata)
+
+        # Build body with all fields from the MemoryItem
+        body = {
+            "user": {
+                "__type": "Pointer",
+                "className": "_User",
+                "objectId": user_id
+            },
+            "content": memory_item.content,
+            "context": context,
+            "metadata": metadata_str,
+            "memoryId": memory_id_str,
+            "type": memory_item.metadata.get("type", "text"),
+        }
+        
+        # Add optional fields if they exist
+        optional_fields = {
+            "title": memory_item.metadata.get("title"),
+            "location": memory_item.metadata.get("location"),
+            "sourceUrl": memory_item.metadata.get("sourceUrl"),
+            "conversationId": memory_item.metadata.get("conversationId"),
+            "emojiTags": emoji_tags if isinstance(emoji_tags, list) else [],
+            "topics": topics if isinstance(topics, list) else [],
+            "hierarchicalStructures": memory_item.metadata.get("hierarchical structures"),
+        }
+        
+        # Add memoryChunkIds if present
+        if hasattr(memory_item, 'memoryChunkIds') and memory_item.memoryChunkIds:
+            optional_fields["memoryChunkIds"] = memory_item.memoryChunkIds
+        
+        # Add developer user pointer if provided
+        if developer_user_object_id:
+            optional_fields["developerUser"] = {
+                "__type": "Pointer",
+                "className": "DeveloperUser",
+                "objectId": developer_user_object_id
+            }
+        
+        # Add ACL fields
+        for acl_field in ['user_read_access', 'user_write_access', 'workspace_read_access', 
+                         'workspace_write_access', 'role_read_access', 'role_write_access',
+                         'namespace_read_access', 'namespace_write_access',
+                         'organization_read_access', 'organization_write_access',
+                         'external_user_read_access', 'external_user_write_access']:
+            if acl_field in memory_item.metadata:
+                optional_fields[acl_field] = memory_item.metadata[acl_field]
+        
+        # Remove None values
+        body.update({k: v for k, v in optional_fields.items() if v is not None})
+
+        # Prepare the batch request entry
+        data = {
+            "method": "POST",
+            "path": "/parse/classes/Memory",
+            "body": body
+        }
+
+        requests_data.append(data)
+
+    # Prepare headers
+    HEADERS = {
+        "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+        "X-Parse-Master-Key": PARSE_MASTER_KEY,  # Use master key for batch operations
+        "Content-Type": "application/json"
+    }
+    
+    # Make async batch request
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        response = await client.post(
+            url,
+            headers=HEADERS,
+            json={"requests": requests_data}
+        )
+        
+        if response.status_code != 200:
+            logger.error(f"❌ Batch store failed: {response.status_code} - {response.text}")
+            raise Exception(f"Parse batch store failed: {response.status_code}")
+        
+        batch_results = response.json()
+        logger.info(f"✅ Batch stored {len(batch_results)} memories")
+        
+        # Parse results and create ParseStoredMemory objects
+        stored_memories = []
+        for idx, result in enumerate(batch_results):
+            if result.get("success"):
+                success_data = result["success"]
+                memory_item = memory_items[idx]
+                
+                # Extract developerUser pointer if present
+                developer_user_pointer = None
+                if developer_user_object_id:
+                    developer_user_pointer = DeveloperUserPointer(
+                        objectId=developer_user_object_id,
+                        className='DeveloperUser',
+                        external_id=None
+                    )
+                
+                stored_memory = ParseStoredMemory(
+                    objectId=success_data.get("objectId"),
+                    createdAt=success_data.get("createdAt"),
+                    updatedAt=success_data.get("createdAt"),
+                    ACL=memory_item.metadata.get("ACL", {}),
+                    content=memory_item.content,
+                    type=memory_item.metadata.get("type", "text"),
+                    metadata=metadata_str if 'metadata_str' in locals() else "{}",
+                    customMetadata=memory_item.metadata.get("customMetadata"),
+                    memoryId=str(memory_item.id),
+                    memoryChunkIds=memory_item.memoryChunkIds if hasattr(memory_item, 'memoryChunkIds') else [],
+                    user=ParseUserPointer(
+                        objectId=user_id,
+                        className='_User'
+                    ),
+                    developerUser=developer_user_pointer,
+                    external_user_read_access=memory_item.metadata.get('external_user_read_access', []),
+                    external_user_write_access=memory_item.metadata.get('external_user_write_access', []),
+                    user_read_access=memory_item.metadata.get('user_read_access', []),
+                    user_write_access=memory_item.metadata.get('user_write_access', []),
+                    workspace_read_access=memory_item.metadata.get('workspace_read_access', []),
+                    workspace_write_access=memory_item.metadata.get('workspace_write_access', []),
+                    role_read_access=memory_item.metadata.get('role_read_access', []),
+                    role_write_access=memory_item.metadata.get('role_write_access', []),
+                    namespace_read_access=memory_item.metadata.get('namespace_read_access', []),
+                    namespace_write_access=memory_item.metadata.get('namespace_write_access', []),
+                    organization_read_access=memory_item.metadata.get('organization_read_access', []),
+                    organization_write_access=memory_item.metadata.get('organization_write_access', []),
+                )
+                stored_memories.append(stored_memory)
+            else:
+                logger.error(f"❌ Batch store item {idx} failed: {result.get('error')}")
+                raise Exception(f"Batch store item {idx} failed: {result.get('error')}")
+        
+        return stored_memories
+
+
+def batch_store_memories(session_token: str, memory_items: list):
+    """Legacy sync version - deprecated, use batch_store_memories_async instead"""
+    url = f"{PARSE_SERVER_URL}/parse/batch"
+    logger.info(f"Batch URL: {url}")
+
+    requests_data = []
+
+    for memory_item in memory_items:
+        # Assuming 'topics' and 'emoji tags' are stored as lists in memory_item.metadata
+        topics = memory_item.metadata.get('topics')
+        emoji_tags = memory_item.metadata.get('emoji tags')
+
+        # Convert UUID to string
+        memory_id_str = str(memory_item.id)
+        context = json.dumps(memory_item.context)  # Ensure context is a JSON string
+
+        # Prepare the individual request data
+        data = {
+            "method": "POST",
+            "path": "/parse/classes/Memory",
+            "body": {
+                "user": {
+                    "__type": "Pointer",
+                    "className": "_User",
+                    "objectId": memory_item.metadata.get("user_id")
+                },
+                "content": memory_item.content,
+                "context": context,
+                "title": memory_item.metadata.get("title"),
+                "location": memory_item.metadata.get("location"),
+                "emojiTags": emoji_tags if isinstance(emoji_tags, list) else [],
+                "hierarchicalStructures": memory_item.metadata.get("hierarchical structures"),
+                "type": memory_item.metadata.get("type"),
+                "sourceUrl": memory_item.metadata.get("sourceUrl"),
+                "conversationId": memory_item.metadata.get("conversationId"),
+                "memoryId": memory_id_str,
+                "topics": topics if isinstance(topics, list) else [],
+                # Add other fields if necessary
+            }
+        }
+
+        # Remove any None values
+        data["body"] = {k: v for k, v in data["body"].items() if v is not None}
+
+        requests_data.append(data)
+
+    HEADERS = {
+        "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+        "X-Parse-REST-API-Key": PARSE_REST_API_KEY,
+        "X-Parse-Master-Key": PARSE_MASTER_KEY,
+        "Content-Type": "application/json"
+    }
+
+    # The batch request payload
+    batch_payload = {
+        "requests": requests_data
+    }
+
+    response = requests.post(url, headers=HEADERS, data=json.dumps(batch_payload))
+
+    if response.status_code != 200:
+        logger.error(f"Failed to batch store memory items: {response.text}")
+        return None
+
+    logger.info("Memory items successfully stored in batch.")
+    return response.json()
+
+async def batch_store_memories_async_old(
+    session_token: str,
+    memory_items: List[MemoryItem],
+    api_key: Optional[str] = None
+) -> List[ParseStoredMemory]:
+    """
+    Asynchronously batch store memory items to Parse Server using the /batch endpoint.
+    
+    Args:
+        session_token: Session token for authentication
+        memory_items: List of MemoryItem objects to store
+        api_key: Optional API key for authentication
+        
+    Returns:
+        List of ParseStoredMemory objects with objectId, createdAt, memoryChunkIds
+    """
+    url = f"{PARSE_SERVER_URL}/parse/batch"
+    logger.info(f"Async batch storing {len(memory_items)} memories to {url}")
+    
+    requests_data = []
+    
+    for memory_item in memory_items:
+        # Convert UUID to string
+        memory_id_str = str(memory_item.id)
+        
+        # Prepare context
+        context = json.dumps(memory_item.context) if memory_item.context else "[]"
+        
+        # Get metadata fields
+        metadata = memory_item.metadata if isinstance(memory_item.metadata, dict) else {}
+        user_id = metadata.get('user_id')
+        workspace_id = metadata.get('workspace_id')
+        
+        # Prepare ACL fields
+        acl_data = {}
+        if user_id:
+            acl_data[user_id] = {"read": True, "write": True}
+        
+        # Add workspace ACL if present
+        user_read_access = metadata.get('user_read_access', [])
+        user_write_access = metadata.get('user_write_access', [])
+        workspace_read_access = metadata.get('workspace_read_access', [])
+        workspace_write_access = metadata.get('workspace_write_access', [])
+        role_read_access = metadata.get('role_read_access', [])
+        role_write_access = metadata.get('role_write_access', [])
+        namespace_read_access = metadata.get('namespace_read_access', [])
+        namespace_write_access = metadata.get('namespace_write_access', [])
+        organization_read_access = metadata.get('organization_read_access', [])
+        organization_write_access = metadata.get('organization_write_access', [])
+        
+        # Build the body for this memory
+        body = {
+            "user": {
+                "__type": "Pointer",
+                "className": "_User",
+                "objectId": user_id
+            } if user_id else None,
+            "content": memory_item.content,
+            "context": context,
+            "type": metadata.get("type", "text"),
+            "memoryId": memory_id_str,
+            "memoryChunkIds": memory_item.memoryChunkIds if hasattr(memory_item, 'memoryChunkIds') else [],
+            "metadata": json.dumps(metadata),
+            "ACL": acl_data if acl_data else None,
+        }
+        
+        # Add optional fields
+        if metadata.get("title"):
+            body["title"] = metadata["title"]
+        if metadata.get("sourceUrl"):
+            body["sourceUrl"] = metadata["sourceUrl"]
+        if workspace_id:
+            body["workspace"] = {
+                "__type": "Pointer",
+                "className": "WorkSpace",
+                "objectId": workspace_id
+            }
+        
+        # Add ACL fields
+        if user_read_access:
+            body["user_read_access"] = user_read_access
+        if user_write_access:
+            body["user_write_access"] = user_write_access
+        if workspace_read_access:
+            body["workspace_read_access"] = workspace_read_access
+        if workspace_write_access:
+            body["workspace_write_access"] = workspace_write_access
+        if role_read_access:
+            body["role_read_access"] = role_read_access
+        if role_write_access:
+            body["role_write_access"] = role_write_access
+        if namespace_read_access:
+            body["namespace_read_access"] = namespace_read_access
+        if namespace_write_access:
+            body["namespace_write_access"] = namespace_write_access
+        if organization_read_access:
+            body["organization_read_access"] = organization_read_access
+        if organization_write_access:
+            body["organization_write_access"] = organization_write_access
+        
+        # Add external user fields if present
+        external_user_id = metadata.get('external_user_id')
+        if external_user_id:
+            body["external_user_id"] = external_user_id
+            body["external_user_read_access"] = metadata.get('external_user_read_access', [])
+            body["external_user_write_access"] = metadata.get('external_user_write_access', [])
+        
+        # Add developer user pointer if present
+        developer_user_object_id = metadata.get('developer_user_object_id')
+        if developer_user_object_id:
+            body["developerUser"] = {
+                "__type": "Pointer",
+                "className": "DeveloperUser",
+                "objectId": developer_user_object_id
+            }
+        
+        # Remove None values
+        body = {k: v for k, v in body.items() if v is not None}
+        
+        # Prepare the batch request data
+        data = {
+            "method": "POST",
+            "path": "/parse/classes/Memory",
+            "body": body
+        }
+        
+        requests_data.append(data)
+    
+    # Prepare headers
+    headers = {
+        "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+        "X-Parse-Master-Key": PARSE_MASTER_KEY,
+        "Content-Type": "application/json"
+    }
+    
+    if api_key:
+        headers["X-API-Key"] = api_key
+    elif session_token:
+        headers["X-Parse-Session-Token"] = session_token
+    
+    # The batch request payload
+    batch_payload = {
+        "requests": requests_data
+    }
+    
+    # Send async request
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        response = await client.post(url, headers=headers, json=batch_payload)
+        
+        if response.status_code != 200:
+            logger.error(f"Failed to batch store memory items: {response.status_code} - {response.text}")
+            raise Exception(f"Parse batch insert failed: {response.status_code} - {response.text}")
+        
+        results = response.json()
+        logger.info(f"Successfully batch stored {len(results)} memory items in Parse Server")
+        
+        # Convert results to ParseStoredMemory objects
+        stored_memories = []
+        for idx, (memory_item, result) in enumerate(zip(memory_items, results)):
+            if result.get("success"):
+                success_data = result["success"]
+                
+                # Create ParseStoredMemory object
+                stored_memory = ParseStoredMemory(
+                    objectId=success_data.get("objectId"),
+                    createdAt=success_data.get("createdAt"),
+                    updatedAt=success_data.get("createdAt"),  # Same as createdAt for new items
+                    ACL=body.get("ACL", {}),
+                    content=memory_item.content,
+                    type=memory_item.metadata.get("type", "text"),
+                    metadata=json.dumps(memory_item.metadata),
+                    memoryId=str(memory_item.id),
+                    memoryChunkIds=memory_item.memoryChunkIds if hasattr(memory_item, 'memoryChunkIds') else [],
+                    user=ParseUserPointer(
+                        objectId=memory_item.metadata.get('user_id'),
+                        className='_User'
+                    ) if memory_item.metadata.get('user_id') else None,
+                    external_user_read_access=memory_item.metadata.get('external_user_read_access', []),
+                    external_user_write_access=memory_item.metadata.get('external_user_write_access', []),
+                    user_read_access=memory_item.metadata.get('user_read_access', []),
+                    user_write_access=memory_item.metadata.get('user_write_access', []),
+                    workspace_read_access=memory_item.metadata.get('workspace_read_access', []),
+                    workspace_write_access=memory_item.metadata.get('workspace_write_access', []),
+                    role_read_access=memory_item.metadata.get('role_read_access', []),
+                    role_write_access=memory_item.metadata.get('role_write_access', []),
+                    namespace_read_access=memory_item.metadata.get('namespace_read_access', []),
+                    namespace_write_access=memory_item.metadata.get('namespace_write_access', []),
+                    organization_read_access=memory_item.metadata.get('organization_read_access', []),
+                    organization_write_access=memory_item.metadata.get('organization_write_access', []),
+                )
+                
+                stored_memories.append(stored_memory)
+            else:
+                error_data = result.get("error", {})
+                logger.error(f"Failed to store memory {idx}: {error_data}")
+                # Still add a placeholder to maintain index alignment
+                stored_memories.append(None)
+        
+        return stored_memories
+
+async def retrieve_memory_item_by_qdrant_id(session_token: str, pinecone_id: str, api_key: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """
+    Asynchronously retrieve a memory item from Parse Server by its Pinecone ID.
+    
+    Args:
+        session_token (str): The session token for authentication
+        pinecone_id (str): The Pinecone ID to search for
+        
+    Returns:
+        Optional[Dict[str, Any]]: The memory item if found, None otherwise
+    """
+    url = f"{PARSE_SERVER_URL}/parse/classes/Memory"
+
+    HEADERS = {
+        "X-Parse-Application-Id": env.get("PARSE_APPLICATION_ID"),
+        "X-Parse-REST-API-Key": env.get("PARSE_REST_API_KEY"),
+        "X-Parse-Master-Key": env.get("PARSE_MASTER_KEY"),
+        "Content-Type": "application/json"
+    }
+
+    # Strip chunk suffix (_0, _1, etc) to get base memory ID
+    base_memory_id = pinecone_id.split('_')[0]
+
+    # Create a query to find the memory item with either matching memoryId or in memoryChunkIds
+    query = {
+        "$or": [
+            {"memoryId": base_memory_id},  # Match exact ID
+            {"memoryId": pinecone_id},     # Match chunk ID
+            {"memoryChunkIds": base_memory_id},  # Match as chunk
+            {"memoryChunkIds": pinecone_id}      # Match as chunk
+        ]
+    }
+
+    params = {
+        "where": json.dumps(query),
+        "limit": 1,
+        "include": "developerUser"
+    }
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                url,
+                headers=HEADERS,
+                params=params,
+                timeout=30.0
+            )
+            
+            response.raise_for_status()
+
+            if response.status_code != 200:
+                logger.error(f"Failed to retrieve memory item by Pinecone ID: {response.text}")
+                return None
+
+            results = response.json().get('results', [])
+            
+            if not results:
+                logger.warning(f"No memory item found with Pinecone ID: {pinecone_id}")
+                return None
+
+            logger.info(f"Memory item successfully retrieved by Pinecone ID: {results}")
+            return results[0]  # Return the first (and should be only) result
+
+    except httpx.TimeoutException:
+        logger.error(f"Timeout while retrieving memory item for Pinecone ID: {pinecone_id}")
+        return None
+    except httpx.HTTPError as e:
+        logger.error(f"HTTP error while retrieving memory item: {str(e)}")
+        return None
+    except Exception as e:
+        logger.error(f"Unexpected error while retrieving memory item: {str(e)}")
+        return None
+
+async def retrieve_memory_item_parse(
+    session_token: str, 
+    memory_item_id: Optional[str] = None, 
+    memory_chunk_ids: Optional[List[str]] = None,
+    api_key: Optional[str] = None
+) -> Optional[ParseStoredMemory]:
+    """
+    Asynchronously retrieves a memory item from Parse Server.
+    
+    Args:
+        session_token (str): The session token for authentication
+        memory_item_id (Optional[str]): The memory ID to retrieve
+        memory_chunk_ids (Optional[List[str]]): List of memory chunk IDs
+        
+    Returns:
+        Optional[ParseStoredMemory]: The retrieved memory item
+    """
+    url = f"{PARSE_SERVER_URL}/parse/classes/Memory"
+    
+    query = {}
+    if memory_item_id:
+        # Strip chunk suffix (_0, _1, etc) to get base memory ID
+        base_memory_id = memory_item_id.split('_')[0]
+        query["$or"] = [
+            {"memoryId": base_memory_id},  # Match exact ID
+            {"memoryId": memory_item_id},  # Match chunk ID
+            {"memoryChunkIds": base_memory_id},  # Match as chunk
+            {"memoryChunkIds": memory_item_id}  # Match as chunk
+        ]
+    if memory_chunk_ids:
+        # Strip chunk suffixes for all chunk IDs
+        base_chunk_ids = [chunk_id.split('_')[0] for chunk_id in memory_chunk_ids]
+        all_ids = memory_chunk_ids + base_chunk_ids
+        query["$or"] = query.get("$or", []) + [
+            {"memoryChunkIds": {"$in": all_ids}},
+            {"memoryId": {"$in": all_ids}}
+        ]
+    
+    logger.debug(f"Query for Parse Server: {query}")
+    
+    headers = {
+        "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+        "X-Parse-Master-Key": PARSE_MASTER_KEY,
+        "Content-Type": "application/json"
+    }
+    
+    params = {
+        "where": json.dumps(query)
+    }
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                url, 
+                headers=headers, 
+                params=params,
+                timeout=30.0
+            )
+            
+            response.raise_for_status()
+            results = response.json().get('results', [])
+            
+            if not results:
+                logger.warning(f"No memory item found with the given criteria.")
+                return None
+                
+            memory_data = results[0]
+            
+            # Convert to ParseStoredMemory
+            try:
+                # Extract metadata
+                metadata = memory_data.get('metadata', '{}')
+                if isinstance(metadata, str):
+                    try:
+                        metadata = json.loads(metadata)
+                    except json.JSONDecodeError:
+                        metadata = {}
+                
+                # Get user data
+                user_data = memory_data.get("user", {})
+                user = {
+                    "objectId": user_data.get("objectId"),
+                    "displayName": user_data.get("displayName"),
+                    "fullname": user_data.get("fullname"),
+                    "profileimage": user_data.get("profileimage"),
+                    "title": user_data.get("title"),
+                    "isOnline": user_data.get("isOnline")
+                }
+                
+                stored_memory = ParseStoredMemory(
+                    objectId=memory_data["objectId"],
+                    createdAt=memory_data.get("createdAt"),
+                    updatedAt=memory_data.get("updatedAt"),
+                    ACL=memory_data.get("ACL", {}),
+                    content=memory_data.get("content", ""),
+                    metadata=json.dumps(metadata),
+                    customMetadata=memory_data.get("customMetadata", {}),
+                    sourceType=memory_data.get("sourceType", ""),
+                    context=parse_context(memory_data.get("context", "")),
+                    title=memory_data.get("title"),
+                    location=memory_data.get("location"),
+                    emojiTags=memory_data.get("emojiTags", []),
+                    emotionTags=memory_data.get("emotionTags", []),
+                    hierarchicalStructures=memory_data.get("hierarchicalStructures", ""),
+                    type=memory_data.get("type", ""),
+                    sourceUrl=memory_data.get("sourceUrl", ""),
+                    conversationId=memory_data.get("conversationId", ""),
+                    role=memory_data.get("role"),
+                    category=memory_data.get("category"),
+                    memoryId=memory_data.get("memoryId", ""),
+                    topics=memory_data.get("topics", []),
+                    steps=memory_data.get("steps", []),
+                    current_step=memory_data.get("current_step"),
+                    memoryChunkIds=memory_data.get("memoryChunkIds", []),
+                    user=ParseUserPointer(**user),
+                    workspace=memory_data.get("workspace"),
+                    post=memory_data.get("post"),
+                    postMessage=memory_data.get("postMessage")
+                )
+                
+                return stored_memory
+                
+            except ValidationError as ve:
+                logger.error(f"Validation error creating ParseStoredMemory: {ve}")
+                return None
+                
+    except httpx.HTTPError as e:
+        logger.error(f"HTTP error retrieving memory item: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Error retrieving memory item: {e}")
+        return None
+
+def retrieve_memory_item_with_user(session_token: str, memory_item_id: str, api_key: Optional[str] = None):
+    """
+    Retrieves a memory item from Parse Server by its memoryId, including the associated user object.
+
+    Parameters:
+        session_token (str): The session token of the authenticated user.
+        memory_item_id (str): The memoryId of the memory item to retrieve.
+
+    Returns:
+        dict or None: The memory item data with the user object if found, else None.
+    """
+    url = f"{PARSE_SERVER_URL}/parse/classes/Memory"
+    
+    query = json.dumps({"memoryId": memory_item_id})
+    
+    HEADERS = {
+        "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+        "X-Parse-REST-API-Key": PARSE_REST_API_KEY,
+        "X-Parse-Master-Key": PARSE_MASTER_KEY,
+        "Content-Type": "application/json"
+    }
+    
+    # Specify the fields to include, using dot notation for nested user fields
+    keys = (
+        "ACL,"
+        "user.objectId,user.displayName,user.fullname,user.profileimage,user.title,user.isOnline,"
+        "content,context,topics,emojiTags,hierarchicalStructures,type,sourceUrl,sourceType,title,memoryId,role,category,steps,current_step,createdAt,updatedAt"
+    )
+    
+    params = {
+        "where": query,
+        "keys": keys  # Specify fields to include
+    }
+    
+    response = requests.get(url, headers=HEADERS, params=params)
+    
+    if response.status_code != 200:
+        logger.error(f"Failed to retrieve memory item with user: {response.text}")
+        return None
+    
+    results = response.json().get('results', [])
+
+    # Log the raw response for debugging
+    logger.debug(f"Raw Parse Server Response single: {response.json()}")
+    
+    if not results:
+        logger.warning(f"No memory item found with memoryId: {memory_item_id}")
+        return None
+    
+    logger.info("Memory item with user successfully retrieved.")
+    memory_item = results[0]
+    
+    # Define the desired fields for the user object
+    desired_user_fields = [
+        'objectId',
+        'displayName',
+        'fullname',
+        'profileimage',
+        'title',
+        'isOnline'
+    ]
+    
+    # Clean up the user object by keeping only the desired fields
+    if 'user' in memory_item:
+        user = memory_item['user']
+        # Create a new user dictionary with only the desired fields
+        filtered_user = {k: v for k, v in user.items() if k in desired_user_fields}
+        memory_item['user'] = filtered_user
+    
+    return memory_item  # Return the first matching memory item with filtered user
+
+def retrieve_memory_items_with_users(session_token: str, memory_item_ids: list, chunk_base_ids: list, class_name: str, api_key: Optional[str] = None):
+    """
+    Retrieves multiple memory items from Parse Server by their memoryIds, including the associated user objects.
+
+    Parameters:
+        session_token (str): The session token of the authenticated user.
+        memory_item_ids (list): A list of memoryIds of the memory items to retrieve.
+        chunk_base_ids (list): List of base memory IDs without chunk numbers
+        class_name (str): The class name in Parse Server to query.
+
+    Returns:
+        dict: A dictionary containing:
+            - 'results': List of memory items with user objects
+            - 'missing_memory_ids': List of memory IDs that weren't found
+    """
+    url = f"{PARSE_SERVER_URL}/parse/classes/{class_name}"
+    
+    # Log input parameters for debugging
+    logger.info(f"Retrieving memory items with users. Memory IDs count: {len(memory_item_ids)}")
+    logger.info(f"First few memory IDs: {memory_item_ids[:5] if memory_item_ids else []}")
+    
+    # Formulate the query
+    query = {
+        "$or": [
+            {"memoryId": {"$in": memory_item_ids}},
+            {"memoryChunkIds": {"$in": memory_item_ids}},
+            {"memoryId": {"$in": chunk_base_ids}}
+        ]
+    }
+    
+    # Specify the fields to include
+    keys = (
+        "objectId,createdAt,updatedAt,ACL,content,metadata,sourceType,context,title,location,"
+        "emojiTags,hierarchicalStructures,type,sourceUrl,conversationId,memoryId,topics,steps,"
+        "current_step,memoryChunkIds,user.objectId,user.displayName,user.fullname,user.profileimage,"
+        "user.title,user.isOnline,workspace,post,postMessage,matchingChunkIds,"
+        "role,category"
+    )
+
+    params = {
+        "where": json.dumps(query),
+        "keys": keys  # Specify fields to include
+    }
+
+    HEADERS = {
+        "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+        "X-Parse-REST-API-Key": PARSE_REST_API_KEY,        
+        "Content-Type": "application/json"
+    }
+    if api_key is not None:
+        HEADERS["X-Parse-Master-Key"] = PARSE_MASTER_KEY
+    else:
+        HEADERS["X-Parse-Session-Token"] = session_token
+
+    # Log the query for debugging
+    logger.debug(f"Query parameters: {params}")
+    
+    response = requests.get(url, headers=HEADERS, params=params)
+
+    # Log response status and details
+    logger.info(f"Response status code: {response.status_code}")
+    
+    if response.status_code != 200:
+        logger.error(f"Failed to retrieve memory items with users: {response.text}")
+        return []
+    
+    results = response.json().get('results', [])
+    logger.info(f"Retrieved {len(results)} memory items from Parse Server")
+    
+    # Helper function to strip chunk suffix (_0, _1, etc.) from memory IDs
+    def strip_chunk_suffix(memory_id: str) -> str:
+        """Strip chunk identifier (_0, _1, etc.) from memory ID to get base ID."""
+        if '_' in memory_id and memory_id.split('_')[-1].isdigit():
+            return memory_id.rsplit('_', 1)[0]
+        return memory_id
+
+    # Log the memory IDs that were found vs not found using base IDs for accurate comparison
+    found_memory_ids = [item.get('memoryId') for item in results]
+    # Convert input memory_item_ids to base IDs for comparison
+    base_memory_item_ids = [strip_chunk_suffix(mid) for mid in memory_item_ids]
+    missing_base_ids = list(set(base_memory_item_ids) - set(found_memory_ids))
+    
+    if missing_base_ids:
+        logger.warning(f"Missing memory items: {len(missing_base_ids)}")
+        logger.warning(f"First few missing memory IDs: {missing_base_ids[:5]}")
+    
+    # Define the desired fields for the user object
+    desired_user_fields = [
+        'objectId',
+        'displayName',
+        'fullname',
+        'profileimage',
+        'title',
+        'isOnline'
+    ]
+    
+    # Clean up each memory item's user object
+    for memory_item in results:
+        if 'user' in memory_item:
+            user = memory_item['user']
+            # Create a new user dictionary with only the desired fields
+            filtered_user = {k: v for k, v in user.items() if k in desired_user_fields}
+            memory_item['user'] = filtered_user
+    
+    return {
+        'results': results,
+        'missing_memory_ids': missing_base_ids
+    }
+
+def retrieve_memory_items(session_token: str, memory_item_ids: list, class_name: str):
+    url = f"{PARSE_SERVER_URL}/parse/classes/{class_name}"
+    
+    # Formulating the query to match any memory item whose objectId is in memory_item_ids
+    params = {
+        "where": json.dumps({
+            "memoryId": {
+                "$in": memory_item_ids
+            }
+        })
+    }
+
+    HEADERS = {
+            "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+            "X-Parse-REST-API-Key": PARSE_REST_API_KEY,
+            "X-Parse-Master-Key": PARSE_MASTER_KEY,
+            "Content-Type": "application/json"
+    }
+    
+    
+    response = requests.get(url, headers=HEADERS, params=params)
+    
+    if response.status_code != 200:
+        logger.error(f"Failed to retrieve memory items: {response.text}")
+        return None
+    
+    logger.info("Memory items successfully retrieved.")
+    return response.json().get('results', [])
+
+def retrieve_multiple_memory_items(session_token: str, memory_item_ids: list, chunk_base_ids: list, api_key: Optional[str] = None):
+    """
+    Retrieves multiple memory items with their associated users, deduplicating by memoryId.
+    
+    Parameters:
+        session_token (str): The session token of the authenticated user
+        memory_item_ids (list): List of memory IDs to retrieve
+        chunk_base_ids (list): List of base memory IDs
+        
+    Returns:
+        dict: A dictionary containing:
+            - 'results': List of retrieved memory items with user data (deduplicated by memoryId)
+            - 'missing_memory_ids': List of memory IDs that weren't found
+    """
+    memory_class = "Memory"
+    try:
+        response = retrieve_memory_items_with_users(session_token, memory_item_ids, chunk_base_ids, memory_class, api_key)
+        
+        # Deduplicate results based on memoryId
+        seen_memory_ids = set()
+        deduplicated_results = []
+        
+        for item in response["results"]:
+            memory_id = item.get('memoryId')
+            if memory_id and memory_id not in seen_memory_ids:
+                seen_memory_ids.add(memory_id)
+                deduplicated_results.append(item)
+        
+        # Update response with deduplicated results
+        response["results"] = deduplicated_results
+        
+        logger.info(f'Retrieved {len(response["results"])} deduplicated items from Parse Server.')
+        logger.info(f'Missing {len(response["missing_memory_ids"])} items.')
+        if response["missing_memory_ids"]:
+            logger.info(f'First few missing IDs: {response["missing_memory_ids"][:5]}')
+        return response
+    except Exception as exc:
+        logger.error(f"Error retrieving Memory items: {exc}")
+        return {'results': [], 'missing_memory_ids': memory_item_ids}
+
+async def retrieve_memory_items_with_users_async(
+    session_token: str, 
+    memory_item_ids: list, 
+    chunk_base_ids: list, 
+    class_name: str = "Memory",
+    api_key: Optional[str] = None
+)  -> MemoryRetrievalResult:
+    """
+    Async version: Retrieves multiple memory items from Parse Server by their memoryIds.
+
+    Parameters:
+        session_token (str): The session token of the authenticated user.
+        memory_item_ids (List[str]): A list of memoryIds of the memory items to retrieve.
+        chunk_base_ids (List[str]): List of base memory IDs without chunk numbers
+        class_name (str): The class name in Parse Server to query.
+
+    Returns:
+        MemoryRetrievalResult: A dictionary containing:
+            - 'results': List[ParseStoredMemory] - List of memory items with user objects
+            - 'missing_memory_ids': List[str] - List of memory IDs that weren't found
+    """
+    url = f"{PARSE_SERVER_URL}/parse/classes/{class_name}"
+    
+    # Log input parameters for debugging
+    logger.info(f"Retrieving memory items with users. Memory IDs count: {len(memory_item_ids)}")
+    logger.info(f"First few memory IDs: {memory_item_ids[:5] if memory_item_ids else []}")
+    
+    # Deduplicate IDs
+    unique_memory_ids = list(set(memory_item_ids))
+    unique_chunk_base_ids = list(set(chunk_base_ids))
+
+    # For memoryId search, combine and dedupe both sets
+    all_ids = list(set(unique_memory_ids + unique_chunk_base_ids))
+    
+    # Strip _grouped suffix from IDs before querying Parse Server
+    # Qdrant uses _grouped to track grouped memories, but Parse Server stores original IDs
+    # We keep the chunk number suffix (_0, _1, etc.) as Parse Server stores those in memoryChunkIds
+    def strip_grouped_suffix(memory_id: str) -> str:
+        """
+        Remove only the _grouped part from memory ID for Parse Server queries.
+        Examples:
+            - f924d5ea-7926-49c3-b66d-e2e026733e20_grouped_0 -> f924d5ea-7926-49c3-b66d-e2e026733e20_0
+            - f924d5ea-7926-49c3-b66d-e2e026733e20_grouped -> f924d5ea-7926-49c3-b66d-e2e026733e20
+        """
+        import re
+        # Remove only _grouped, keeping the chunk number (_N) if present
+        memory_id = re.sub(r'_grouped(?=_\d+$|$)', '', memory_id)
+        return memory_id
+    
+    # Strip grouped suffixes from all IDs
+    all_ids_stripped = [strip_grouped_suffix(id) for id in all_ids]
+    all_ids = list(set(all_ids_stripped))  # Deduplicate again after stripping
+    
+    logger.info(f"Deduplicated memory IDs count: {len(unique_memory_ids)}")
+    logger.info(f"Deduplicated chunk base IDs count: {len(unique_chunk_base_ids)}")
+    logger.info(f"Combined unique IDs count (after stripping _grouped): {len(all_ids)}")
+
+    # Constants for batch size
+    # Reduce batch size to avoid URL length issues with ngrok and proxies
+    # Testing shows ngrok has ~8KB URL limit, each ID is ~40 chars encoded
+    MAX_IDS_PER_BATCH = 10
+    max_retries = 3
+    
+    # Specify the fields to include
+    keys = (
+        "objectId,createdAt,updatedAt,ACL,content,metadata,sourceType,context,title,location,"
+        "emojiTags,hierarchicalStructures,type,sourceUrl,conversationId,memoryId,topics,steps,"
+        "current_step,memoryChunkIds,user.objectId,user.displayName,user.fullname,user.profileimage,"
+        "user.title,user.isOnline,workspace,post,postMessage,matchingChunkIds,"
+        "developerUser,developerUser.external_id,"
+        "external_user_read_access,external_user_write_access,"
+        "user_read_access,user_write_access,"
+        "workspace_read_access,workspace_write_access,"
+        "role_read_access,role_write_access,"
+        "namespace_read_access,namespace_write_access,"
+        "organization_read_access,organization_write_access,"
+        "role,category,"
+        "customMetadata"
+    )
+
+    async def execute_batch_query(all_ids: List[str], memory_ids: List[str] = None) -> List[Dict]:
+        """Execute a single batch query using GET with small batches to avoid URL length limits"""
+        # Build query for this batch
+        query = {
+            "$or": [
+                {"memoryId": {"$in": all_ids}},  # Search memoryId in base IDs
+            ]
+        }
+        
+        # Only add memoryChunkIds search if chunk_ids is provided
+        if memory_ids:
+            query["$or"].append({"memoryChunkIds": {"$in": memory_ids}})  # Search chunks in memory IDs
+
+        # Use standard GET with URL parameters (with small batch sizes to avoid URL length limits)
+        params = {
+            "where": json.dumps(query),
+            "keys": keys
+        }
+        
+        # Add API key to headers if provided, otherwise use session token
+        headers = {
+            "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+            "X-Parse-REST-API-Key": PARSE_REST_API_KEY,
+            "Content-Type": "application/json",
+            "Accept-Encoding": "gzip, deflate"
+        }
+        if api_key is not None:
+            headers["X-Parse-Master-Key"] = PARSE_MASTER_KEY
+        else:
+            headers["X-Parse-Session-Token"] = session_token
+
+
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(30.0, connect=10.0),
+            limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
+            headers=headers
+        ) as client:
+            for attempt in range(max_retries):
+                try:
+                    # Use standard GET request with small batches to keep URLs under limits
+                    logger.info(f"Making Parse Server GET request to {url} with {len(all_ids)} IDs")
+                    response = await client.get(url, params=params, follow_redirects=True)
+                    logger.info(f"Parse Server response status: {response.status_code}")
+                    response.raise_for_status()
+                    results = response.json().get('results', [])
+                    logger.info(f"Retrieved {len(results)} memory items from Parse Server")
+                    return results
+                except httpx.HTTPError as e:
+                    logger.error(f"Parse Server query failed (attempt {attempt + 1}/{max_retries}): {str(e)}")
+                    if hasattr(e, 'response') and e.response is not None:
+                        logger.error(f"Response status: {e.response.status_code}")
+                        logger.error(f"Response body: {e.response.text[:500]}")
+                    if attempt == max_retries - 1:
+                        logger.error(f"Batch query failed after all retries: {str(e)}")
+                        raise
+                    await asyncio.sleep(1 * (attempt + 1))
+
+    async def process_batches() -> List[Dict]:
+        """Process all IDs in batches"""
+        
+        # Split into batches
+        all_ids_batches = [all_ids[i:i + MAX_IDS_PER_BATCH] 
+                       for i in range(0, len(all_ids), MAX_IDS_PER_BATCH)]
+        memory_ids_batches = [unique_memory_ids[i:i + MAX_IDS_PER_BATCH] 
+                         for i in range(0, len(unique_memory_ids), MAX_IDS_PER_BATCH)]
+        
+        # Create tasks for all batches
+        tasks = []
+        for i, all_ids_batch in enumerate(all_ids_batches):
+            # Find corresponding memory batch for chunk search
+            memory_ids_batch = memory_ids_batches[i] if i < len(memory_ids_batches) else None
+            tasks.append(execute_batch_query(all_ids_batch, memory_ids_batch))
+
+        # Execute all batches in parallel
+        batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Combine results and handle any exceptions
+        all_results = []
+        for result in batch_results:
+            if isinstance(result, Exception):
+                logger.error(f"Failed to process batch: {str(result)}")
+                continue
+            all_results.extend(result)
+            
+        return all_results
+
+    try:
+        # Process all batches
+        raw_results = await process_batches()
+        
+        # Convert raw results to ParseStoredMemory objects
+        results = []
+        for item in raw_results:
+            try:
+                # Clean up user data first
+                if 'user' in item:
+                    user_data = item['user']
+                    item['user'] = {
+                        'objectId': user_data.get('objectId'),
+                        'displayName': user_data.get('displayName'),
+                        'fullname': user_data.get('fullname'),
+                        'profileimage': user_data.get('profileimage', {}).get('url') if isinstance(user_data.get('profileimage'), dict) else user_data.get('profileimage'),
+                        'title': user_data.get('title'),
+                        'isOnline': user_data.get('isOnline')
+                    }
+
+                # Ensure required fields exist with proper types
+                cleaned_item = {
+                    'objectId': item.get('objectId'),
+                    'createdAt': item.get('createdAt'),
+                    'updatedAt': item.get('updatedAt'),
+                    'ACL': item.get('ACL', {}),
+                    'content': item.get('content', ''),
+                    'metadata': item.get('metadata', '{}'),
+                    'sourceType': item.get('sourceType', ''),
+                    'context': parse_context(item.get('context', '')),
+                    'title': item.get('title'),
+                    'location': item.get('location'),
+                    'emojiTags': item.get('emojiTags', []),
+                    'hierarchicalStructures': item.get('hierarchicalStructures', ''),
+                    'type': item.get('type', 'TextMemoryItem'),
+                    'sourceUrl': item.get('sourceUrl', ''),
+                    'conversationId': item.get('conversationId', ''),
+                    'memoryId': item.get('memoryId'),
+                    'topics': item.get('topics', []),
+                    'steps': item.get('steps', []),
+                    'current_step': item.get('current_step'),
+                    'memoryChunkIds': item.get('memoryChunkIds', []),
+                    'user': item.get('user'),
+                    'developerUser': item.get('developerUser'),
+                    'external_user_read_access': item.get('external_user_read_access', []),
+                    'external_user_write_access': item.get('external_user_write_access', []),
+                    'user_read_access': item.get('user_read_access', []),
+                    'user_write_access': item.get('user_write_access', []),
+                    'workspace_read_access': item.get('workspace_read_access', []),
+                    'workspace_write_access': item.get('workspace_write_access', []),
+                    'role_read_access': item.get('role_read_access', []),
+                    'role_write_access': item.get('role_write_access', []),
+                    'namespace_read_access': item.get('namespace_read_access', []),
+                    'namespace_write_access': item.get('namespace_write_access', []),
+                    'organization_read_access': item.get('organization_read_access', []),
+                    'organization_write_access': item.get('organization_write_access', []),
+                    'customMetadata': item.get('customMetadata'),
+                }
+
+                # Add optional pointers only if they exist
+                if 'workspace' in item and isinstance(item['workspace'], dict):
+                    cleaned_item['workspace'] = {
+                        '__type': 'Pointer',
+                        'className': 'WorkSpace',
+                        'objectId': item['workspace'].get('objectId')
+                    }
+
+                if 'post' in item and isinstance(item['post'], dict):
+                    cleaned_item['post'] = {
+                        '__type': 'Pointer',
+                        'className': 'Post',
+                        'objectId': item['post'].get('objectId')
+                    }
+
+                # Remove any None values
+                cleaned_item = {k: v for k, v in cleaned_item.items() if v is not None}
+
+                # Validate the cleaned item
+                memory = ParseStoredMemory.model_validate(cleaned_item)
+                logger.debug(f"Successfully validated memory {memory.memoryId} as ParseStoredMemory")
+                results.append(memory)
+            except Exception as e:
+                logger.error(f"Failed to validate memory item as ParseStoredMemory: {e}")
+                logger.error(f"Problematic item: {item}")
+                continue
+
+        # Helper function to strip chunk suffix (_0, _1, etc.) from memory IDs
+        def strip_chunk_suffix(memory_id: str) -> str:
+            """Strip chunk identifier (_0, _1, etc.) from memory ID to get base ID."""
+            if '_' in memory_id and memory_id.split('_')[-1].isdigit():
+                return memory_id.rsplit('_', 1)[0]
+            return memory_id
+        
+        def strip_all_suffixes(memory_id: str) -> str:
+            """Strip both _grouped and chunk suffixes to get true base ID for comparison."""
+            import re
+            # First remove _grouped (keep chunk number if present)
+            memory_id = re.sub(r'_grouped(?=_\d+$|$)', '', memory_id)
+            # Then remove chunk suffix to get base ID
+            return strip_chunk_suffix(memory_id)
+
+        # Process found vs missing memory IDs using base IDs for accurate comparison
+        found_memory_ids = [item.memoryId for item in results]
+        # Convert input memory_item_ids to base IDs for comparison (strip both _grouped and _N)
+        base_memory_item_ids = [strip_all_suffixes(mid) for mid in memory_item_ids]
+        missing_base_ids = list(set(base_memory_item_ids) - set(found_memory_ids))
+
+        if missing_base_ids:
+            logger.warning(f"Missing memory items: {len(missing_base_ids)}")
+            logger.warning(f"First few missing memory IDs: {missing_base_ids[:5]}")
+        
+        # Deduplicate results based on memoryId
+        seen_memory_ids = set()
+        deduplicated_results: List[ParseStoredMemory] = []
+        
+        for item in results:
+            if item.memoryId and item.memoryId not in seen_memory_ids:
+                seen_memory_ids.add(item.memoryId)
+                deduplicated_results.append(item)
+        
+        # Process found vs missing memory IDs using deduplicated results and base IDs  
+        # Note: base_memory_item_ids already has _grouped and _N stripped from above
+        found_memory_ids = [item.memoryId for item in deduplicated_results]
+        missing_base_ids_final = list(set(base_memory_item_ids) - set(found_memory_ids))
+        
+        logger.info(f'Retrieved {len(deduplicated_results)} deduplicated items from Parse Server.')
+        logger.info(f'Missing {len(missing_base_ids_final)} items.')
+        if missing_base_ids_final:
+            logger.info(f'First few missing IDs: {missing_base_ids_final[:5]}')
+        
+        return {
+            'results': deduplicated_results,
+            'missing_memory_ids': missing_base_ids_final
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to retrieve memory items: {str(e)}")
+        return {'results': [], 'missing_memory_ids': memory_item_ids}
+
+async def store_connector_user_id(session_token: str, user_id: str, connector_type: str, connector_user_id: str, api_key: Optional[str] = None):
+    """
+    Adds a connector user ID to the ConnectorUserId class in the Parse server.
+
+    Parameters:
+        session_token (str): The session token of the authenticated user.
+        user_id (str): The objectId of the authenticated user.
+        connector_type (str): The type/name of the connector (e.g., 'slack', 'github').
+        connector_user_id (str): The user ID from the connector app.
+
+    Returns:
+        bool: True if the operation was successful, False otherwise.
+    """
+    if not PARSE_SERVER_URL:
+        logger.error("PARSE_SERVER_URL environment variable is not set.")
+        return False
+
+    headers = {
+        "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+        "X-Parse-REST-API-Key": PARSE_REST_API_KEY,
+        "Content-Type": "application/json"
+    }
+    if api_key is not None:
+        headers["X-Parse-Master-Key"] = PARSE_MASTER_KEY
+    else:
+        headers["X-Parse-Session-Token"] = session_token
+
+    # First, check if the ConnectorUserId already exists
+    find_url = f"{PARSE_SERVER_URL}/parse/classes/ConnectorUserId"
+    
+    query = {
+        "where": json.dumps({
+            "connector_type": connector_type,
+            "connector_user_id": connector_user_id
+        })
+    }
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(find_url, headers=headers, params=query)
+            response.raise_for_status()
+            results = response.json().get("results", [])
+
+            if results:
+                logger.info(f"'ConnectorUserId' entry already exists for connector '{connector_type}' with user ID '{connector_user_id}'.")
+                return False  # Already exists
+
+            # If not exists, proceed to create
+            create_url = find_url  # Same endpoint for POST
+            data = {
+                "connector_type": connector_type,
+                "connector_user_id": connector_user_id,
+                "user": {
+                    "__type": "Pointer",
+                    "className": "_User",
+                    "objectId": user_id
+                }
+            }
+
+            create_response = await client.post(create_url, headers=headers, json=data)
+            create_response.raise_for_status()
+
+            logger.info(f"Successfully created 'ConnectorUserId' entry for connector '{connector_type}' with user ID '{connector_user_id}'.")
+            return True
+
+    except httpx.HTTPStatusError as http_err:
+        logger.error(f"HTTP error occurred while handling 'ConnectorUserId': {http_err} - {response.text}")
+    except Exception as err:
+        logger.error(f"An unexpected error occurred: {err}")
+
+    return False
+
+# -------------------------
+# Memory counters utilities
+# -------------------------
+
+def _parse_iso_dt(ts: Optional[str]) -> Optional[datetime]:
+    try:
+        if not ts:
+            return None
+        # Support both Z and offset forms
+        if isinstance(ts, str):
+            s = ts.replace("Z", "+00:00")
+            return datetime.fromisoformat(s)
+        return None
+    except Exception:
+        return None
+
+def _apply_time_decay(previous_value: float, previous_updated_at: Optional[str], now_dt: datetime, half_life_days: float) -> float:
+    try:
+        if previous_value is None:
+            previous_value = 0.0
+        last_dt = _parse_iso_dt(previous_updated_at)
+        if not last_dt:
+            return float(previous_value)
+        dt_days = max(0.0, (now_dt - last_dt).total_seconds() / 86400.0)
+        if dt_days <= 0.0:
+            return float(previous_value)
+        decay = 0.5 ** (dt_days / max(1e-6, half_life_days))
+        return float(previous_value) * float(decay)
+    except Exception:
+        return float(previous_value or 0.0)
+
+async def update_memory_counters_from_retrieval_async(
+    retrieved_ids: List[str],
+    retrieved_similarity_scores: Optional[Dict[str, float]],
+    retrieved_confidence_scores: Optional[Dict[str, float]],
+    cited_ids: Optional[List[str]],
+    cited_confidence_scores: Optional[Dict[str, float]],
+    session_token: Optional[str] = None,
+    api_key: Optional[str] = None,
+    half_life_days: float = 30.0,
+    # New params for additional signals
+    retrieval_latency_ms: Optional[float] = None,  # From query log
+    token_counts: Optional[Dict[str, int]] = None,  # From Memory docs
+    tier_confidences: Optional[Dict[str, float]] = None,  # From query log
+    engagement_scores: Optional[Dict[str, float]] = None  # Avg from feedback
+) -> None:
+    """Increment cache/citation counters and EMAs for retrieved/cited memories.
+
+    Inputs are Parse `Memory.objectId` identifiers. We update these fields:
+    - cacheHitTotal, cacheHitEma30d, cacheConfidenceWeighted30d, cacheEmaUpdatedAt
+    - citationHitTotal, citationHitEma30d, citationConfidenceWeighted30d, citationEmaUpdatedAt
+
+    EMA is time-decayed using `_apply_time_decay` with half-life in days, then
+    we add the current event's contribution (1 for hit; confidence-weighted for CW EMA).
+    """
+    try:
+        import asyncio as _asyncio
+
+        retrieved_ids = list({x for x in (retrieved_ids or []) if x})
+        cited_ids = list({x for x in (cited_ids or []) if x})
+
+        if not retrieved_ids and not cited_ids:
+            return
+
+        now_dt = datetime.now(timezone.utc)
+
+        # Default maps
+        retrieved_similarity_scores = retrieved_similarity_scores or {}
+        retrieved_confidence_scores = retrieved_confidence_scores or {}
+        cited_confidence_scores = cited_confidence_scores or {}
+        token_counts = token_counts or {}
+        tier_confidences = tier_confidences or {}
+        engagement_scores = engagement_scores or {}
+
+        # Fetch current rows to compute decayed EMA baselines
+        # Include 'type' field to ensure it's preserved in updates (needed for afterSave trigger)
+        keys = (
+            "objectId,type,cacheHitTotal,cacheHitEma30d,cacheConfidenceWeighted30d,cacheEmaUpdatedAt,"
+            "citationHitTotal,citationHitEma30d,citationConfidenceWeighted30d,citationEmaUpdatedAt,"
+            "lastAccessedAt"
+        )
+        all_ids = list({*retrieved_ids, *cited_ids})
+        current_rows = await retrieve_memories_by_object_ids_async(
+            all_ids,
+            session_token=session_token,
+            api_key=api_key,
+            keys=keys,
+            limit=len(all_ids) if all_ids else None,
+        )
+        by_id: Dict[str, Dict[str, Any]] = {row.get("objectId"): row for row in (current_rows or [])}
+
+        def _clip01(x: float) -> float:
+            try:
+                if x is None:
+                    return 0.0
+                if x != x:  # NaN check
+                    return 0.0
+                if x < 0.0:
+                    return 0.0
+                if x > 1.0:
+                    return 1.0
+                return float(x)
+            except Exception:
+                return 0.0
+
+        def _fused_confidence(mem_id: str) -> float:
+            """Fuse multiple normalized signals into a single confidence in [0,1].
+
+            Signals used (all clipped to [0,1]):
+            - s_sim: cosine similarity (default 0.5 if missing)
+            - s_conf: reranker/LLM confidence (default 0.5)
+            - s_lat: exp(-latency_ms/500) (default 1.0 if latency unknown)
+            - s_tier: tierPredictionConfidence / 2.0 (default 0.5)
+            - s_eng: engagement/feedback score (default 0.5)
+            - s_tok: min(token_count/512, 1) (default 0.5)
+            Final c_i = product of signals (already in [0,1]).
+            """
+            from math import exp as _exp
+
+            s_sim = _clip01(float(retrieved_similarity_scores.get(mem_id, 0.5)))
+            s_conf = _clip01(float(retrieved_confidence_scores.get(mem_id, 0.5)))
+            lat_ms = retrieval_latency_ms if retrieval_latency_ms is not None else None
+            s_lat = _clip01(float(_exp(-float(lat_ms) / 500.0)) if lat_ms is not None else 1.0)
+            s_tier = _clip01(float(tier_confidences.get(mem_id, 1.0)) / 2.0)
+            s_eng = _clip01(float(engagement_scores.get(mem_id, 0.5)))
+            s_tok = _clip01(min(float(token_counts.get(mem_id, 256)) / 512.0, 1.0))
+
+            ci = s_sim * s_conf * s_lat * s_tier * s_eng * s_tok
+            return _clip01(ci)
+
+        async def _update_one(mem_id: str) -> None:
+            row = by_id.get(mem_id, {})
+
+            update_data: Dict[str, Any] = {}
+            
+            # Preserve 'type' field if it exists (needed for afterSave trigger)
+            # This ensures the trigger doesn't fail when trying to process the memory
+            if row.get("type"):
+                update_data["type"] = row["type"]
+
+            # Cache hit updates
+            if mem_id in retrieved_ids:
+                prev_cache_ema = float(row.get("cacheHitEma30d") or 0.0)
+                prev_cache_cw = float(row.get("cacheConfidenceWeighted30d") or 0.0)
+                cache_updated_at = row.get("cacheEmaUpdatedAt")
+
+                decayed_cache_ema = _apply_time_decay(prev_cache_ema, cache_updated_at, now_dt, half_life_days)
+                decayed_cache_cw = _apply_time_decay(prev_cache_cw, cache_updated_at, now_dt, half_life_days)
+
+                # Fused confidence from available signals
+                conf = _fused_confidence(mem_id)
+                new_cache_ema = decayed_cache_ema + 1.0
+                new_cache_cw = decayed_cache_cw + max(0.0, conf)
+
+                update_data.update({
+                    "cacheHitTotal": {"__op": "Increment", "amount": 1},
+                    "cacheHitEma30d": new_cache_ema,
+                    "cacheConfidenceWeighted30d": new_cache_cw,
+                    "cacheEmaUpdatedAt": now_dt,
+                    "lastAccessedAt": now_dt,
+                })
+
+            # Citation updates (from feedback or explicit citations)
+            if mem_id in cited_ids:
+                prev_cite_ema = float(row.get("citationHitEma30d") or 0.0)
+                prev_cite_cw = float(row.get("citationConfidenceWeighted30d") or 0.0)
+                cite_updated_at = row.get("citationEmaUpdatedAt")
+
+                decayed_cite_ema = _apply_time_decay(prev_cite_ema, cite_updated_at, now_dt, half_life_days)
+                decayed_cite_cw = _apply_time_decay(prev_cite_cw, cite_updated_at, now_dt, half_life_days)
+                # Prefer explicit cited confidence if provided; else reuse fused confidence
+                cite_conf = float(cited_confidence_scores.get(mem_id)) if mem_id in cited_confidence_scores else _fused_confidence(mem_id)
+                new_cite_ema = decayed_cite_ema + 1.0
+                new_cite_cw = decayed_cite_cw + max(0.0, cite_conf)
+
+                # Merge with any cache updates already staged
+                update_data.update({
+                    "citationHitTotal": {"__op": "Increment", "amount": 1},
+                    "citationHitEma30d": new_cite_ema,
+                    "citationConfidenceWeighted30d": new_cite_cw,
+                    "citationEmaUpdatedAt": now_dt,
+                })
+
+            if not update_data:
+                return
+
+            await update_memory_item_parse(
+                session_token=session_token or "",
+                object_id=mem_id,
+                update_data=update_data,
+                api_key=api_key,
+            )
+
+        # Bound concurrency to avoid hammering Parse
+        semaphore = _asyncio.Semaphore(8)
+
+        async def _guarded(mem_id: str):
+            async with semaphore:
+                try:
+                    await _update_one(mem_id)
+                except Exception as _e:  # Log but continue others
+                    logger.error(f"Failed updating counters for Memory {mem_id}: {_e}")
+
+        await _asyncio.gather(*(_guarded(mid) for mid in all_ids))
+
+    except Exception as e:
+        logger.error(f"update_memory_counters_from_retrieval_async failed: {e}", exc_info=True)
+
+async def update_memory_counters_from_feedback_async(
+    cited_memory_ids: List[str],
+    feedback_type: Any,
+    feedback_score: Optional[int],
+    session_token: Optional[str] = None,
+    api_key: Optional[str] = None,
+    half_life_days: float = 30.0
+) -> None:
+    """Update citation counters from feedback signal for cited memories.
+
+    We treat feedback as a citation signal; strength derived from score/type.
+    """
+    try:
+        if not cited_memory_ids:
+            return
+        # Map feedback to confidence increment
+        base_conf = 1.0
+        try:
+            if isinstance(feedback_score, (int, float)):
+                base_conf = max(0.0, float(feedback_score))
+        except Exception:
+            base_conf = 1.0
+        cited_conf = {mid: base_conf for mid in cited_memory_ids if mid}
+        await update_memory_counters_from_retrieval_async(
+            retrieved_ids=[],
+            retrieved_similarity_scores=None,
+            retrieved_confidence_scores=None,
+            cited_ids=cited_memory_ids,
+            cited_confidence_scores=cited_conf,
+            session_token=session_token,
+            api_key=api_key,
+            half_life_days=half_life_days,
+        )
+    except Exception as e:
+        logger.error(f"Failed updating memory counters from feedback: {e}", exc_info=True)
+
+def find_user_by_connector_id(session_token: str, connector_type: str, connector_user_id: str):
+    """
+    Retrieves a Papr _User object based on a single connector user ID for a specific connector.
+
+    Parameters:
+        connector_type (str): The type/name of the connector (e.g., 'slack', 'github').
+        connector_user_id (str): The user ID from the connector app.
+
+    Returns:
+        dict or None: A dictionary containing the user's objectId and other public fields if found, else None.
+    """
+    url = f"{PARSE_SERVER_URL}/parse/classes/ConnectorUserId"
+    headers = {
+        "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+        "X-Parse-REST-API-Key": PARSE_REST_API_KEY,
+         "X-Parse-Session-Token": session_token,
+        "Content-Type": "application/json"
+    }
+    params = {
+        "where": json.dumps({
+            "connector_type": connector_type,
+            "connector_user_id": connector_user_id
+        }),
+        "include": "user"
+    }
+
+    try:
+        response = requests.get(url, headers=headers, params=params)
+        response.raise_for_status()
+        results = response.json().get("results", [])
+        if results:
+            user = results[0]["user"]
+            return user  # Contains the user's objectId and other public fields
+        return None
+    except requests.exceptions.HTTPError as http_err:
+        logger.error(f"HTTP error occurred while querying users: {http_err} - {response.text}")
+    except Exception as err:
+        logger.error(f"An unexpected error occurred: {err}")
+
+    return None
+
+
+async def find_user_by_connector_ids(
+    session_token: str, 
+    connector_type: str, 
+    connector_user_ids: List[str]
+) -> List[str]:
+    """
+    Async version: Retrieves Papr _User objectIds based on a list of connector user IDs.
+
+    Args:
+        session_token (str): The session token of the authenticated user
+        connector_type (str): The type/name of the connector (e.g., 'slack', 'github')
+        connector_user_ids (List[str]): A list of user IDs from the connector app
+
+    Returns:
+        List[str]: A list of Papr _User objectIds that match the provided connector user IDs
+    """
+    if not PARSE_SERVER_URL:
+        logger.error("PARSE_SERVER_URL environment variable is not set.")
+        return []
+
+    url = f"{PARSE_SERVER_URL}/parse/classes/ConnectorUserId"
+
+    headers = {
+        "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+        "X-Parse-REST-API-Key": PARSE_REST_API_KEY,
+        "X-Parse-Session-Token": session_token,
+        "Content-Type": "application/json"
+    }
+    logger.info(f"headers: {headers}")
+
+    # Construct the 'where' clause using the '$in' operator for multiple IDs
+    where_clause = {
+        "connector_type": connector_type,
+        "connector_user_id": {"$in": connector_user_ids}
+    }
+    logger.info(f"where_clause: {where_clause}")
+
+    params = {
+        "where": json.dumps(where_clause),
+        "include": "user",
+        "limit": 1000  # Adjust limit as needed (max 1000 in Parse Server)
+    }
+
+    logger.info(f"params: {params}")
+    logger.info(f"url: {url}")
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(url, headers=headers, params=params)
+            response.raise_for_status()
+
+            data = response.json()
+            results = data.get("results", [])
+
+            # Extract the 'objectId' of the 'user' from each result
+            object_ids = [result["user"]["objectId"] for result in results if "user" in result]
+            logger.info(f"Retrieved {len(object_ids)} user objectIds for connector '{connector_type}'.")
+            return object_ids
+        
+        except httpx.HTTPError as http_err:
+            logger.error(f"HTTP error occurred while querying users: {http_err}")
+            return []
+        except Exception as err:
+            logger.error(f"An unexpected error occurred: {err}")
+            return []
+
+async def get_workspaceId_using_tenantId(session_token: str, tenant_id: str) -> str:
+    """
+    Asynchronously retrieves the objectId of a WorkSpace based on the provided tenantId.
+
+    Parameters:
+        session_token (str): The session token of the authenticated user.
+        tenant_id (str): The tenantId to query the WorkSpace.
+
+    Returns:
+        str or None: The objectId of the WorkSpace if found, else None.
+    """
+    url = f"{PARSE_SERVER_URL}/parse/classes/WorkSpace"
+    
+    # Define the query parameters to filter by tenantId
+    params = {
+        "where": json.dumps({
+            "tenantId": tenant_id
+        }),
+        "limit": 1  # Assuming tenantId is unique
+    }
+    
+    headers = {
+        "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+        "X-Parse-REST-API-Key": PARSE_REST_API_KEY,
+        "X-Parse-Session-Token": session_token,
+        "Content-Type": "application/json"
+    }
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            logger.info(f"Fetching workspace for tenant_id: {tenant_id}")
+            response = await client.get(url, headers=headers, params=params)
+            response.raise_for_status()
+            
+            results = response.json().get('results', [])
+            
+            if not results:
+                logger.warning(f"No WorkSpace found with tenantId: {tenant_id}")
+                return None
+            
+            workspace = results[0]
+            workspace_id = workspace.get('objectId')
+            logger.info(f"WorkSpace successfully retrieved: {workspace_id}")
+            return workspace_id
+            
+    except httpx.HTTPStatusError as http_err:
+        logger.error(f"HTTP error occurred while retrieving workspace: {http_err} - {response.text}")
+        return None
+    except Exception as err:
+        logger.error(f"Unexpected error occurred while retrieving workspace: {err}")
+        return None
+
+async def get_user_goals_async(user_id: str, session_token: str, api_key: Optional[str] = None, limit: Optional[int] = None) -> List[dict]:
+    """Async version of get_user_goals
+    
+    Args:
+        user_id (str): The user's ID
+        session_token (str): The session token for authentication
+        
+    Returns:
+        List[dict]: A list of goal dictionaries. Returns empty list if request fails.
+    """
+    url = f"{PARSE_SERVER_URL}/parse/classes/Goal"
+    # Preserve prior behavior (no order/limit/keys) unless a limit is explicitly provided
+    if limit is None:
+        params = {
+            "where": json.dumps({
+                "user": {
+                    "__type": "Pointer",
+                    "className": "_User",
+                    "objectId": user_id
+                }
+            })
+        }
+    else:
+        params = {
+            "where": json.dumps({
+                "user": {
+                    "__type": "Pointer",
+                    "className": "_User",
+                    "objectId": user_id
+                }
+            }),
+            "order": "-createdAt",
+            "limit": max(1, min(int(limit), 10)),
+            "keys": "objectId,title,description,keyResults,createdAt"
+        }
+    headers = {
+        "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+        "X-Parse-REST-API-Key": PARSE_REST_API_KEY,
+        "X-Parse-Master-Key": PARSE_MASTER_KEY,
+        "Content-Type": "application/json"
+    }
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(url, headers=headers, params=params)
+            response.raise_for_status()
+            return response.json().get('results', [])
+        except httpx.HTTPStatusError as e:
+            body = e.response.text if e.response is not None else None
+            logger.error(f"Failed to get user goals: {e} | url={url} params={params} headers_keys={list(headers.keys())} body={body}")
+            return []
+        except httpx.HTTPError as e:
+            logger.error(f"Failed to get user goals (non-status): {str(e)} | url={url} params={params}")
+            return []
+
+async def get_user_usecases_async(user_id: str, session_token: str, api_key: Optional[str] = None, limit: Optional[int] = None) -> List[dict]:
+    """Async version of get_user_usecases
+    
+    Args:
+        user_id (str): The user's ID
+        session_token (str): The session token for authentication
+        
+    Returns:
+        List[dict]: A list of usecase dictionaries containing name, description, and createdAt fields.
+                   Returns empty list if request fails.
+    """
+    url = f"{PARSE_SERVER_URL}/parse/classes/Usecase"
+    where_clause = {
+            "user": {
+                "__type": "Pointer",
+                "className": "_User",
+                "objectId": user_id
+            }
+    }
+    # Preserve prior behavior (order by -createdAt with default limit=10 and keys),
+    # unless a different limit is explicitly provided
+    if limit is None:
+        params = {
+            "where": json.dumps(where_clause),
+            "keys": "name,description,createdAt",
+            "order": "-createdAt",
+            "limit": 10
+        }
+    else:
+        params = {
+            "where": json.dumps(where_clause),
+            "keys": "objectId,name,description,createdAt",
+            "order": "-createdAt",
+            "limit": max(1, min(int(limit), 10))
+        }
+    headers = {
+        "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+        "X-Parse-REST-API-Key": PARSE_REST_API_KEY,
+        "X-Parse-Master-Key": PARSE_MASTER_KEY,
+        "Content-Type": "application/json"
+    }
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(url, headers=headers, params=params)
+            response.raise_for_status()
+            return response.json().get('results', [])
+        except httpx.HTTPStatusError as e:
+            body = e.response.text if e.response is not None else None
+            logger.error(f"Failed to get user usecases: {e} | url={url} params={params} headers_keys={list(headers.keys())} body={body}")
+            return []
+        except httpx.HTTPError as e:
+            logger.error(f"Failed to get user usecases (non-status): {str(e)} | url={url} params={params}")
+            return []
+
+async def get_top_retrieved_memory_object_ids_async(
+    user_id: str,
+    session_token: Optional[str] = None,
+    workspace_id: Optional[str] = None,
+    days: int = 7,
+    limit: int = 500,
+    api_key: Optional[str] = None
+) -> Dict[str, int]:
+    """Return a map of Memory.objectId -> retrieval count over the last N days.
+
+    Uses Parse Master Key by default to avoid ACL surprises in server-side analytics.
+    """
+    if not PARSE_SERVER_URL:
+        logger.error("PARSE_SERVER_URL environment variable is not set.")
+        return {}
+
+    headers = {
+        "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+        "X-Parse-Master-Key": PARSE_MASTER_KEY,
+        "Content-Type": "application/json",
+        "Accept-Encoding": "gzip"
+    }
+    if session_token and not api_key:
+        headers["X-Parse-Session-Token"] = session_token
+
+    seven_days_ago = (datetime.now(UTC) - timedelta(days=max(1, int(days)))).isoformat()
+    where_logs: Dict[str, Any] = {
+        "$and": [
+            {"user": {"__type": "Pointer", "className": "_User", "objectId": user_id}},
+            {"createdAt": {"$gte": {"__type": "Date", "iso": seven_days_ago}}}
+        ]
+    }
+    if workspace_id:
+        where_logs["$and"].append({
+            "workspace": {"__type": "Pointer", "className": "WorkSpace", "objectId": workspace_id}
+        })
+
+    params = {
+        "where": json.dumps(where_logs),
+        "order": "-createdAt",
+        "limit": str(max(1, min(int(limit), 1000))),
+        "keys": "objectId,retrievedMemories"
+    }
+
+    logger.info(f"params for get_top_retrieved_memory_object_ids_async: {params}")
+
+    counts: Dict[str, int] = {}
+    async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, read=20.0)) as client:
+        try:
+            r = await client.get(f"{PARSE_SERVER_URL}/parse/classes/MemoryRetrievalLog", headers=headers, params=params)
+            logger.info(f"response for get_top_retrieved_memory_object_ids_async: {r.json()}")
+            r.raise_for_status()
+            retrieval_logs = r.json().get("results", [])
+            logger.info(f"Found {len(retrieval_logs)} MemoryRetrievalLog entries")
+            
+            # For each MemoryRetrievalLog, query Memory class with relation constraint
+            for i, log in enumerate(retrieval_logs):
+                log_id = log.get("objectId")
+                if not log_id:
+                    continue
+                    
+                # Query Memory class where it's related to this MemoryRetrievalLog via retrievedMemories relation
+                try:
+                    # Parse Server relation query: find Memory objects that are in the retrievedMemories relation of this log
+                    memory_where = {
+                        "$relatedTo": {
+                            "object": {
+                                "__type": "Pointer",
+                                "className": "MemoryRetrievalLog", 
+                                "objectId": log_id
+                            },
+                            "key": "retrievedMemories"
+                        }
+                    }
+                    
+                    memory_params = {
+                        "where": json.dumps(memory_where),
+                        "keys": "objectId",
+                        "limit": "1000"
+                    }
+                    
+                    logger.debug(f"Querying Memory class with relation constraint for log {log_id}")
+                    memory_url = f"{PARSE_SERVER_URL}/parse/classes/Memory"
+                    memory_resp = await client.get(memory_url, headers=headers, params=memory_params)
+                    memory_resp.raise_for_status()
+                    
+                    memory_objects = memory_resp.json().get("results", [])
+                    logger.info(f"MemoryRetrievalLog {log_id} has {len(memory_objects)} retrieved memories")
+                    
+                    if i < 3:  # Log details for first 3 logs
+                        logger.info(f"Memory relation query for log {log_id} returned: {memory_resp.json()}")
+                    
+                    for memory_obj in memory_objects:
+                        obj_id = memory_obj.get("objectId")
+                        if obj_id:
+                            counts[obj_id] = counts.get(obj_id, 0) + 1
+                            if i < 3:  # Log first few memory IDs
+                                logger.info(f"Adding memory {obj_id} to counts (count now: {counts[obj_id]})")
+                            
+                except Exception as relation_error:
+                    logger.warning(f"Failed to query Memory relation for log {log_id}: {relation_error}")
+                    continue
+        except httpx.HTTPStatusError as e:
+            body = e.response.text if e.response is not None else None
+            logger.warning(f"Failed to aggregate MemoryRetrievalLog: {e} | url={PARSE_SERVER_URL}/parse/classes/MemoryRetrievalLog params={params} body={body}")
+        except Exception as e:
+            logger.warning(f"Failed to aggregate MemoryRetrievalLog (non-status): {e}")
+    return counts
+
+async def retrieve_memories_by_object_ids_async(
+    object_ids: List[str],
+    session_token: Optional[str] = None,
+    api_key: Optional[str] = None,
+    keys: Optional[str] = None,
+    limit: Optional[int] = None
+) -> List[dict]:
+    """Fetch Memory rows by their Parse objectIds and return raw dicts.
+
+    This is helpful when analytics returns Memory.objectId and we need full rows.
+    
+    Automatically batches requests to avoid HTTP 431 (Request URI Too Large) errors
+    when fetching many IDs at once.
+    """
+    if not object_ids:
+        return []
+    if not PARSE_SERVER_URL:
+        logger.error("PARSE_SERVER_URL environment variable is not set.")
+        return []
+
+    # Deduplicate and filter empty IDs
+    unique_ids = list({oid for oid in object_ids if oid})
+    if not unique_ids:
+        return []
+    
+    # Batch size to avoid HTTP 431 errors (Request URI Too Large)
+    # 50 IDs keeps URL under ~2KB which is safe for most servers
+    BATCH_SIZE = 50
+    
+    # If we have few IDs, make a single request
+    if len(unique_ids) <= BATCH_SIZE:
+        return await _fetch_memories_batch(
+            unique_ids, 
+            session_token=session_token,
+            api_key=api_key,
+            keys=keys,
+            limit=limit
+        )
+    
+    # For many IDs, batch the requests
+    logger.info(f"Batching {len(unique_ids)} memory IDs into chunks of {BATCH_SIZE}")
+    all_results = []
+    
+    for i in range(0, len(unique_ids), BATCH_SIZE):
+        batch_ids = unique_ids[i:i + BATCH_SIZE]
+        batch_results = await _fetch_memories_batch(
+            batch_ids,
+            session_token=session_token,
+            api_key=api_key,
+            keys=keys,
+            limit=None  # No limit per batch
+        )
+        all_results.extend(batch_results)
+        
+        # Apply overall limit if specified
+        if limit and len(all_results) >= limit:
+            all_results = all_results[:limit]
+            break
+    
+    logger.info(f"Retrieved {len(all_results)} memories from {len(unique_ids)} requested IDs")
+    return all_results
+
+
+async def _fetch_memories_batch(
+    object_ids: List[str],
+    session_token: Optional[str] = None,
+    api_key: Optional[str] = None,
+    keys: Optional[str] = None,
+    limit: Optional[int] = None
+) -> List[dict]:
+    """Internal helper to fetch a single batch of memories by objectIds.
+    
+    Note: Parse Server always returns objectId for all records (it's a required field).
+    All results from this function will have objectId present.
+    """
+    if not object_ids:
+        return []
+    
+    headers = {
+        "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+        "Content-Type": "application/json",
+        "Accept-Encoding": "gzip"
+    }
+    # Prefer master key for server-side integrations
+    headers["X-Parse-Master-Key"] = PARSE_MASTER_KEY
+    if session_token and not api_key:
+        headers["X-Parse-Session-Token"] = session_token
+
+    where_filter = {"objectId": {"$in": object_ids}}
+    params = {
+        "where": json.dumps(where_filter),
+        "limit": str(max(1, min(int(limit or len(object_ids)), 1000))),
+        "keys": keys or MEMORY_KEYS,
+        "order": "-updatedAt"
+    }
+
+    async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, read=20.0)) as client:
+        try:
+            r = await client.get(f"{PARSE_SERVER_URL}/parse/classes/Memory", headers=headers, params=params)
+            r.raise_for_status()
+            results = r.json().get("results", [])
+            
+            # Validate that all results have objectId (Parse Server should always provide this)
+            missing_object_id = [r for r in results if not r.get("objectId")]
+            if missing_object_id:
+                logger.warning(f"Found {len(missing_object_id)} memories without objectId from Parse Server (this should never happen)")
+            
+            return results
+        except Exception as e:
+            logger.error(f"Failed to fetch memories batch (size={len(object_ids)}): {e}")
+            return []
+
+async def enrich_memories_with_embeddings_batch(
+    memories: List[Dict[str, Any]],
+    memory_graph: "MemoryGraph",
+    quantize: bool = True
+) -> List[Dict[str, Any]]:
+    """
+    Enrich memory items with embeddings from Qdrant in batch.
+    
+    Args:
+        memories: List of memory dictionaries from Parse Server
+        memory_graph: MemoryGraph instance with Qdrant client
+        quantize: Whether to quantize embeddings to INT8 (default: True)
+        
+    Returns:
+        List of memories enriched with embeddings
+    """
+    if not memories:
+        return memories
+    
+    # Helper to safely get value from dict or object
+    def safe_get(obj, key, default=None):
+        if isinstance(obj, dict):
+            return obj.get(key, default)
+        return getattr(obj, key, default)
+    
+    # Collect all chunk IDs from memories
+    chunk_ids_to_fetch = []
+    memory_chunk_map = {}  # Map memory index to its chunk IDs
+    
+    for idx, memory in enumerate(memories):
+        # Extract chunk IDs from memoryChunkIds or matchingChunkIds fields
+        chunk_ids = []
+        
+        mem_chunk_ids = safe_get(memory, 'memoryChunkIds')
+        if mem_chunk_ids:
+            chunk_ids.extend(mem_chunk_ids)
+            
+        matching_chunk_ids = safe_get(memory, 'matchingChunkIds')
+        if matching_chunk_ids:
+            chunk_ids.extend(matching_chunk_ids)
+        
+        # Fallback: construct chunk ID from objectId/memoryId
+        if not chunk_ids:
+            memory_id = safe_get(memory, 'memoryId') or safe_get(memory, 'objectId') or safe_get(memory, 'id')
+            if memory_id:
+                # Default chunk pattern: {memory_id}_0
+                chunk_ids.append(f"{memory_id}_0")
+        
+        if chunk_ids:
+            chunk_ids_to_fetch.extend(chunk_ids)
+            memory_chunk_map[idx] = chunk_ids
+    
+    logger.info(f"Enriching {len(memories)} memories with embeddings from {len(chunk_ids_to_fetch)} chunk IDs")
+    
+    # Batch retrieve embeddings from Qdrant
+    embeddings_map = await memory_graph.retrieve_embeddings_by_chunk_ids_batch(chunk_ids_to_fetch)
+    
+    if not embeddings_map:
+        logger.warning("No embeddings retrieved from Qdrant")
+        return memories
+    
+    def quantize_int8(vec: List[float]) -> List[int]:
+        """Quantize float vector to INT8"""
+        if not vec:
+            return []
+        max_abs = max(abs(x) for x in vec) or 1e-8
+        scale = 127.0 / max_abs
+        q = []
+        for x in vec:
+            v = int(round(x * scale))
+            if v > 127:
+                v = 127
+            if v < -128:
+                v = -128
+            q.append(v)
+        return q
+    
+    # Enrich memories with embeddings
+    enriched_count = 0
+    for idx, chunk_ids in memory_chunk_map.items():
+        # Get embeddings for all chunks of this memory
+        chunk_embeddings = []
+        for chunk_id in chunk_ids:
+            if chunk_id in embeddings_map:
+                chunk_embeddings.append(embeddings_map[chunk_id])
+        
+        if chunk_embeddings:
+            # Average embeddings if multiple chunks
+            if len(chunk_embeddings) == 1:
+                avg_embedding = chunk_embeddings[0]
+            else:
+                dim = len(chunk_embeddings[0])
+                avg_embedding = [0.0] * dim
+                for emb in chunk_embeddings:
+                    for i in range(dim):
+                        avg_embedding[i] += emb[i]
+                avg_embedding = [x / len(chunk_embeddings) for x in avg_embedding]
+            
+            # Add embedding to memory (quantized or full)
+            # Clear the opposite field to avoid confusion
+            if quantize:
+                if isinstance(memories[idx], dict):
+                    memories[idx]['embedding_int8'] = quantize_int8(avg_embedding)
+                    # Clear float32 field if present
+                    if 'embedding' in memories[idx]:
+                        memories[idx]['embedding'] = None
+                else:
+                    setattr(memories[idx], 'embedding_int8', quantize_int8(avg_embedding))
+                    # Clear float32 field if present
+                    if hasattr(memories[idx], 'embedding'):
+                        setattr(memories[idx], 'embedding', None)
+            else:
+                if isinstance(memories[idx], dict):
+                    memories[idx]['embedding'] = avg_embedding
+                    # Clear INT8 field if present
+                    if 'embedding_int8' in memories[idx]:
+                        memories[idx]['embedding_int8'] = None
+                else:
+                    setattr(memories[idx], 'embedding', avg_embedding)
+                    # Clear INT8 field if present
+                    if hasattr(memories[idx], 'embedding_int8'):
+                        setattr(memories[idx], 'embedding_int8', None)
+            
+            enriched_count += 1
+    
+    logger.info(f"Enriched {enriched_count}/{len(memories)} memories with embeddings from Qdrant")
+    return memories
+
+
+async def build_tier1_ranked_memories_async(
+    user_id: str,
+    session_token: str,
+    *,
+    workspace_id: Optional[str] = None,
+    days: int = 30,
+    limit: int = 500,
+    max_items: int = 50,
+    user_workspace_ids: Optional[List[str]] = None,
+    user_roles: Optional[List[str]] = None,
+    organization_id: Optional[str] = None,
+    namespace_id: Optional[str] = None,
+) -> List["Memory"]:
+    """Fetch candidate memories and rank with citation-first weights.
+
+    final score =
+      if has citation signal: 0.7*Score_cite + 0.3*Score_cache
+      else: Score_cache
+
+    where Score_cache = 0.5*log1p(cacheHitTotal) + 0.3*cacheHitEma30d + 0.2*avg_cache_conf
+          Score_cite  = 0.4*log1p(citationHitTotal) + 0.3*citationHitEma30d + 0.3*avg_cite_conf
+          avg_cache_conf = cacheConfidenceWeighted30d / max(cacheHitEma30d,1)
+          avg_cite_conf  = citationConfidenceWeighted30d / max(citationHitEma30d,1)
+    
+    ACL filtering: Applies organization_id and namespace_id filters if provided.
+    
+    Returns List[Memory] with all fields populated including ACL fields.
+    """
+    logger.info(f"[TIER1_DEBUG] Starting build_tier1_ranked_memories_async with user_id={user_id}, workspace_id={workspace_id}, days={days}, limit={limit}, max_items={max_items}, org_id={organization_id}, namespace_id={namespace_id}")
+    
+    counts = await get_top_retrieved_memory_object_ids_async(
+        user_id, session_token, workspace_id=workspace_id, days=days, limit=limit
+    )
+    logger.info(f"[TIER1_DEBUG] get_top_retrieved_memory_object_ids_async returned {len(counts) if counts else 0} counts")
+    if not counts:
+        logger.warning(f"[TIER1_DEBUG] No counts returned from get_top_retrieved_memory_object_ids_async - returning empty list")
+        return []
+    
+    candidate_ids = list(counts.keys())[:limit]
+    logger.info(f"[TIER1_DEBUG] Selected {len(candidate_ids)} candidate_ids from counts (top {limit})")
+    logger.info(f"[TIER1_DEBUG] First 5 candidate_ids: {candidate_ids[:5]}")
+    logger.info(f"[TIER1_DEBUG] Top 5 counts: {[(k, counts[k]) for k in candidate_ids[:5]]}")
+
+    # Use comprehensive MEMORY_KEYS which includes all fields plus analytics fields
+    logger.info(f"[TIER1_DEBUG] Retrieving memories with keys: {MEMORY_KEYS}")
+    rows = await retrieve_memories_by_object_ids_async(candidate_ids, session_token=session_token, keys=MEMORY_KEYS)
+    logger.info(f"[TIER1_DEBUG] retrieve_memories_by_object_ids_async returned {len(rows)} rows")
+    if not rows:
+        logger.warning(f"[TIER1_DEBUG] No rows returned from retrieve_memories_by_object_ids_async - returning empty list")
+        return []
+    
+    # Apply ACL filtering if organization_id or namespace_id is provided
+    if organization_id or namespace_id:
+        filtered_rows = []
+        for m in rows:
+            # Check organization access
+            if organization_id:
+                # Memory must have matching organization_read_access OR no organization_id (legacy)
+                org_read_access = m.get('organization_read_access', [])
+                memory_org_id = m.get('organization_id')
+                has_org_access = (
+                    organization_id in org_read_access or
+                    not memory_org_id  # Legacy memory without organization_id
+                )
+                if not has_org_access:
+                    continue
+            
+            # Check namespace access
+            if namespace_id:
+                # Memory must have matching namespace_read_access OR no namespace_id (legacy)
+                ns_read_access = m.get('namespace_read_access', [])
+                memory_ns_id = m.get('namespace_id')
+                has_ns_access = (
+                    namespace_id in ns_read_access or
+                    not memory_ns_id  # Legacy memory without namespace_id
+                )
+                if not has_ns_access:
+                    continue
+            
+            filtered_rows.append(m)
+        
+        logger.info(f"[TIER1_DEBUG] ACL filtering: {len(rows)} -> {len(filtered_rows)} memories (org_id={organization_id}, namespace_id={namespace_id})")
+        rows = filtered_rows
+
+    def _f(x: Any) -> float:
+        try:
+            return float(x)
+        except Exception:
+            return 0.0
+
+    def _log1p(x: Any) -> float:
+        try:
+            return math.log1p(float(x) if x is not None else 0.0)
+        except Exception:
+            return 0.0
+
+    scored: List[Tuple[float, Dict[str, Any]]] = []
+    logger.info(f"[TIER1_DEBUG] Starting scoring loop for {len(rows)} rows")
+    
+    for i, m in enumerate(rows):
+        memory_id = m.get("memoryId") or m.get("objectId")
+        c_tot = _f(m.get('cacheHitTotal'))
+        c_ema = _f(m.get('cacheHitEma30d'))
+        c_cw  = _f(m.get('cacheConfidenceWeighted30d'))
+        z_tot = _f(m.get('citationHitTotal'))
+        z_ema = _f(m.get('citationHitEma30d'))
+        z_cw  = _f(m.get('citationConfidenceWeighted30d'))
+
+        avg_cache_conf = c_cw / max(c_ema, 1.0)
+        avg_cite_conf  = z_cw / max(z_ema, 1.0)
+        score_cache = 0.5*_log1p(c_tot) + 0.3*c_ema + 0.2*avg_cache_conf
+        score_cite  = 0.4*_log1p(z_tot) + 0.3*z_ema + 0.3*avg_cite_conf
+        has_cite = (z_tot > 0) or (z_ema > 0) or (z_cw > 0.0)
+        final = (0.7*score_cite + 0.3*score_cache) if has_cite else score_cache
+        
+        if i < 5:  # Log details for first 5 items
+            logger.info(f"[TIER1_DEBUG] Memory {i+1} (id={memory_id}): cache_total={c_tot}, cache_ema={c_ema}, cache_conf={c_cw}, cite_total={z_tot}, cite_ema={z_ema}, cite_conf={z_cw}, has_cite={has_cite}, final_score={final}")
+        
+        scored.append((final, m))
+
+    scored.sort(key=lambda t: t[0], reverse=True)
+    logger.info(f"[TIER1_DEBUG] After sorting, top 5 scores: {[s[0] for s in scored[:5]]}")
+    
+    # Import Memory for conversion
+    from models.parse_server import Memory
+    
+    out: List[Memory] = []
+    for i, (score, m) in enumerate(scored[:max_items]):
+        memory_id = m.get("memoryId") or m.get("objectId")
+        if i < 5:  # Log details for first 5 results
+            logger.info(f"[TIER1_DEBUG] Final result {i+1}: id={memory_id}, score={score}, content_preview={str(m.get('content', ''))[:100]}...")
+        
+        try:
+            # Convert raw Parse response to ParseStoredMemory, then to Memory
+            parse_stored = ParseStoredMemory.from_dict(m)
+            memory_obj = Memory.from_internal(parse_stored)
+            # Attach the relevance score from server ranking
+            memory_obj.relevance_score = score
+            out.append(memory_obj)
+        except Exception as e:
+            logger.error(f"Failed to convert memory {memory_id} to Memory object: {e}")
+            # Skip this memory if conversion fails
+            continue
+    
+    logger.info(f"[TIER1_DEBUG] Returning {len(out)} tier1 Memory objects (max_items={max_items})")
+    return out
+    
+async def fetch_memory_delta_since_async(
+    user_id: str,
+    watermark_iso: str,
+    session_token: Optional[str] = None,
+    workspace_id: Optional[str] = None,
+    limit: int = 200,
+    api_key: Optional[str] = None
+) -> List[dict]:
+    """Fetch Memory rows updated strictly after the provided ISO watermark.
+
+    Returns raw Memory dicts with a stable order for cursoring (updatedAt,objectId).
+    """
+    if not PARSE_SERVER_URL:
+        logger.error("PARSE_SERVER_URL environment variable is not set.")
+        return []
+
+    headers = {
+        "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+        "Content-Type": "application/json",
+        "Accept-Encoding": "gzip"
+    }
+    headers["X-Parse-Master-Key"] = PARSE_MASTER_KEY
+    if session_token and not api_key:
+        headers["X-Parse-Session-Token"] = session_token
+
+    where_filter: Dict[str, Any] = {
+        "$and": [
+            {"user": {"__type": "Pointer", "className": "_User", "objectId": user_id}},
+            {"updatedAt": {"$gt": {"__type": "Date", "iso": watermark_iso}}}
+        ]
+    }
+    if workspace_id:
+        where_filter["$and"].append({
+            "workspace": {"__type": "Pointer", "className": "WorkSpace", "objectId": workspace_id}
+        })
+
+    params = {
+        "where": json.dumps(where_filter),
+        "order": "updatedAt,objectId",
+        "limit": str(max(1, min(int(limit), 1000))),
+        "keys": MEMORY_KEYS
+    }
+
+    async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, read=20.0)) as client:
+        try:
+            r = await client.get(f"{PARSE_SERVER_URL}/parse/classes/Memory", headers=headers, params=params)
+            r.raise_for_status()
+            return r.json().get("results", [])
+        except httpx.HTTPStatusError as e:
+            body = e.response.text if e.response is not None else None
+            logger.error(f"Failed to fetch memory delta since watermark: {e} | url={PARSE_SERVER_URL}/parse/classes/Memory params={params} body={body}")
+            return []
+        except Exception as e:
+            logger.error(f"Failed to fetch memory delta since watermark (non-status): {e}")
+            return []
+
+async def get_user_memGraph_schema_async(user_id: str, session_token: str) -> dict:
+    """Async version of get_user_memGraph_schema using httpx
+    
+    Args:
+        user_id (str): The user's ID
+        session_token (str): The session token for authentication
+        
+    Returns:
+        dict or None: The memory graph schema if found, None otherwise
+    """
+    url = f"{PARSE_SERVER_URL}/parse/classes/MemoryGraph"
+    params = {
+        "where": json.dumps({
+            "user": {
+                "__type": "Pointer",
+                "className": "_User",
+                "objectId": user_id
+            }
+        }),
+        "include": "nodes,relationships"
+    }
+    headers = {
+        "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+        "X-Parse-REST-API-Key": PARSE_REST_API_KEY,
+        "X-Parse-Master-Key": PARSE_MASTER_KEY,
+        "Content-Type": "application/json"
+    }
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(url, headers=headers, params=params)
+            response.raise_for_status()
+            data = response.json()
+            if data.get('results'):
+                return data['results'][0]
+            return None
+        except httpx.HTTPError as e:
+            logger.error(f"Failed to get memory graph schema: {str(e)}")
+            return None
+
+async def create_usecase_async(user_id: str, session_token: str, name: str, description: str, api_key: Optional[str] = None) -> dict:
+    """Async version of create_usecase using httpx
+    
+    Args:
+        user_id (str): The user's ID
+        session_token (str): The session token for authentication
+        name (str): The name of the usecase
+        description (str): The description of the usecase
+        
+    Returns:
+        dict or None: The created usecase data if successful, None otherwise
+    """
+    url = f"{PARSE_SERVER_URL}/parse/classes/Usecase"
+    data = {
+        "user": {
+            "__type": "Pointer",
+            "className": "_User",
+            "objectId": user_id
+        },
+        "name": name,
+        "description": description
+    }
+    headers = {
+        "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+        "X-Parse-REST-API-Key": PARSE_REST_API_KEY,
+        "X-Parse-Master-Key": PARSE_MASTER_KEY,
+        "Content-Type": "application/json"
+    }
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(url, headers=headers, json=data)
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPError as e:
+            logger.error(f"Failed to create usecase: {str(e)}")
+            return None
+
+async def add_list_of_usecases_async(user_id: str, session_token: str, use_cases: list, api_key: Optional[str] = None):
+    """Async version of add_list_of_usecases"""
+    async def add_single_usecase(use_case):
+        if not use_case.get('name') or not use_case.get('description'):
+            logger.info(f"Invalid use case: {use_case}")
+            return None
+        response = await create_usecase_async(user_id, session_token, use_case['name'], use_case['description'], api_key=api_key)
+        if response is not None:
+            logger.info(f"Use case added successfully: {use_case['name']}")
+        else:
+            logger.info(f"Failed to add use case: {use_case['name']}")
+        return response
+
+    # Create tasks for all use cases
+    tasks = [add_single_usecase(use_case) for use_case in use_cases]
+    # Wait for all tasks to complete
+    results = await asyncio.gather(*tasks)
+    return results
+
+async def create_goal_async(
+    user_id: str, 
+    session_token: str, 
+    title: str, 
+    description: str = None, 
+    key_results: List[dict] = None,
+    api_key: Optional[str] = None
+) -> Optional[dict]:
+    """Async version of create_goal using httpx
+    
+    Args:
+        user_id (str): The user's ID
+        session_token (str): The session token for authentication
+        title (str): The title of the goal
+        description (str, optional): The description of the goal. Defaults to None.
+        key_results (List[dict], optional): List of key results for the goal. Defaults to None.
+        
+    Returns:
+        Optional[dict]: The created goal data if successful, None otherwise
+    """
+    url = f"{PARSE_SERVER_URL}/parse/classes/Goal"
+    data = {
+        "user": {
+            "__type": "Pointer",
+            "className": "_User",
+            "objectId": user_id
+        },
+        "title": title,
+        "description": description or "",
+        "keyResults": key_results or []
+    }
+    headers = {
+        "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+        "X-Parse-REST-API-Key": PARSE_REST_API_KEY,
+        "X-Parse-Master-Key": PARSE_MASTER_KEY,
+        "Content-Type": "application/json"
+    }
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(url, headers=headers, json=data)
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPError as e:
+            logger.error(f"Failed to create goal: {str(e)}")
+            return None
+
+async def add_list_of_goals_async(user_id: str, session_token: str, goals: List[dict], api_key: Optional[str] = None) -> List[Optional[dict]]:
+    """Async version of add_list_of_goals that processes multiple goals concurrently
+    
+    Args:
+        user_id (str): The user's ID
+        session_token (str): The session token for authentication
+        goals (List[dict]): List of goal dictionaries containing title, description, and key_results
+        
+    Returns:
+        List[Optional[dict]]: List of created goal data, None for any goals that failed to create
+    """
+    async def add_single_goal(goal: dict) -> Optional[dict]:
+        key_results = goal.get('key_results', [])
+        description = goal.get('description', '')
+        title = goal.get('title', '')
+        
+        response = await create_goal_async(user_id, session_token, title, description, key_results, api_key=api_key)
+        if response is not None:
+            logger.info(f"Goal added successfully: {title}")
+        else:
+            logger.error(f"Failed to add goal: {title}")
+        return response
+
+    # Create tasks for all goals
+    tasks = [add_single_goal(goal) for goal in goals]
+    
+    # Wait for all tasks to complete concurrently
+    results = await asyncio.gather(*tasks)
+    
+    return results
+
+async def create_memory_graph_node_async(user_id: str, session_token: str, name: str) -> Optional[str]:
+    """Async version of create_memory_graph_node using httpx
+    
+    Args:
+        user_id (str): The user's ID
+        session_token (str): The session token for authentication
+        name (str): The name of the memory graph node
+        
+    Returns:
+        Optional[str]: The objectId of the created/existing node if successful, None otherwise
+    """
+    query_url = f"{PARSE_SERVER_URL}/parse/classes/MemoryGraphNode"
+    headers = {
+        "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+        "X-Parse-REST-API-Key": PARSE_REST_API_KEY,
+        "X-Parse-Master-Key": PARSE_MASTER_KEY,
+        "Content-Type": "application/json"
+    }
+    
+    # Check if node already exists
+    params = {
+        "where": json.dumps({
+            "name": name,
+            "user": {
+                "__type": "Pointer",
+                "className": "_User",
+                "objectId": user_id
+            }
+        })
+    }
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            # Check if node exists
+            response = await client.get(query_url, headers=headers, params=params)
+            response.raise_for_status()
+            data = response.json()
+            
+            if data['results']:
+                return data['results'][0]['objectId']
+            
+            # Create new node if it doesn't exist
+            data = {
+                "name": name,
+                "user": {
+                    "__type": "Pointer",
+                    "className": "_User",
+                    "objectId": user_id
+                }
+            }
+            
+            create_response = await client.post(query_url, headers=headers, json=data)
+            create_response.raise_for_status()
+            result = create_response.json()
+            return result['objectId']
+            
+        except httpx.HTTPError as e:
+            logger.error(f"Failed to create memory graph node: {str(e)}")
+            return None
+
+async def create_memory_graph_relationship_async(user_id: str, session_token: str, name: str) -> Optional[str]:
+    """Async version of create_memory_graph_relationship using httpx
+    
+    Args:
+        user_id (str): The user's ID
+        session_token (str): The session token for authentication
+        name (str): The name of the relationship
+        
+    Returns:
+        Optional[str]: The objectId of the created/existing relationship if successful, None otherwise
+    """
+    query_url = f"{PARSE_SERVER_URL}/parse/classes/MemoryGraphRelationship"
+    headers = {
+        "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+        "X-Parse-REST-API-Key": PARSE_REST_API_KEY,
+        "X-Parse-Master-Key": PARSE_MASTER_KEY,
+        "Content-Type": "application/json"
+    }
+    
+    # Check if relationship already exists
+    params = {
+        "where": json.dumps({
+            "name": name,
+            "user": {
+                "__type": "Pointer",
+                "className": "_User",
+                "objectId": user_id
+            }
+        })
+    }
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            # Check if relationship exists
+            response = await client.get(query_url, headers=headers, params=params)
+            response.raise_for_status()
+            data = response.json()
+            
+            if data['results']:
+                return data['results'][0]['objectId']
+            
+            # Create new relationship if it doesn't exist
+            data = {
+                "name": name,
+                "user": {
+                    "__type": "Pointer",
+                    "className": "_User",
+                    "objectId": user_id
+                }
+            }
+            
+            create_response = await client.post(query_url, headers=headers, json=data)
+            create_response.raise_for_status()
+            result = create_response.json()
+            return result['objectId']
+            
+        except httpx.HTTPError as e:
+            logger.error(f"Failed to create memory graph relationship: {str(e)}")
+            return None
+
+async def create_memory_graph_async(user_id: str, session_token: str, schema: dict) -> Optional[dict]:
+    """Async version of create_memory_graph using httpx
+    
+    Args:
+        user_id (str): The user's ID
+        session_token (str): The session token for authentication
+        schema (dict): The memory graph schema containing nodes and relationships
+        
+    Returns:
+        Optional[dict]: The created memory graph data if successful, None otherwise
+    """
+    # Extract nodes and relationships from schema
+    nodes = schema.get('nodes', [])
+    relationships = schema.get('relationships', [])
+    
+    # Create nodes and relationships concurrently
+    node_tasks = [create_memory_graph_node_async(user_id, session_token, node['name']) for node in nodes]
+    relationship_tasks = [create_memory_graph_relationship_async(user_id, session_token, rel['name']) for rel in relationships]
+    
+    # Wait for all tasks to complete
+    node_ids = await asyncio.gather(*node_tasks)
+    relationship_ids = await asyncio.gather(*relationship_tasks)
+    
+    # Filter out None values
+    node_ids = [nid for nid in node_ids if nid is not None]
+    relationship_ids = [rid for rid in relationship_ids if rid is not None]
+    
+    # Create the memory graph
+    url = f"{PARSE_SERVER_URL}/parse/classes/MemoryGraph"
+    data = {
+        "user": {
+            "__type": "Pointer",
+            "className": "_User",
+            "objectId": user_id
+        },
+        "schema": schema,
+        "nodes": [
+            {
+                "__type": "Pointer",
+                "className": "MemoryGraphNode",
+                "objectId": node_id
+            } for node_id in node_ids
+        ],
+        "relationships": [
+            {
+                "__type": "Pointer",
+                "className": "MemoryGraphRelationship",
+                "objectId": relationship_id
+            } for relationship_id in relationship_ids
+        ]
+    }
+    headers = {
+        "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+        "X-Parse-REST-API-Key": PARSE_REST_API_KEY,
+        "X-Parse-Master-Key": PARSE_MASTER_KEY,
+        "Content-Type": "application/json"
+    }
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(url, headers=headers, json=data)
+            response.raise_for_status()
+            result = response.json()
+            logger.info(f"Successfully created memory graph: {result['objectId']}")
+            return result
+        except httpx.HTTPError as e:
+            logger.error(f"Failed to create memory graph: {str(e)}")
+            return None
+
+async def update_memory_item(
+    session_token: str, 
+    updated_memory_item: dict, 
+    node_and_relationships: Optional[dict] = None,
+    api_key: Optional[str] = None
+) -> UpdateMemoryResponse:
+    try:
+        # Ensure updated_memory_item and metadata are dicts to avoid NoneType errors
+        if not isinstance(updated_memory_item, dict):
+            updated_memory_item = {}
+        metadata = updated_memory_item.get('metadata', {})
+        if not isinstance(metadata, dict):
+            try:
+                if isinstance(metadata, str):
+                    metadata = json.loads(metadata)
+                else:
+                    metadata = {}
+            except Exception:
+                metadata = {}
+        updated_memory_item['metadata'] = metadata
+
+        # Get the memory ID and strip any chunk suffix
+        # Handle both direct access and .get() patterns
+        memory_objectId = updated_memory_item.get('objectId') or updated_memory_item['objectId']
+
+        memory_id = updated_memory_item.get('id') or updated_memory_item.get('memoryId')
+
+        # First get the existing memory to preserve ACL if needed
+        headers = {
+            "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+            "Content-Type": "application/json"
+        }
+        if api_key is not None:
+            headers["X-Parse-Master-Key"] = PARSE_MASTER_KEY
+        elif session_token is not None:
+            headers["X-Parse-Session-Token"] = session_token    
+
+        logger.info(f"headers: {headers}")
+        logger.info(f"memory_objectId: {memory_objectId}")
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            get_url = f"{PARSE_SERVER_URL}/parse/classes/Memory/{memory_objectId}"
+            try:
+                get_response = await client.get(get_url, headers=headers)
+            except httpx.ConnectTimeout:
+                logger.error(f"Connection timeout while fetching memory item {memory_objectId} from Parse Server")
+                return UpdateMemoryResponse.failure(
+                    error="Connection timeout while fetching memory item",
+                    code=408
+                )
+            except httpx.ReadTimeout:
+                logger.error(f"Read timeout while fetching memory item {memory_objectId} from Parse Server")
+                return UpdateMemoryResponse.failure(
+                    error="Read timeout while fetching memory item",
+                    code=408
+                )
+            except httpx.RequestError as e:
+                logger.error(f"Request error while fetching memory item {memory_objectId}: {e}")
+                return UpdateMemoryResponse.failure(
+                    error=f"Request error: {str(e)}",
+                    code=500
+                )
+            
+            if get_response.status_code != 200:
+                return UpdateMemoryResponse.failure(
+                    error=f"Failed to get existing memory item: {get_response.text}",
+                    code=get_response.status_code
+                )
+            
+            existing_memory = get_response.json()
+            existing_acl = existing_memory.get('ACL', {})
+            # Preserve existing memoryChunkIds to prevent data loss during updates
+            existing_memory_chunk_ids = existing_memory.get('memoryChunkIds', [])
+            logger.info(f"Existing ACL: {existing_acl}")
+            logger.info(f"Existing memoryChunkIds: {existing_memory_chunk_ids}")
+        
+        if not memory_id:
+            return UpdateMemoryResponse.failure(
+                error="Memory ID is required",
+                code=400
+            )
+            
+        if not memory_objectId:
+            return UpdateMemoryResponse.failure(
+                error="Updated memory item does not have an objectId",
+                code=400
+            )
+        
+        # Strip chunk suffix (_0, _1, etc) to get base memory ID
+        base_memory_id = memory_id.split('_')[0]
+        updated_memory_item['memoryId'] = base_memory_id
+        logger.info(f"Using base memory ID: {base_memory_id}")
+        logger.info(f"memory_objectId: {memory_objectId}")
+        
+        if not memory_objectId:
+            return UpdateMemoryResponse.failure(
+                error="Updated memory item does not have an objectId",
+                code=400
+            )
+        
+        # Extract metrics if they exist
+        metrics = updated_memory_item.get('metrics', {})
+        operation_costs = metrics.get('operation_costs', {})
+
+        # Extract metadata and convert string fields to lists
+        metadata = updated_memory_item.get('metadata', {})
+        if isinstance(metadata, str):
+            try:
+                metadata = json.loads(metadata)
+            except json.JSONDecodeError:
+                logger.error("Failed to parse metadata string")
+                metadata = {}
+        
+
+        # Extract goals and usecases IDs from metadata
+        goal_ids = metadata.get('goals', [])
+        usecase_ids = metadata.get('usecases', [])
+
+        # Convert to list of strings if not already
+        if isinstance(goal_ids, str):
+            goal_ids = [goal_ids]
+        if isinstance(usecase_ids, str):
+            usecase_ids = [usecase_ids]
+
+        # Always convert to pointer dicts if list of strings
+        if goal_ids and isinstance(goal_ids[0], str):
+            goal_pointers = ids_to_parse_pointers(goal_ids, "Goal")
+        else:
+            goal_pointers = goal_ids
+        if usecase_ids and isinstance(usecase_ids[0], str):
+            usecase_pointers = ids_to_parse_pointers(usecase_ids, "Usecase")
+        else:
+            usecase_pointers = usecase_ids
+
+        # Pre-process list fields to ensure proper format before Pydantic validation
+        emoji_tags = convert_comma_string_to_list(
+            metadata.get('emojiTags') or 
+            metadata.get('emoji_tags') or 
+            metadata.get('emoji tags')
+        )
+        emotion_tags = convert_comma_string_to_list(
+            metadata.get('emotionTags') or 
+            metadata.get('emotion_tags') or 
+            metadata.get('emotion tags')
+        )
+        topics = convert_comma_string_to_list(metadata.get('topics'))
+        # Preserve existing memoryChunkIds if not provided in update
+        memory_chunk_ids = (
+            metadata.get('memoryChunkIds') or
+            updated_memory_item.get('memoryChunkIds') or
+            existing_memory_chunk_ids
+        )
+        steps = convert_comma_string_to_list(metadata.get('steps'))
+
+        # Update metadata with converted lists only if they exist
+        if emoji_tags:
+            metadata['emojiTags'] = emoji_tags
+        if emotion_tags:
+            metadata['emotionTags'] = emotion_tags
+        if topics:
+            metadata['topics'] = topics
+        if memory_chunk_ids:
+            metadata['memoryChunkIds'] = memory_chunk_ids
+        if steps:
+            metadata['steps'] = steps
+
+        # Get ACL from either metadata or direct ACL field, fallback to existing ACL
+        new_acl = None
+        if 'ACL' in updated_memory_item:  # Direct ACL update
+            new_acl = updated_memory_item['ACL']
+            logger.info(f"New ACL: {new_acl}")
+        elif metadata:  # ACL in metadata
+            new_acl = convert_acl(metadata)
+            logger.info(f"New ACL conver_acl: {new_acl}")
+        # If no new ACL provided or empty ACL, use existing
+        final_acl = new_acl if new_acl else existing_acl
+        logger.info(f"Final ACL to use: {final_acl}")
+
+        # List of ACL fields
+        acl_fields = [
+            'external_user_read_access', 'external_user_write_access',
+            'user_read_access', 'user_write_access',
+            'workspace_read_access', 'workspace_write_access',
+            'role_read_access', 'role_write_access',
+            'namespace_read_access', 'namespace_write_access',
+            'organization_read_access', 'organization_write_access'
+        ]
+
+        # Collect ACL fields from either updated_memory_item or metadata
+        acl_values = {}
+        for field in acl_fields:
+            value = updated_memory_item.get(field)
+            if value is None and field in metadata:
+                value = metadata[field]
+            if value is not None:
+                acl_values[field] = value
+
+        # Remove ACL fields from metadata to avoid redundancy
+        for field in acl_fields:
+            metadata.pop(field, None)
+
+        # Create base parse data with minimal fields first
+        base_data = {
+            "ACL": final_acl,
+            "memoryId": base_memory_id,
+        }
+        
+        # Add user pointer only if user_id is present
+        user_id_from_meta = metadata.get("user_id")
+        if user_id_from_meta and str(user_id_from_meta).strip():
+            base_data["user"] = ParsePointer(
+                __type="Pointer",
+                className="_User",
+                objectId=user_id_from_meta
+            )
+
+        # Don't include goals and usecases in the main update - they need to be handled as Relations
+        # We'll add them separately after the main update
+
+        logger.info(f"base_data inside update_memory_item: {base_data}")
+
+        # Create a MemoryParseServer instance with base data and ACL fields
+        parse_memory = MemoryParseServer(
+            **base_data,
+            **acl_values
+        )
+
+        # Add customMetadata if it exists
+        custom_metadata = metadata.get('customMetadata')
+        if not isinstance(custom_metadata, dict):
+            parse_memory.customMetadata = {}
+        else:
+            parse_memory.customMetadata = custom_metadata
+
+        # Add metrics fields if they exist
+        if 'metrics' in updated_memory_item:
+            metrics = updated_memory_item['metrics']
+            metrics_mapping = {
+                'totalProcessingCost': metrics.get('total_cost'),
+                'tokenSize': metrics.get('token_size'),
+                'storageSize': metrics.get('storage_size'),
+                'usecaseGenerationCost': metrics.get('operation_costs', {}).get('usecase_generation'),
+                'schemaGenerationCost': metrics.get('operation_costs', {}).get('schema_generation'),
+                'relatedMemoriesCost': metrics.get('operation_costs', {}).get('related_memories'),
+                'bigbirdEmbeddingCost': metrics.get('operation_costs', {}).get('bigbird_embedding'),
+                'sentenceBertCost': metrics.get('operation_costs', {}).get('sentence_bert')
+            }
+            
+            for field, value in metrics_mapping.items():
+                if value is not None:
+                    setattr(parse_memory, field, value)
+
+        # Now update fields that need validation
+        if topics:
+            parse_memory.topics = topics
+        if emoji_tags:
+            parse_memory.emojiTags = emoji_tags
+        if emotion_tags:
+            parse_memory.emotionTags = emotion_tags
+        # Always set memoryChunkIds to preserve existing values (even if empty list)
+        parse_memory.memoryChunkIds = memory_chunk_ids if memory_chunk_ids is not None else []
+        if steps:
+            parse_memory.steps = steps
+        
+        # Add content if it exists
+        if 'content' in updated_memory_item:
+            parse_memory.content = updated_memory_item['content']
+
+        # Add other fields from metadata
+        metadata_field_mapping = {
+            'sourceType': ['sourceType'],
+            'context': ['context'],
+            'title': ['title'],
+            'location': ['location'],
+            'hierarchicalStructures': ['hierarchicalStructures', 'hierarchical_structures', 'hierarchical structures'],
+            'type': ['type'],
+            'sourceUrl': ['sourceUrl'],
+            'conversationId': ['conversationId'],
+            'role': ['role'],
+            'category': ['category'],
+            'steps': ['steps'],
+            'current_step': ['current_step'],
+            'memoryChunkIds': ['memoryChunkIds']
+            # Removed goals and usecases from here - they'll be handled separately
+        }
+
+        # Add fields from metadata if they exist
+        for parse_field, meta_fields in metadata_field_mapping.items():
+            for meta_field in meta_fields:
+                if meta_field in metadata:
+                    setattr(parse_memory, parse_field, metadata[meta_field])
+                    break
+
+        # Add pointers if they exist
+        if "workspace_id" in metadata:
+            workspace_id = metadata["workspace_id"]
+            if workspace_id and workspace_id.strip() and workspace_id.lower() != "none":
+                parse_memory.workspace = ParsePointer(
+                    __type="Pointer",
+                    className="WorkSpace",
+                    objectId=workspace_id
+                )
+        
+        logger.info(f"parse_memory: {parse_memory}")
+
+        # Convert to dict and remove None values
+        data = parse_memory.model_dump(exclude_none=True)
+        logger.info(f"Final data after validation: {data}")
+
+        # Clean the data by removing None values and empty collections
+        cleaned_data = {
+            k: v for k, v in updated_memory_item.items() 
+            if v is not None  # Remove None values
+            and v != []       # Remove empty lists
+            and v != {}       # Remove empty dicts
+            and k != 'objectId'  # Don't include objectId in payload
+            and k != 'metadata'  # Don't include metadata
+        }
+        
+        logger.info(f"Cleaned update data: {cleaned_data}")
+
+        url = f"{PARSE_SERVER_URL}/parse/classes/Memory/{memory_objectId}?keys=objectId,memoryId,memoryChunkIds,content,updatedAt,topics,ACL,hierarchical_structures,location,emoji_tags,conversationId,sourceUrl,role,category,workspace_read_access,workspace_write_access,role_read_access,role_write_access,namespace_read_access,namespace_write_access,organization_read_access,organization_write_access,customMetadata"
+        logger.info(f"URL: {url}")
+
+        headers = {
+            "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+            "Content-Type": "application/json"
+        }
+        if api_key is not None:
+            headers["X-Parse-Master-Key"] = PARSE_MASTER_KEY
+        elif session_token is not None:
+            headers["X-Parse-Session-Token"] = session_token    
+
+        async with httpx.AsyncClient() as client:
+            # Update the item
+            response = await client.put(
+                url,
+                headers=headers,
+                json=data,
+                timeout=30.0
+            )
+            logger.info(f"update_memory_item response: {response.json()}")
+
+            if response.status_code != 200:
+                return UpdateMemoryResponse.failure(
+                    error=f"Failed to update memory item: {response.text}",
+                    code=response.status_code
+                )
+
+            # Now handle goals and usecases as Relations
+            if goal_pointers:
+                await _add_objects_to_relation(client, headers, memory_objectId, "goals", goal_pointers)
+            
+            if usecase_pointers:
+                await _add_objects_to_relation(client, headers, memory_objectId, "usecases", usecase_pointers)
+
+            # Get the updated item
+            get_url = f"{PARSE_SERVER_URL}/parse/classes/Memory/{memory_objectId}"
+            try:
+                get_response = await client.get(get_url, headers=headers)
+            except httpx.ConnectTimeout:
+                logger.error(f"Connection timeout while fetching updated memory item {memory_objectId} from Parse Server")
+                return UpdateMemoryResponse.failure(
+                    error="Connection timeout while fetching updated memory item",
+                    code=408
+                )
+            except httpx.ReadTimeout:
+                logger.error(f"Read timeout while fetching updated memory item {memory_objectId} from Parse Server")
+                return UpdateMemoryResponse.failure(
+                    error="Read timeout while fetching updated memory item",
+                    code=408
+                )
+            except httpx.RequestError as e:
+                logger.error(f"Request error while fetching updated memory item {memory_objectId}: {e}")
+                return UpdateMemoryResponse.failure(
+                    error=f"Request error: {str(e)}",
+                    code=500
+                )
+            
+            if get_response.status_code != 200:
+                return UpdateMemoryResponse.failure(
+                    error=f"Failed to get updated memory item: {get_response.text}",
+                    code=get_response.status_code
+                )
+
+            updated_item = get_response.json()
+            logger.info(f"Retrieved updated memory item: {updated_item}")
+
+            # Create UpdateMemoryItem
+            # Try to get the full metadata from updated_item
+            metadata_resp = updated_item.get('metadata')
+            if isinstance(metadata_resp, str):
+                try:
+                    metadata_resp = json.loads(metadata_resp)
+                except Exception:
+                    metadata_resp = {}
+            if not metadata_resp:
+                # Helper function to convert string 'None' to Python None
+                def clean_none_value(value):
+                    if value == 'None' or value == 'null' or value == '':
+                        return None
+                    return value
+
+                metadata_resp = {
+                    "topics": updated_item.get('topics'),
+                    "hierarchical_structures": updated_item.get('hierarchicalStructures'),
+                    "location": clean_none_value(updated_item.get('location')),
+                    "emoji_tags": updated_item.get('emojiTags'),
+                    "emotion_tags": updated_item.get('emotionTags'),
+                    "conversationId": clean_none_value(updated_item.get('conversationId')),
+                    "sourceUrl": clean_none_value(updated_item.get('sourceUrl')),
+                    "role": clean_none_value(updated_item.get('role')),
+                    "category": clean_none_value(updated_item.get('category')),
+                    "user_read_access": list(updated_item.get('ACL', {}).keys()),
+                    "user_write_access": [k for k, v in updated_item.get('ACL', {}).items() if v.get('write')],
+                    "workspace_read_access": updated_item.get('workspace_read_access', []),
+                    "workspace_write_access": updated_item.get('workspace_write_access', []),
+                    "role_read_access": updated_item.get('role_read_access', []),
+                    "role_write_access": updated_item.get('role_write_access', []),
+                    "namespace_read_access": updated_item.get('namespace_read_access', []),
+                    "namespace_write_access": updated_item.get('namespace_write_access', []),
+                    "organization_read_access": updated_item.get('organization_read_access', []),
+                    "organization_write_access": updated_item.get('organization_write_access', []),
+                    "customMetadata": updated_item.get('customMetadata')
+                }
+            # Ensure metadata is a MemoryMetadata object
+            from models.shared_types import MemoryMetadata
+            if not isinstance(metadata_resp, MemoryMetadata):
+                # Clean any string 'None' values in the metadata dict
+                for key in ['role', 'category', 'location', 'conversationId', 'sourceUrl', 'hierarchical_structures']:
+                    if key in metadata_resp and (metadata_resp[key] == 'None' or metadata_resp[key] == 'null' or metadata_resp[key] == ''):
+                        metadata_resp[key] = None
+                metadata_obj = MemoryMetadata(**metadata_resp)
+            else:
+                metadata_obj = metadata_resp
+
+            memory_item = UpdateMemoryItem(
+                objectId=updated_item.get('objectId'),
+                memoryId=updated_item.get('memoryId'),
+                content=updated_item.get('content'),
+                updatedAt=datetime.fromisoformat(updated_item.get('updatedAt').replace('Z', '+00:00')),
+                memoryChunkIds=updated_item.get('memoryChunkIds', []), 
+                metadata=metadata_obj
+            )
+
+            # Log metrics if present
+            if 'metrics' in updated_memory_item:
+                logger.info(
+                    f"Memory item successfully updated with metrics:\n"
+                    f"- Total AI processing cost: ${updated_item.get('totalProcessingCost', 0.0):.6f}\n"
+                    f"- Token size: {updated_item.get('tokenSize', 0)}\n"
+                    f"- Storage size: {updated_item.get('storageSize', 0)} bytes\n"
+                    f"- Operation costs:\n"
+                    f"  * Usecase generation: ${updated_item.get('usecaseGenerationCost', 0.0):.6f}\n"
+                    f"  * Schema generation: ${updated_item.get('schemaGenerationCost', 0.0):.6f}\n"
+                    f"  * Related memories: ${updated_item.get('relatedMemoriesCost', 0.0):.6f}\n"
+                    f"  * Node definition: ${updated_item.get('nodeDefinitionCost', 0.0):.6f}\n"
+                    f"  * BigBird embedding: ${updated_item.get('bigbirdEmbeddingCost', 0.0):.6f}\n"
+                    f"  * Sentence-BERT: ${updated_item.get('sentenceBertCost', 0.0):.6f}"
+                )
+
+            # Return successful response with the updated item
+            return UpdateMemoryResponse.success(
+                memory_items=[memory_item],
+                status_obj=SystemUpdateStatus(parse=True),
+                code=200,
+                message="Memory item updated successfully"
+            )
+
+    except Exception as e:
+        logger.error(f"Error updating memory item: {e}")
+        logger.error("Full traceback:", exc_info=True)
+        return UpdateMemoryResponse.failure(
+            error=str(e),
+            code=500
+        )
+
+async def _add_objects_to_relation(client, headers, parent_object_id, relation_key, objects, class_name="Memory") -> bool:
+    """
+    Add objects to a Parse Server relation using the Relations API.
+
+    Args:
+        client: httpx.AsyncClient instance
+        headers: Request headers
+        parent_object_id: The object ID of the parent object
+        relation_key: The key of the relation field
+        objects: List of Parse pointer objects to add to the relation
+        class_name: The Parse Server class name (default: "Memory")
+
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    try:
+        # Parse Server Relations API endpoint
+        url = f"{PARSE_SERVER_URL}/parse/classes/{class_name}/{parent_object_id}"
+
+        # Add objects to the relation
+        relation_data = {
+            relation_key: {
+                "__op": "AddRelation",
+                "objects": objects
+            }
+        }
+
+        response = await client.put(
+            url,
+            headers=headers,
+            json=relation_data,
+            timeout=30.0
+        )
+
+        if response.status_code != 200:
+            logger.error(f"Failed to add objects to {relation_key} relation (status {response.status_code}): {response.text}")
+            return False
+
+        logger.info(f"Successfully added {len(objects)} objects to {relation_key} relation")
+        return True
+
+    except Exception as e:
+        logger.error(f"Exception adding objects to {relation_key} relation: {str(e) if e else 'Unknown error'}", exc_info=True)
+        return False
+
+def format_memory_chunk_ids(chunk_ids) -> list:
+    """
+    Formats memoryChunkIds to ensure proper array format.
+    
+    Args:
+        chunk_ids: The chunk IDs in any format (string, list, etc.)
+        
+    Returns:
+        list: A properly formatted list of chunk IDs
+    """
+    logger.info(f"memoryChunkIds before formatting: {chunk_ids} (type: {type(chunk_ids)})")
+    
+    if chunk_ids is None:
+        return []
+        
+    if isinstance(chunk_ids, str):
+        try:
+            # Try to parse if it's a JSON string
+            parsed = json.loads(chunk_ids)
+            if isinstance(parsed, list):
+                result = [str(id) for id in parsed]
+                logger.info(f"memoryChunkIds after formatting: {result} (type: {type(result)})")
+                return result
+        except json.JSONDecodeError:
+            # If it looks like a Python list string but isn't valid JSON
+            if chunk_ids.startswith('[') and chunk_ids.endswith(']'):
+                # Remove brackets and split on commas
+                items = chunk_ids[1:-1].split(',')
+                # Clean up each item
+                result = [item.strip().strip("'\"") for item in items if item.strip()]
+                logger.info(f"memoryChunkIds after formatting: {result} (type: {type(result)})")
+                return result
+            return []
+    
+    if isinstance(chunk_ids, list):
+        result = [str(id) for id in chunk_ids]
+        logger.info(f"memoryChunkIds after formatting: {result} (type: {type(result)})")
+        return result
+        
+    return []
+
+async def upload_file_to_parse(
+    file_content: bytes,  # Changed from file_path: str
+    filename: str,
+    content_type: str,
+    session_token: str,
+    api_key: Optional[str] = None
+) -> Optional[ParseFileUploadResponse]:
+    """
+    Upload a file to Parse Server and return the file URL and metadata
+    
+    Args:
+        file_content: Content of the file as bytes
+        filename: Original filename
+        content_type: MIME type of the file
+        session_token: Parse session token
+        api_key: Optional API key for authentication
+    
+    Returns:
+        Optional[ParseFileUploadResponse]: Response containing file URLs and metadata or None if upload fails
+    """
+    url = f"{PARSE_SERVER_URL}/parse/files/{filename}"
+    file_size = len(file_content)
+    
+    logger.info(f"Starting file upload to Parse: filename={filename}, size={file_size} bytes, content_type={content_type}, url={url}")
+    
+    headers = {
+        "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+        "Content-Type": content_type
+    }
+
+    # Add appropriate authentication header
+    if api_key:
+        headers["X-Parse-Master-Key"] = PARSE_MASTER_KEY
+        logger.debug("Using API key authentication")
+    else:
+        headers["X-Parse-Session-Token"] = session_token
+        logger.debug("Using session token authentication")
+
+    # Upload file to Parse with extended timeout for large files through ngrok
+    # ngrok can be very slow for large uploads, so use generous timeouts
+    # Timeout configuration: connect=60s, read=600s (10 minutes), write=600s, pool=60s
+    timeout_config = httpx.Timeout(
+        connect=60.0,
+        read=600.0,    # 10 minutes for reading response (large files through ngrok)
+        write=600.0,   # 10 minutes for writing request (large files through ngrok)
+        pool=60.0
+    )
+
+    # Configure SSL certificate verification
+    # For macOS, try to find the appropriate certificate file
+    import platform
+    
+    ssl_cert_file = env.get("SSL_CERT_FILE")
+    
+    # If SSL_CERT_FILE is not set, auto-detect for macOS
+    if not ssl_cert_file and platform.system() == "Darwin":  # macOS
+        cert_locations = [
+            '/etc/ssl/cert.pem',  # macOS system certificates
+        ]
+        
+        # Try to import certifi as fallback
+        try:
+            import certifi
+            cert_locations.append(certifi.where())
+        except ImportError:
+            pass
+        
+        # Try each location until we find one that exists
+        for cert_path in cert_locations:
+            if os.path.exists(cert_path):
+                ssl_cert_file = cert_path
+                logger.debug(f"Auto-detected SSL certificate file for macOS: {ssl_cert_file}")
+                break
+    
+    # Create SSL context for httpx (httpx requires SSL context object, not string path)
+    # Retry with exponential backoff for transient errors (especially SSL errors)
+    import asyncio as _asyncio
+    import ssl
+    max_attempts = 3
+    backoffs = [1.0, 2.0, 4.0]  # Longer backoffs for file uploads
+    attempt = 0
+    
+    # Create SSL context - use certificate file if available, otherwise use system defaults
+    ssl_context = ssl.create_default_context()
+    if ssl_cert_file:
+        try:
+            ssl_context.load_verify_locations(ssl_cert_file)
+            logger.info(f"Using SSL certificate file: {ssl_cert_file}")
+        except Exception as e:
+            logger.warning(f"Failed to load SSL certificate from {ssl_cert_file}: {e}, using system defaults")
+            ssl_context = ssl.create_default_context()
+    else:
+        logger.info("Using system default SSL certificates")
+    
+    while attempt < max_attempts:
+        try:
+            logger.info(f"Upload attempt {attempt + 1}/{max_attempts} for file {filename} ({file_size} bytes)")
+            
+            # Create a fresh client for each attempt to avoid connection reuse issues
+            # Disable connection pooling limits for large file uploads
+            # Use SSL context for proper certificate verification
+            async with httpx.AsyncClient(
+                timeout=timeout_config,
+                limits=httpx.Limits(max_keepalive_connections=0, max_connections=1),
+                verify=ssl_context
+            ) as client:
+                logger.info(f"Sending POST request to {url}")
+                try:
+                    response = await client.post(
+                        url,
+                        headers=headers,
+                        content=file_content,
+                    )
+                    logger.info(f"Received response: status={response.status_code}, headers={dict(response.headers)}")
+                except httpx.ReadTimeout as timeout_err:
+                    logger.error(f"Request timed out waiting for Parse Server response after {timeout_config.read}s")
+                    logger.error(f"This may indicate Parse Server is hanging (check Redis connection). Retrying...")
+                    raise  # Re-raise to trigger retry logic
+                
+                if response.status_code == 201:
+                    response_data = response.json()
+                    logger.info(f"File uploaded successfully: {response_data}")
+                    
+                    return ParseFileUploadResponse(
+                        file_url=response_data.get('url'),
+                        source_url=response_data.get('url'),
+                        name=response_data.get('name', filename),
+                        mime_type=content_type
+                    )
+                else:
+                    error_details = {
+                        "status_code": response.status_code,
+                        "response_text": response.text[:500],  # Limit to first 500 chars
+                        "headers": dict(response.headers),
+                        "url": url,
+                        "filename": filename,
+                        "file_size": file_size
+                    }
+                    logger.error(f"Failed to upload file to Parse Server: {error_details}")
+                    
+                    # Parse Server specific error codes:
+                    # 400: Bad Request (invalid file, missing required fields)
+                    # 401: Unauthorized (invalid credentials)
+                    # 403: Forbidden (master key not allowed, ACL issues)
+                    # 413: Payload Too Large (file size limit exceeded)
+                    # 500: Internal Server Error (Parse Server configuration issue, file adapter not configured)
+                    
+                    # Retry on server errors
+                    if response.status_code in {408, 429, 500, 502, 503, 504} and attempt < max_attempts - 1:
+                        logger.info(f"Retrying upload after {backoffs[attempt]} seconds due to status {response.status_code}")
+                        await _asyncio.sleep(backoffs[attempt])
+                        attempt += 1
+                        continue
+                    
+                    # For non-retryable errors, log detailed error and return None
+                    if response.status_code == 400:
+                        # Parse Server error code 122 specifically indicates invalid filename characters
+                        try:
+                            error_data = response.json()
+                            if error_data.get("code") == 122:
+                                logger.error(f"Parse Server rejected filename due to invalid characters: {filename}. Parse Server error: {error_data.get('error', 'Unknown error')}")
+                            else:
+                                logger.error(f"Parse Server bad request (400): {error_data}")
+                        except:
+                            logger.error(f"Parse Server bad request (400): {response.text}")
+                    elif response.status_code == 401:
+                        logger.error("Parse Server authentication failed - check PARSE_APPLICATION_ID and PARSE_MASTER_KEY")
+                    elif response.status_code == 403:
+                        logger.error("Parse Server access forbidden - check master key permissions and ACL settings")
+                    elif response.status_code == 413:
+                        logger.error("File too large for Parse Server - check file size limits")
+                    elif response.status_code == 500:
+                        logger.error("Parse Server internal error - check Parse Server logs and file adapter configuration")
+                    
+                    return None
+
+        except ssl.SSLError as ssl_error:
+            logger.warning(f"SSL error uploading file (attempt {attempt + 1}/{max_attempts}): {ssl_error}")
+            if attempt < max_attempts - 1:
+                await _asyncio.sleep(backoffs[attempt])
+                attempt += 1
+                continue
+            logger.error(f"SSL error uploading file to Parse after {max_attempts} attempts: {ssl_error}", exc_info=True)
+            return None
+            
+        except (httpx.ReadTimeout, httpx.ConnectTimeout) as timeout_error:
+            logger.error(f"Timeout error uploading file (attempt {attempt + 1}/{max_attempts}): {timeout_error}")
+            if attempt < max_attempts - 1:
+                logger.info(f"Retrying after {backoffs[attempt]} seconds...")
+                await _asyncio.sleep(backoffs[attempt])
+                attempt += 1
+                continue
+            logger.error(f"Timeout error uploading file to Parse after {max_attempts} attempts: {timeout_error}", exc_info=True)
+            return None
+            
+        except (httpx.ConnectError, httpx.RemoteProtocolError, httpx.RequestError) as network_error:
+            logger.warning(f"Network error uploading file (attempt {attempt + 1}/{max_attempts}): {network_error}")
+            if attempt < max_attempts - 1:
+                logger.info(f"Retrying after {backoffs[attempt]} seconds...")
+                await _asyncio.sleep(backoffs[attempt])
+                attempt += 1
+                continue
+            logger.error(f"Network error uploading file to Parse after {max_attempts} attempts: {network_error}", exc_info=True)
+            return None
+            
+        except httpx.HTTPStatusError as http_error:
+            status = getattr(http_error.response, "status_code", None)
+            logger.warning(f"HTTP status error uploading file (attempt {attempt + 1}/{max_attempts}): {status} - {http_error.response.text}")
+            # Retry on transient HTTP errors
+            if status in {408, 429, 500, 502, 503, 504} and attempt < max_attempts - 1:
+                await _asyncio.sleep(backoffs[attempt])
+                attempt += 1
+                continue
+            logger.error(f"HTTP error uploading file to Parse: {status} - {http_error.response.text}")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Unexpected error uploading file to Parse (attempt {attempt + 1}/{max_attempts}): {e}", exc_info=True)
+            # Don't retry on unexpected errors unless it might be transient
+            if attempt < max_attempts - 1 and isinstance(e, (OSError, ConnectionError)):
+                await _asyncio.sleep(backoffs[attempt])
+                attempt += 1
+                continue
+            return None
+    
+    logger.error(f"Failed to upload file to Parse after {max_attempts} attempts")
+    return None
+
+async def update_memory_status(
+    objectId: str,
+    data: dict,
+    headers: dict,
+    params: dict
+) -> dict:
+    """Update Memory class status in Parse Server"""
+    async with httpx.AsyncClient() as client:
+        response = await client.put(
+            f"{PARSE_SERVER_URL}/parse/classes/Memory/{objectId}",
+            headers=headers,
+            params=params,
+            json={k: v for k, v in data.items() if v is not None},
+            timeout=30.0
+        )
+        response.raise_for_status()
+        return response.json()
+
+async def update_post_status(
+    post_objectId: str,
+    data: dict,
+    headers: dict,
+    params: dict
+) -> dict:
+    """Update Post class status in Parse Server"""
+    async with httpx.AsyncClient() as client:
+        response = await client.put(
+            f"{PARSE_SERVER_URL}/parse/classes/Post/{post_objectId}",
+            headers=headers,
+            params=params,
+            json={k: v for k, v in data.items() if v is not None},
+            timeout=30.0
+        )
+        response.raise_for_status()
+        return response.json()
+
+async def update_document_upload_status(
+    objectId: str, 
+    filename: str,
+    status: DocumentUploadStatusType = DocumentUploadStatusType.PROCESSING,
+    progress: float = 0.0,
+    current_page: Optional[int] = None,
+    total_pages: Optional[int] = None,
+    error: Optional[str] = None,
+    memory_items: Optional[List[dict]] = None,
+    post_objectId: Optional[str] = None,
+    upload_id: Optional[str] = None,
+    file_url: Optional[str] = None
+) -> DocumentUploadStatusResponse:
+    """Update document upload status in existing Memory objectId and optionally Post objectId"""
+    
+    # Prepare update data
+    data = {
+        "status": status.value,
+        "progress": progress,
+        "page_number": current_page,
+        "total_pages": total_pages,
+        "error": error,
+        "filename": filename,
+        "upload_id": upload_id,
+        "file_url": file_url
+    }
+
+    headers = {
+        "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+        "X-Parse-Master-Key": PARSE_MASTER_KEY,
+        "Content-Type": "application/json"
+    }
+
+    params = {
+        "keys": "objectId,status,progress,page_number,total_pages,error,upload_id,user,filename,file_url,file"
+    }
+
+    try:
+        # Update Memory class
+        memory_data = await update_memory_status(objectId, data, headers, params)
+        
+        # Update Post class if post_objectId is provided
+        post_data = None
+        if post_objectId:
+            post_data = await update_post_status(post_objectId, data, headers, params)
+            logger.info(f"Post update response: {post_data}")
+
+        logger.info(f"Successfully updated document upload status for memory {objectId}" + 
+                   (f" and post {post_objectId}" if post_objectId else ""))
+
+        # Combine data, preferring memory data but including post file info if available
+        response_data = {
+            **memory_data,
+            **(post_data or {}),
+        }
+
+        return DocumentUploadStatusResponse(
+            objectId=response_data.get('objectId', objectId),
+            status=DocumentUploadStatusType(response_data.get('status', status.value)),
+            progress=float(response_data.get('progress', progress)),
+            current_page=response_data.get('page_number', current_page),
+            total_pages=response_data.get('total_pages', total_pages),
+            current_filename=response_data.get('current_filename'),
+            error=response_data.get('error', error),
+            upload_id=response_data.get('upload_id', ''),
+            user=response_data.get('user', {'__type': 'Pointer', 'className': '_User', 'objectId': ''})
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to update document upload status: {str(e)}")
+        return DocumentUploadStatusResponse(
+            objectId=objectId,
+            filename=filename,
+            status=status,
+            progress=progress,
+            current_page=current_page,
+            total_pages=total_pages,
+            error=str(e),
+            upload_id='',
+            user={'__type': 'Pointer', 'className': '_User', 'objectId': ''}
+        )
+
+async def get_document_upload_status(
+    user_id: str,
+    session_token: str,
+    upload_id: str
+) -> Optional[dict]:
+    """Get document upload status from Parse Server"""
+    url = f"{PARSE_SERVER_URL}/parse/classes/Memory"
+    
+    params = {
+        "where": json.dumps({
+            "type": "DocumentMemoryItem",
+            "upload_id": upload_id,
+            "user": {
+                "__type": "Pointer",
+                "className": "_User",
+                "objectId": user_id
+            }
+        })
+    }
+
+    headers = {
+        "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+        "X-Parse-Master-Key": PARSE_MASTER_KEY,
+        "Content-Type": "application/json"
+    }
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(
+                url,
+                headers=headers,
+                params=params,
+                timeout=30.0
+            )
+            response.raise_for_status()
+            results = response.json().get("results", [])
+            if results:
+                logger.info(f"Found document upload status for upload_id {upload_id}")
+                return results[0]
+            logger.info(f"No document upload status found for upload_id {upload_id}")
+            return None
+        except Exception as e:
+            logger.error(f"Failed to get document upload status: {str(e)}")
+            raise
+
+async def get_post_file_info(post_objectId: str) -> Optional[str]:
+    """
+    Fetch file information from a Post object in Parse Server.
+    
+    Args:
+        post_objectId (str): The objectId of the Post to fetch
+        
+    Returns:
+        Optional[str]: The file URL if found, None otherwise
+        
+    Raises:
+        ValueError: If no file URL is found in the Post object
+    """
+    url = f"{PARSE_SERVER_URL}/parse/classes/Post/{post_objectId}"
+    
+    headers = {
+        "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+        "X-Parse-Master-Key": PARSE_MASTER_KEY,
+        "Content-Type": "application/json"
+    }
+    
+    params = {
+        "keys": "file"  # Only fetch the file field
+    }
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(
+                url,
+                headers=headers,
+                params=params,
+                timeout=30.0
+            )
+            response.raise_for_status()
+            
+            post_data = response.json()
+            if 'file' in post_data and post_data['file'].get('url'):
+                logger.info(f"Successfully retrieved file URL from Post {post_objectId}")
+                return post_data['file']['url']
+            else:
+                raise ValueError(f"No file URL found in Post object {post_objectId}")
+                
+        except Exception as e:
+            logger.error(f"Failed to fetch file info from Post {post_objectId}: {str(e)}")
+            raise
+
+async def fetch_post_with_provider_result_async(
+    post_id: str,
+    session_token: Optional[str] = None,
+    api_key: Optional[str] = None
+) -> Optional['PostWithProviderResult']:
+    """
+    Fetch Post from Parse Server and download provider result if stored as file.
+    
+    This is a reusable method for retrieving document processing results from Parse Posts,
+    including downloading and decompressing provider JSON stored as files.
+    
+    Args:
+        post_id: The objectId of the Post to fetch
+        session_token: Optional session token for authentication
+        api_key: Optional API key for authentication
+        
+    Returns:
+        PostWithProviderResult containing:
+            - post: Full PostParseServer object from Parse
+            - provider_specific: The full provider result JSON (downloaded if stored as file)
+            - provider_name: Name of the provider (reducto, tensorlake, etc.)
+            - organization_id: Organization ID from Post
+            - namespace_id: Namespace ID from Post
+            - workspace_id: Workspace ID from Post (if present)
+            - upload_id: Upload ID from Post
+            - file_url: Original document file URL
+            - file_name: Original document filename
+            - file_metadata: File metadata from Post
+            - processing_metadata: Processing stats (total_pages, confidence, etc.)
+            - extraction_metadata: Extraction summary (element counts, decision, etc.)
+            - post_title: Title of the post
+        
+        Returns None if Post not found or fetch fails.
+    """
+    import gzip
+    
+    parse_url = PARSE_SERVER_URL
+    parse_app_id = PARSE_APPLICATION_ID
+    parse_master_key = PARSE_MASTER_KEY
+    
+    if not all([parse_url, parse_app_id, parse_master_key]):
+        logger.error("Parse Server configuration missing")
+        return None
+    
+    headers = {
+        "X-Parse-Application-Id": parse_app_id,
+        "X-Parse-Master-Key": parse_master_key,
+        "Content-Type": "application/json"
+    }
+    
+    try:
+        # Fetch the Post with all relevant fields (including new extraction fields)
+        # Retry logic to handle Parse Server propagation delays
+        max_retries = 3
+        retry_delay = 1.0  # seconds
+
+        for attempt in range(max_retries):
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                response = await client.get(
+                    f"{parse_url}/parse/classes/Post/{post_id}",
+                    params={
+                        "keys": "content,processingMetadata,metadata,post_title,uploadId,file,workspace,organizationId,namespaceId,objectId,providerResultFile,extractionResultFile,extractionMetadata"
+                    },
+                    headers=headers
+                )
+
+                if response.status_code == 200:
+                    break
+
+                if response.status_code == 404 or response.status_code == 101:  # Parse "Object not found" error code
+                    if attempt < max_retries - 1:
+                        logger.warning(f"Post {post_id} not found (attempt {attempt + 1}/{max_retries}), retrying in {retry_delay}s...")
+                        await asyncio.sleep(retry_delay)
+                        retry_delay *= 2  # Exponential backoff
+                        continue
+
+                # Other errors - don't retry
+                logger.error(f"Failed to fetch Post {post_id}: {response.status_code} {response.text[:500]}")
+                return None
+
+        if response.status_code != 200:
+            logger.error(f"Failed to fetch Post {post_id} after {max_retries} attempts: {response.status_code}")
+            return None
+
+        post = response.json()
+        logger.info(f"Successfully fetched Post {post_id}")
+
+        # Extract content object
+        content_obj = post.get("content") or {}
+        provider_name = content_obj.get("provider", "unknown")
+
+        # Initialize provider_specific
+        provider_specific = None
+
+        # Check if provider result is stored as a Parse File
+        # Try top-level field first (new location), then content object (legacy)
+        provider_file = post.get("providerResultFile") or content_obj.get("provider_result_file")
+        if provider_file and isinstance(provider_file, dict):
+            file_url = provider_file.get("url")
+            if not file_url:
+                logger.error(f"provider_result_file exists but has no url for Post {post_id}")
+            else:
+                logger.info(f"Downloading provider result from file: {file_url}")
+                
+                async with httpx.AsyncClient(timeout=120.0) as file_client:
+                    file_resp = await file_client.get(file_url)
+                    
+                    if file_resp.status_code == 200:
+                        file_content = file_resp.content
+                        logger.info(f"Downloaded {len(file_content)} bytes from provider file")
+                        
+                        # Try to decompress if gzipped
+                        try:
+                            decompressed = gzip.decompress(file_content)
+                            logger.info(f"Decompressed gzipped content: {len(decompressed)} bytes")
+                            provider_specific = json.loads(decompressed.decode('utf-8'))
+                        except (gzip.BadGzipFile, OSError):
+                            # Not gzipped, parse as-is
+                            logger.info("Content is not gzipped, parsing directly")
+                            provider_specific = json.loads(file_content.decode('utf-8'))
+                        
+                        logger.info(f"Successfully parsed provider result: {len(str(provider_specific))} chars")
+                    else:
+                        logger.error(f"Failed to download provider file: {file_resp.status_code}")
+        
+        # Fallback: check for inline provider_result (legacy/small payloads)
+        if provider_specific is None:
+            provider_specific = content_obj.get("provider_result")
+            if provider_specific:
+                logger.info(f"Using inline provider_result from Post ({len(str(provider_specific))} chars)")
+            else:
+                logger.warning(f"Post {post_id} has no provider_result_file or provider_result")
+        
+        # Extract provider from processingMetadata if not in content
+        if not provider_name or provider_name == "unknown":
+            processing_metadata = post.get("processingMetadata") or {}
+            provider_name = processing_metadata.get("provider", "unknown")
+        
+        # Extract workspace ID (handle pointer format)
+        workspace_obj = post.get("workspace")
+        workspace_id = None
+        if isinstance(workspace_obj, dict):
+            workspace_id = workspace_obj.get("objectId")
+        
+        # Extract file info from metadata
+        metadata = post.get("metadata") or {}
+        
+        # Extract file info from Post.file
+        file_obj = post.get("file") or {}
+        if isinstance(file_obj, dict):
+            file_url = file_obj.get("url")
+            file_name = file_obj.get("name")
+        else:
+            # Fallback to metadata
+            file_url = metadata.get("file_url")
+            file_name = metadata.get("file_name")
+        
+        # Parse the Post dict into PostParseServer Pydantic model
+        post_model = PostParseServer(**post)
+        
+        # Construct and return the typed response
+        return PostWithProviderResult(
+            post=post_model,
+            provider_specific=provider_specific or {},
+            provider_name=provider_name,
+            organization_id=post.get("organizationId"),
+            namespace_id=post.get("namespaceId"),
+            workspace_id=workspace_id,
+            upload_id=post.get("uploadId"),
+            file_url=file_url,
+            file_name=file_name,
+            file_metadata=metadata,
+            processing_metadata=post.get("processingMetadata") or {},
+            extraction_metadata=post.get("extractionMetadata") or {},  # Include extraction metadata
+            post_title=post.get("post_title")
+        )
+        
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse provider result JSON for Post {post_id}: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Error fetching Post {post_id} with provider result: {e}", exc_info=True)
+        return None
+
+
+async def store_extraction_result_in_post(
+    post_id: str,
+    structured_elements: List[Dict[str, Any]],  # ContentElement dicts (already serialized)
+    memory_requests: List[Dict[str, Any]],      # AddMemoryRequest dicts (already serialized)
+    element_summary: Dict[str, int],
+    decision: str,
+    session_token: Optional[str] = None,
+    api_key: Optional[str] = None
+) -> str:
+    """
+    Store large extraction results in Parse Post to avoid Temporal payload limits.
+    
+    Compresses and stores the extraction result as a Parse File, similar to how
+    we store provider_result_file.
+    
+    Args:
+        post_id: The objectId of the Post to update
+        structured_elements: List of ContentElement model_dump() outputs (already serialized)
+        memory_requests: List of AddMemoryRequest model_dump() outputs (already serialized)
+        element_summary: Count of elements by type (e.g., {"text": 342, "image": 10})
+        decision: "simple" or "complex"
+        session_token: Optional session token for authentication
+        api_key: Optional API key for authentication
+        
+    Returns:
+        str: The extraction_result_id (filename of stored Parse File)
+        
+    Note:
+        The inputs are already serialized dicts from Pydantic models, not the models themselves.
+        This is because they've already been through .model_dump() in the calling activity.
+    """
+    try:
+        import gzip
+        import json
+        
+        # Build extraction payload
+        extraction_data = {
+            "decision": decision,
+            "structured_elements": structured_elements,
+            "memory_requests": memory_requests,
+            "element_summary": element_summary,
+            "extracted_at": datetime.now(UTC).isoformat()
+        }
+        
+        # Compress the extraction data
+        json_str = json.dumps(extraction_data, ensure_ascii=False)
+        compressed = gzip.compress(json_str.encode('utf-8'))
+        
+        logger.info(f"Compressing extraction: {len(json_str)} bytes → {len(compressed)} bytes (ratio: {len(compressed)/len(json_str):.1%})")
+        
+        # Upload as Parse File
+        headers = {
+            "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+            "X-Parse-Master-Key": PARSE_MASTER_KEY,
+            "Content-Type": "application/gzip"
+        }
+        
+        extraction_filename = f"extraction_{post_id}_{uuid.uuid4().hex[:8]}.json.gz"
+        
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            # Upload file
+            file_response = await client.post(
+                f"{PARSE_SERVER_URL}/parse/files/{extraction_filename}",
+                headers=headers,
+                content=compressed
+            )
+            
+            if file_response.status_code not in (200, 201):
+                raise Exception(f"Failed to upload extraction file: {file_response.status_code} {file_response.text}")
+            
+            file_data = file_response.json()
+            file_url = file_data.get("url")
+            
+            # Create ParseFile instance for type safety
+            extraction_file = ParseFile(
+                type="File",
+                name=file_data.get("name"),
+                url=file_url
+            )
+            
+            # Prepare extraction metadata
+            extraction_metadata = {
+                "decision": decision,
+                "element_summary": element_summary,
+                "total_elements": len(structured_elements),
+                "total_memory_requests": len(memory_requests),
+                "compressed_size": len(compressed),
+                "original_size": len(json_str),
+                "extracted_at": datetime.now(UTC).isoformat()
+            }
+            
+            # Generate markdown text from structured elements for display
+            markdown_text = ""
+            for elem in structured_elements[:100]:  # Limit to first 100 elements for text preview
+                content = elem.get("content", "")
+                content_type = elem.get("content_type", "text")
+                
+                if content_type == "text" and content:
+                    markdown_text += content + "\n\n"
+                elif content_type == "image" and elem.get("image_description"):
+                    # Add image description as markdown
+                    image_url = elem.get("image_url", "")
+                    image_desc = elem.get("image_description", "")
+                    if image_url:
+                        markdown_text += f"![{image_desc}]({image_url})\n\n"
+                    else:
+                        markdown_text += f"*Image: {image_desc}*\n\n"
+            
+            # Truncate if too long (Parse field limits)
+            if len(markdown_text) > 50000:
+                markdown_text = markdown_text[:50000] + "...\n\n[Content truncated]"
+            
+            # Build update using Pydantic model fields
+            update_data = {
+                "extractionResultFile": extraction_file.model_dump(exclude_none=True),
+                "extractionMetadata": extraction_metadata,
+                "text": markdown_text  # Add markdown text field
+            }
+            
+            update_response = await client.put(
+                f"{PARSE_SERVER_URL}/parse/classes/Post/{post_id}",
+                headers=headers,
+                json=update_data
+            )
+            
+            if update_response.status_code != 200:
+                raise Exception(f"Failed to update Post with extraction file: {update_response.status_code} {update_response.text}")
+            
+            logger.info(f"Stored extraction result in Post {post_id}: {len(structured_elements)} elements, {len(compressed)} bytes compressed")
+            return file_data.get("name")
+            
+    except Exception as e:
+        logger.error(f"Failed to store extraction result in Post {post_id}: {e}", exc_info=True)
+        raise
+
+
+async def fetch_extraction_result_from_post(
+    post_id: str,
+    session_token: Optional[str] = None,
+    api_key: Optional[str] = None,
+    prefer_chunked: bool = True  # NEW: Prefer chunked_extraction over raw extraction
+) -> Optional[Dict[str, Any]]:
+    """
+    Fetch and decompress extraction result from Parse Post (pipeline-aware).
+    
+    Automatically selects the correct pipeline stage:
+    - If prefer_chunked=True (default): Fetches from chunked_extraction (Stage 2)
+    - Falls back to extractionResultFile (Stage 1 raw extraction)
+    
+    Args:
+        post_id: The objectId of the Post to fetch from
+        session_token: Optional session token for authentication
+        api_key: Optional API key for authentication
+        prefer_chunked: If True (default), fetch chunked_extraction instead of raw extraction
+        
+    Returns:
+        Dict with structured_elements, memory_requests, element_summary, decision
+    """
+    try:
+        import gzip
+        import json
+        
+        headers = {
+            "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+            "X-Parse-Master-Key": PARSE_MASTER_KEY
+        }
+        
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            # Fetch Post
+            post_response = await client.get(
+                f"{PARSE_SERVER_URL}/parse/classes/Post/{post_id}",
+                headers=headers
+            )
+            
+            if post_response.status_code != 200:
+                raise Exception(f"Failed to fetch Post: {post_response.status_code}")
+            
+            post_data = post_response.json()
+            
+            # PIPELINE-AWARE FETCH: Prefer chunked over raw extraction
+            file_url = None
+            source_stage = None
+            element_count_hint = "unknown"
+            
+            if prefer_chunked and post_data.get("extraction_chunked"):
+                # Stage 2: Fetch hierarchically chunked extraction
+                chunked_data = post_data.get("chunked_extraction")
+                if chunked_data and chunked_data.get("url"):
+                    file_url = chunked_data["url"]
+                    source_stage = "chunked_extraction (Stage 2)"
+                    element_count_hint = chunked_data.get("stats", {}).get("chunked_count", "unknown")
+                    logger.info(f"Fetching CHUNKED extraction from Post {post_id} (~{element_count_hint} chunks)")
+            
+            # Fallback: Stage 1 raw extraction
+            if not file_url:
+                extraction_file = post_data.get("extractionResultFile")
+                if extraction_file and extraction_file.get("url"):
+                    file_url = extraction_file["url"]
+                    source_stage = "extractionResultFile (Stage 1 raw)"
+                    element_count_hint = post_data.get("extractionMetadata", {}).get("total_elements", "unknown")
+                    logger.info(f"Fetching RAW extraction from Post {post_id} (~{element_count_hint} elements)")
+            
+            if not file_url:
+                logger.warning(f"Post {post_id} has no extractionResultFile or chunked_extraction")
+                return None
+            
+            # Download and decompress
+            file_response = await client.get(file_url)
+            if file_response.status_code != 200:
+                raise Exception(f"Failed to download extraction file: {file_response.status_code}")
+            
+            compressed_data = file_response.content
+            decompressed = gzip.decompress(compressed_data)
+            extraction_data = json.loads(decompressed.decode('utf-8'))
+            
+            actual_count = len(extraction_data.get('structured_elements', []))
+            logger.info(f"Fetched extraction from {source_stage}: {actual_count} elements (expected ~{element_count_hint})")
+            return extraction_data
+            
+    except Exception as e:
+        logger.error(f"Failed to fetch extraction result from Post {post_id}: {e}", exc_info=True)
+        return None
+
+
+async def store_batch_memories_in_parse(
+    memories: List[Any],  # List of AddMemoryRequest objects
+    organization_id: str,
+    namespace_id: str,
+    user_id: str,
+    workspace_id: Optional[str] = None,
+    batch_metadata: Optional[Dict[str, Any]] = None,
+    session_token: Optional[str] = None,
+    api_key: Optional[str] = None,
+    existing_post_id: Optional[str] = None
+) -> str:
+    """
+    Store batch memories in Parse Post to avoid Temporal GRPC payload limits.
+    
+    Similar to store_extraction_result_in_post, but for batch memory processing.
+    Compresses and stores the memory batch as a Parse File.
+    
+    Args:
+        memories: List of AddMemoryRequest objects (or dicts)
+        organization_id: Organization ID
+        namespace_id: Namespace ID
+        user_id: User ID
+        workspace_id: Optional workspace ID
+        batch_metadata: Optional metadata about the batch (chunk_num, total_chunks, etc.)
+        session_token: Optional session token for authentication
+        api_key: Optional API key for authentication
+        existing_post_id: Optional Post ID to update instead of creating a new Post
+        
+    Returns:
+        str: The objectId of the created or updated Post
+    """
+    try:
+        import gzip
+        import json
+        
+        # Serialize memories to dicts
+        memory_dicts = []
+        for mem in memories:
+            if hasattr(mem, 'model_dump'):
+                memory_dicts.append(mem.model_dump(exclude_none=True, mode='json'))
+            elif isinstance(mem, dict):
+                memory_dicts.append(mem)
+            else:
+                logger.warning(f"Unexpected memory type: {type(mem)}, converting to dict")
+                memory_dicts.append(dict(mem))
+        
+        # Build batch payload
+        batch_data = {
+            "memories": memory_dicts,
+            "batch_metadata": batch_metadata or {},
+            "organization_id": organization_id,
+            "namespace_id": namespace_id,
+            "user_id": user_id,
+            "workspace_id": workspace_id,
+            "stored_at": datetime.now(UTC).isoformat(),
+            "count": len(memory_dicts)
+        }
+        
+        # Compress the batch data
+        json_str = json.dumps(batch_data, ensure_ascii=False)
+        compressed = gzip.compress(json_str.encode('utf-8'))
+        
+        logger.info(f"Compressing batch: {len(json_str)} bytes → {len(compressed)} bytes (ratio: {len(compressed)/len(json_str):.1%})")
+        
+        # Upload as Parse File
+        file_name = f"{uuid.uuid4().hex}_batch_{len(memory_dicts)}_memories.json.gz"
+        
+        headers = get_parse_headers(session_token=session_token, api_key=api_key)
+        headers["Content-Type"] = "application/gzip"
+        
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            file_response = await client.post(
+                f"{PARSE_SERVER_URL}/parse/files/{file_name}",
+                content=compressed,
+                headers=headers
+            )
+            
+            if file_response.status_code not in [200, 201]:
+                raise Exception(f"Failed to upload batch file: {file_response.status_code} - {file_response.text}")
+            
+            file_data = file_response.json()
+            file_url = file_data.get("url")
+            
+            logger.info(f"Uploaded batch file: {file_name} ({len(compressed)} bytes)")
+            
+            # Create Post with batch file reference
+            post_data = {
+                "content": {
+                    "batch_memories_file": {
+                        "__type": "File",
+                        "name": file_name,
+                        "url": file_url
+                    },
+                    "batch_memories_meta": {
+                        "stored": "file",
+                        "size": len(compressed),
+                        "original_size": len(json_str),
+                        "count": len(memory_dicts)
+                    }
+                },
+                "batchMetadata": {
+                    "count": len(memory_dicts),
+                    "compressed_size": len(compressed),
+                    "original_size": len(json_str),
+                    "stored_at": datetime.now(UTC).isoformat(),
+                    **(batch_metadata or {})
+                },
+                "needsProcessing": True,
+                "processingStatus": "indexing"  # Indexing stage (after initial processing)
+            }
+            
+            # Only set type/source/org/namespace for NEW posts (not updates)
+            if not existing_post_id:
+                post_data.update({
+                    "type": "batch_memories",
+                    "source": "temporal_batch_processing",
+                    "organizationId": organization_id,
+                    "namespaceId": namespace_id,
+                })
+            
+            # Add user ACL
+            if user_id and not existing_post_id:
+                post_data["ACL"] = {
+                    user_id: {"read": True, "write": True}
+                }
+                post_data["user"] = {
+                    "__type": "Pointer",
+                    "className": "_User",
+                    "objectId": user_id
+                }
+            
+            # Add workspace if provided
+            if workspace_id and not existing_post_id:
+                post_data["workspace"] = {
+                    "__type": "Pointer",
+                    "className": "WorkSpace",
+                    "objectId": workspace_id
+                }
+            
+            # Create or update Post
+            post_headers = get_parse_headers(session_token=session_token, api_key=api_key)
+            post_headers["Content-Type"] = "application/json"
+            
+            if existing_post_id:
+                # Update existing Post instead of creating a new one
+                # Fetch existing Post first to preserve important fields
+                logger.info(f"Fetching existing Post {existing_post_id} to preserve fields")
+                get_response = await client.get(
+                    f"{PARSE_SERVER_URL}/parse/classes/Post/{existing_post_id}",
+                    headers=post_headers
+                )
+                
+                if get_response.status_code == 200:
+                    existing_post = get_response.json()
+                    # Preserve important fields that should not be overwritten
+                    preserved_fields = {
+                        "text": existing_post.get("text"),
+                        "post_title": existing_post.get("post_title"),
+                        "type": existing_post.get("type"),
+                        "source": existing_post.get("source"),
+                        "organizationId": existing_post.get("organizationId"),
+                        "namespaceId": existing_post.get("namespaceId"),
+                        "workspace": existing_post.get("workspace"),
+                        "user": existing_post.get("user"),
+                        "uploadId": existing_post.get("uploadId"),
+                        "metadata": existing_post.get("metadata"),
+                        "processingMetadata": existing_post.get("processingMetadata"),
+                    }
+                    # Merge preserved fields into post_data
+                    post_data = {**preserved_fields, **post_data}
+                    logger.info(f"Preserved fields from existing Post: {list(preserved_fields.keys())}")
+                else:
+                    logger.warning(f"Could not fetch existing Post {existing_post_id}, proceeding without preservation")
+                
+                logger.info(f"Updating existing Post {existing_post_id} with {len(memory_dicts)} batch memories")
+                post_response = await client.put(
+                    f"{PARSE_SERVER_URL}/parse/classes/Post/{existing_post_id}",
+                    json=post_data,
+                    headers=post_headers
+                )
+                post_id = existing_post_id
+            else:
+                # Create new Post
+                post_response = await client.post(
+                    f"{PARSE_SERVER_URL}/parse/classes/Post",
+                    json=post_data,
+                    headers=post_headers
+                )
+                post_result = post_response.json()
+                post_id = post_result.get("objectId")
+            
+            if post_response.status_code not in [200, 201]:
+                action = "update" if existing_post_id else "create"
+                raise Exception(f"Failed to {action} Post: {post_response.status_code} - {post_response.text}")
+            
+            action_msg = "Updated" if existing_post_id else "Created"
+            logger.info(f"{action_msg} Post {post_id} with {len(memory_dicts)} batch memories")
+            return post_id
+            
+    except Exception as e:
+        logger.error(f"Failed to store batch memories in Parse: {e}", exc_info=True)
+        raise
+
+
+async def fetch_batch_memories_from_parse(
+    post_id: str,
+    session_token: Optional[str] = None,
+    api_key: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
+    """
+    Fetch batch memories from Parse Post.
+    
+    Args:
+        post_id: The objectId of the Post containing batch memories
+        session_token: Optional session token for authentication
+        api_key: Optional API key for authentication
+        
+    Returns:
+        Dict with:
+            - memories: List[Dict] - The memory dicts
+            - batch_metadata: Dict - Batch metadata
+            - organization_id: str
+            - namespace_id: str
+            - user_id: str
+            - workspace_id: Optional[str]
+    """
+    try:
+        import gzip
+        import json
+        
+        # Fetch Post
+        headers = get_parse_headers(session_token=session_token, api_key=api_key)
+        
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            post_response = await client.get(
+                f"{PARSE_SERVER_URL}/parse/classes/Post/{post_id}",
+                headers=headers
+            )
+            
+            if post_response.status_code != 200:
+                raise Exception(f"Failed to fetch Post: {post_response.status_code}")
+            
+            post_data = post_response.json()
+            
+            # Get batch file reference
+            content = post_data.get("content", {})
+            batch_file = content.get("batch_memories_file", {})
+            file_url = batch_file.get("url")
+            
+            if not file_url:
+                raise Exception(f"Post {post_id} does not have batch_memories_file")
+            
+            logger.info(f"Fetching batch memories file from {file_url}")
+            
+            # Download and decompress file
+            file_response = await client.get(file_url)
+            
+            if file_response.status_code != 200:
+                raise Exception(f"Failed to download batch file: {file_response.status_code}")
+            
+            compressed_data = file_response.content
+            decompressed = gzip.decompress(compressed_data)
+            batch_data = json.loads(decompressed.decode('utf-8'))
+            
+            logger.info(f"Fetched batch memories from Post {post_id}: {len(batch_data.get('memories', []))} memories")
+            return batch_data
+            
+    except Exception as e:
+        logger.error(f"Failed to fetch batch memories from Post {post_id}: {e}", exc_info=True)
+        return None
+
+
+async def create_batch_memory_request_in_parse(
+    batch_request: Any,  # BatchMemoryRequest from models
+    auth_response: Any,  # OptimizedAuthResponse
+    batch_id: str,
+    workflow_id: Optional[str] = None,
+    webhook_url: Optional[str] = None,
+    webhook_secret: Optional[str] = None,
+    session_token: Optional[str] = None,
+    api_key: Optional[str] = None
+) -> str:
+    """
+    Create BatchMemoryRequest in Parse Server with compressed batch data.
+
+    Follows the pattern from store_batch_memories_in_parse for gzip compression
+    and Parse File storage to avoid Temporal gRPC payload limits.
+
+    Args:
+        batch_request: BatchMemoryRequest with memories to process
+        auth_response: OptimizedAuthResponse with authentication context
+        batch_id: Unique batch identifier
+        workflow_id: Optional Temporal workflow ID
+        webhook_url: Optional webhook for completion notification
+        webhook_secret: Optional webhook secret for validation
+        session_token: Session token for authentication
+        api_key: API key for authentication
+
+    Returns:
+        objectId of the created BatchMemoryRequest
+
+    Raises:
+        Exception: If creation fails
+    """
+    try:
+        import gzip
+        import json
+        import uuid
+        import base64
+
+        # Serialize memories to dicts
+        memories = []
+        batch_memories = getattr(batch_request, 'memories', [])
+        for mem in batch_memories:
+            if hasattr(mem, 'model_dump'):
+                memories.append(mem.model_dump(exclude_none=True, mode='json'))
+            elif isinstance(mem, dict):
+                memories.append(mem)
+            else:
+                memories.append(dict(mem))
+
+        # Compress batch data
+        batch_data = {
+            "memories": memories,
+            "batch_metadata": {
+                "source": "batch_api",
+                "created_at": datetime.now(UTC).isoformat()
+            }
+        }
+
+        json_str = json.dumps(batch_data, ensure_ascii=False)
+        json_bytes = json_str.encode('utf-8')
+        compressed_data = gzip.compress(json_bytes, compresslevel=6)
+
+        original_size = len(json_bytes)
+        compressed_size = len(compressed_data)
+        compression_ratio = original_size / compressed_size if compressed_size > 0 else 1
+
+        logger.info(
+            f"Compressing batch: {original_size} bytes → {compressed_size} bytes "
+            f"({compression_ratio:.1f}x ratio)"
+        )
+
+        # Create Parse File with compressed data
+        file_name = f"batch_{batch_id}_{uuid.uuid4().hex[:8]}.json.gz"
+        file_data = {
+            "__type": "File",
+            "name": file_name,
+            "base64": base64.b64encode(compressed_data).decode('utf-8')
+        }
+
+        # Get organization and user IDs
+        organization_id = getattr(batch_request, 'organization_id', None) or getattr(auth_response, 'organization_id', None)
+        namespace_id = getattr(batch_request, 'namespace_id', None) or getattr(auth_response, 'namespace_id', None)
+        user_id = getattr(auth_response, 'end_user_id', None)
+        workspace_id = getattr(auth_response, 'workspace_id', None)
+
+        # Build BatchMemoryRequest data
+        batch_req_data = {
+            "batchId": batch_id,
+            "requestId": str(uuid.uuid4()),
+            "batchDataFile": file_data,
+            "batchMetadata": {
+                "memory_count": len(memories),
+                "total_size_bytes": original_size,
+                "compressed_size_bytes": compressed_size,
+                "compression_ratio": round(compression_ratio, 2),
+                "source": "batch_api",
+                "created_at": datetime.now(UTC).isoformat()
+            },
+            "status": "pending",
+            "processedCount": 0,
+            "successCount": 0,
+            "failCount": 0,
+            "totalMemories": len(memories),
+            "webhookSent": False
+        }
+
+        # Add pointers
+        if organization_id:
+            batch_req_data["organization"] = {
+                "__type": "Pointer",
+                "className": "Organization",
+                "objectId": organization_id
+            }
+
+        if namespace_id:
+            batch_req_data["namespace"] = {
+                "__type": "Pointer",
+                "className": "Namespace",
+                "objectId": namespace_id
+            }
+
+        if user_id:
+            batch_req_data["user"] = {
+                "__type": "Pointer",
+                "className": "_User",
+                "objectId": user_id
+            }
+
+        if workspace_id:
+            batch_req_data["workspace"] = {
+                "__type": "Pointer",
+                "className": "WorkSpace",
+                "objectId": workspace_id
+            }
+
+        # Add optional fields
+        if workflow_id:
+            batch_req_data["workflowId"] = workflow_id
+
+        if webhook_url:
+            batch_req_data["webhookUrl"] = webhook_url
+            if webhook_secret:
+                batch_req_data["webhookSecret"] = webhook_secret
+
+        # Set ACL (user + organization read access)
+        if user_id and organization_id:
+            batch_req_data["ACL"] = {
+                user_id: {"read": True, "write": True},
+                f"role:org_{organization_id}": {"read": True}
+            }
+
+        # Create in Parse Server (always with Master Key)
+        headers = {
+            "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+            "X-Parse-Master-Key": PARSE_MASTER_KEY,
+            "Content-Type": "application/json"
+        }
+
+        async def _ensure_batch_memory_request_schema() -> None:
+            """Create the BatchMemoryRequest schema if it doesn't exist."""
+            try:
+                import httpx as _httpx
+                schema_headers = headers
+                schema = {
+                    "className": "BatchMemoryRequest",
+                    "fields": {
+                        "batchId": {"type": "String"},
+                        "batchDataFile": {"type": "File"},
+                        "memoriesCount": {"type": "Number"},
+                        "organizationId": {"type": "String"},
+                        "namespaceId": {"type": "String"},
+                        "workflowId": {"type": "String"},
+                        "webhookUrl": {"type": "String"},
+                        "webhookSecret": {"type": "String"},
+                        "user": {"type": "Pointer", "targetClass": "_User"},
+                        "workspace": {"type": "Pointer", "targetClass": "WorkSpace"}
+                    }
+                }
+                async with _httpx.AsyncClient(timeout=30.0) as _client:
+                    get_resp = await _client.get(
+                        f"{PARSE_SERVER_URL}/parse/schemas/BatchMemoryRequest",
+                        headers=schema_headers
+                    )
+                    if get_resp.status_code == 200:
+                        return
+                    # Create schema
+                    create_resp = await _client.post(
+                        f"{PARSE_SERVER_URL}/parse/schemas/BatchMemoryRequest",
+                        headers=schema_headers,
+                        json=schema
+                    )
+                    if create_resp.status_code not in [200, 201]:
+                        logger.error(
+                            f"Failed to create schema BatchMemoryRequest: {create_resp.status_code} - {create_resp.text}"
+                        )
+            except Exception as _se:
+                logger.error(f"Schema ensure failed for BatchMemoryRequest: {_se}")
+
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            # First attempt
+            response = await client.post(
+                f"{PARSE_SERVER_URL}/parse/classes/BatchMemoryRequest",
+                json=batch_req_data,
+                headers=headers
+            )
+
+            if response.status_code not in [200, 201]:
+                # If class doesn't exist, auto-create schema then retry once
+                try:
+                    body_text = response.text or ""
+                    if response.status_code in (400, 403) and ("non-existent class" in body_text.lower() or 'code":119' in body_text):
+                        logger.warning("BatchMemoryRequest class missing; creating schema and retrying once...")
+                        await _ensure_batch_memory_request_schema()
+                        response = await client.post(
+                            f"{PARSE_SERVER_URL}/parse/classes/BatchMemoryRequest",
+                            json=batch_req_data,
+                            headers=headers
+                        )
+                except Exception:
+                    # Fall through to normal error handling
+                    pass
+
+            if response.status_code not in [200, 201]:
+                logger.error(f"Failed to create BatchMemoryRequest: {response.text}")
+                raise Exception(f"Parse creation failed: {response.status_code} - {response.text}")
+
+            result = response.json()
+            object_id = result.get("objectId")
+
+            logger.info(
+                f"Created BatchMemoryRequest {object_id} with {len(memories)} memories, "
+                f"compressed {original_size} → {compressed_size} bytes ({compression_ratio:.1f}x)"
+            )
+
+            return object_id
+
+    except Exception as e:
+        logger.error(f"Failed to create BatchMemoryRequest: {e}", exc_info=True)
+        raise
+
+
+async def fetch_batch_memory_request_from_parse(
+    request_id: str,
+    session_token: Optional[str] = None,
+    api_key: Optional[str] = None
+) -> Optional["BatchMemoryRequestParse"]:
+    """
+    Fetch BatchMemoryRequest from Parse Server and decompress batch data.
+
+    Follows the pattern from fetch_batch_memories_from_parse with gzip decompression.
+
+    Args:
+        request_id: ObjectId of BatchMemoryRequest
+        session_token: Session token for authentication
+        api_key: API key for authentication
+
+    Returns:
+        BatchMemoryRequestParse with decompressed memories
+
+    Raises:
+        ValueError: If request not found
+        Exception: If fetch/decompression fails
+    """
+    try:
+        import gzip
+        import json
+        from models.parse_server import BatchMemoryRequestParse
+
+        headers = {
+            "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+            "Content-Type": "application/json"
+        }
+        if api_key is not None:
+            headers["X-Parse-Master-Key"] = PARSE_MASTER_KEY
+        elif session_token is not None:
+            headers["X-Parse-Session-Token"] = session_token
+
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            # Fetch BatchMemoryRequest
+            response = await client.get(
+                f"{PARSE_SERVER_URL}/parse/classes/BatchMemoryRequest/{request_id}",
+                headers=headers
+            )
+
+            if response.status_code == 404:
+                raise ValueError(f"BatchMemoryRequest {request_id} not found")
+
+            if response.status_code != 200:
+                logger.error(f"Failed to fetch BatchMemoryRequest: {response.text}")
+                raise Exception(f"Parse fetch failed: {response.status_code}")
+
+            batch_req_data = response.json()
+
+            # Extract file URL
+            batch_file = batch_req_data.get("batchDataFile", {})
+            file_url = batch_file.get("url")
+
+            if not file_url:
+                raise ValueError(f"BatchMemoryRequest {request_id} has no batchDataFile")
+
+            logger.info(f"Downloading batch file from: {file_url}")
+
+            # Download batch data file
+            file_response = await client.get(file_url, timeout=60.0)
+
+            if file_response.status_code != 200:
+                raise Exception(f"Failed to download batch file: {file_response.status_code}")
+
+            compressed_data = file_response.content
+
+            # Decompress (following agent.md learning)
+            try:
+                decompressed_data = gzip.decompress(compressed_data)
+                batch_json = decompressed_data.decode('utf-8')
+                batch_data = json.loads(batch_json)
+            except Exception as e:
+                logger.error(f"Failed to decompress batch file: {e}")
+                raise Exception(f"Decompression failed: {str(e)}")
+
+            memories = batch_data.get("memories", [])
+
+            logger.info(
+                f"Fetched BatchMemoryRequest {request_id}: {len(memories)} memories, "
+                f"{len(compressed_data)} → {len(decompressed_data)} bytes"
+            )
+
+            # Build BatchMemoryRequestParse object
+            batch_request = BatchMemoryRequestParse(**batch_req_data)
+            # Attach decompressed memories as attribute
+            batch_request.memories = memories  # type: ignore
+
+            return batch_request
+
+    except Exception as e:
+        logger.error(f"Failed to fetch BatchMemoryRequest {request_id}: {e}", exc_info=True)
+        return None
+
+
+async def update_batch_request_status(
+    request_id: str,
+    status: str,
+    processed_count: Optional[int] = None,
+    success_count: Optional[int] = None,
+    fail_count: Optional[int] = None,
+    errors: Optional[List[Dict]] = None,
+    error: Optional[str] = None,
+    session_token: Optional[str] = None,
+    api_key: Optional[str] = None
+) -> bool:
+    """
+    Update BatchMemoryRequest status in Parse Server.
+
+    Args:
+        request_id: ObjectId of BatchMemoryRequest
+        status: New status (pending|processing|completed|failed|partial_failure)
+        processed_count: Number of memories processed
+        success_count: Number of successful memories
+        fail_count: Number of failed memories
+        errors: List of error objects
+        error: Error message if status is failed
+        session_token: Session token for authentication
+        api_key: API key for authentication
+
+    Returns:
+        True if update successful, False otherwise
+    """
+    try:
+        update_data = {"status": status}
+
+        # Add timing metadata
+        if status == "processing":
+            update_data["startedAt"] = {
+                "__type": "Date",
+                "iso": datetime.now(UTC).isoformat()
+            }
+        elif status in ["completed", "failed", "partial_failure"]:
+            update_data["completedAt"] = {
+                "__type": "Date",
+                "iso": datetime.now(UTC).isoformat()
+            }
+
+        # Add counts
+        if processed_count is not None:
+            update_data["processedCount"] = processed_count
+        if success_count is not None:
+            update_data["successCount"] = success_count
+        if fail_count is not None:
+            update_data["failCount"] = fail_count
+
+        # Add errors
+        if errors:
+            update_data["errors"] = errors
+        if error:
+            update_data["error"] = error
+
+        headers = {
+            "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+            "Content-Type": "application/json"
+        }
+        if api_key is not None:
+            headers["X-Parse-Master-Key"] = PARSE_MASTER_KEY
+        elif session_token is not None:
+            headers["X-Parse-Session-Token"] = session_token
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.put(
+                f"{PARSE_SERVER_URL}/parse/classes/BatchMemoryRequest/{request_id}",
+                json=update_data,
+                headers=headers
+            )
+
+            if response.status_code != 200:
+                logger.error(f"Failed to update BatchMemoryRequest: {response.text}")
+                return False
+
+            logger.info(f"Updated BatchMemoryRequest {request_id} to status: {status}")
+            return True
+
+    except Exception as e:
+        logger.error(f"Failed to update BatchMemoryRequest {request_id}: {e}", exc_info=True)
+        return False
+
+
+def ids_to_parse_pointers(ids: list, class_name: str) -> list:
+    """Convert a list of objectIds to Parse pointer dicts."""
+    return [
+        {"__type": "Pointer", "className": class_name, "objectId": id_}
+        for id_ in ids if id_
+    ]
+
+async def store_memory_prediction_log_async(
+    prediction_log: MemoryPredictionLog,
+    session_token: str = None,
+    api_key: Optional[str] = None
+) -> Optional[dict]:
+    """Async function to store MemoryPredictionLog in Parse Server
+    
+    Args:
+        prediction_log (MemoryPredictionLog): The MemoryPredictionLog object to store
+        session_token (str): Session token for authentication
+        api_key (Optional[str]): API key for authentication
+        
+    Returns:
+        Optional[dict]: The created MemoryPredictionLog data if successful, None otherwise
+    """
+    url = f"{PARSE_SERVER_URL}/parse/classes/MemoryPredictionLog"
+    
+    # Convert the Pydantic model to dict for Parse Server
+    data = prediction_log.model_dump(exclude_none=True)
+    
+    # Extract predictedRelatedMemories for separate handling as relation
+    predicted_memory_ids = prediction_log.predictedRelatedMemories or []
+    
+    headers = {
+        "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+        "X-Parse-Master-Key": PARSE_MASTER_KEY,
+        "Content-Type": "application/json"
+    }
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            # First, create the MemoryPredictionLog object
+            response = await client.post(url, headers=headers, json=data)
+            response.raise_for_status()
+            result = response.json()
+            prediction_log_id = result.get('objectId')
+            
+            logger.info(f"Successfully created MemoryPredictionLog with objectId: {prediction_log_id}")
+            
+            # If we have predicted memory IDs, add them as relations
+            if predicted_memory_ids and prediction_log_id:
+                # Convert memory IDs to Parse pointers
+                memory_pointers = [
+                    {
+                        "__type": "Pointer",
+                        "className": "Memory",
+                        "objectId": memory_id
+                    }
+                    for memory_id in predicted_memory_ids
+                ]
+                
+                # Add the relations
+                await _add_objects_to_relation(
+                    client=client,
+                    headers=headers,
+                    parent_object_id=prediction_log_id,
+                    relation_key="predictedRelatedMemories",
+                    objects=memory_pointers,
+                    class_name="MemoryPredictionLog"
+                )
+                
+                logger.info(f"Successfully added {len(predicted_memory_ids)} predicted memories to relation")
+            
+            return result
+        except httpx.HTTPError as e:
+            logger.error(f"Failed to store MemoryPredictionLog: {str(e)}")
+            if hasattr(e, 'response') and e.response:
+                logger.error(f"Response text: {e.response.text}")
+            return None
+        except Exception as e:
+            logger.error(f"Unexpected error storing MemoryPredictionLog: {str(e)}")
+            return None
+
+def clean_query_log_data(data: dict, preserve_object_id: bool = False) -> dict:
+    """Clean QueryLog data by removing empty arrays and None values that cause Parse Server schema mismatches.
+    Always keep certain fields (retrievedMemorySimilarityScores, memoryRetrievalTiers, usedPredictedGrouping) even if empty.
+    
+    Args:
+        data: The data dictionary to clean
+        preserve_object_id: If True, preserve objectId (for custom objectId when allowCustomObjectId is enabled)
+    """
+    # Remove reserved Parse Server fields that cannot be set during object creation
+    # objectId can be preserved if intentionally set (e.g., from search_id) and Parse Server allows it
+    fields_to_remove = ['createdAt', 'updatedAt']
+    if not preserve_object_id:
+        fields_to_remove.append('objectId')
+    data = {k: v for k, v in data.items() if k not in fields_to_remove}
+    
+    always_keep_keys = [
+        'retrievedMemorySimilarityScores',
+        'memoryRetrievalTiers',
+        'usedPredictedGrouping',
+        'predictedGroupedMemories',
+        'retrievedMemoryConfidenceScores',
+        'retrievedMemoryScores',
+        'retrievalLatencyMs',
+        'totalMemoriesRetrieved',
+        'queryLog',
+        'user',
+        'workspace',
+    ]
+    cleaned_data = {}
+    for key, value in data.items():
+        # Always keep certain keys, even if empty dict/list/False
+        if key in always_keep_keys:
+            cleaned_data[key] = value
+            continue
+        # Skip empty arrays for relation fields
+        if key in ['relatedGoals', 'relatedUseCases', 'relatedSteps'] and isinstance(value, list) and len(value) == 0:
+            continue
+        # Skip empty arrays for score fields
+        if key in ['goalClassificationScores', 'useCaseClassificationScores', 'stepClassificationScores'] and isinstance(value, list) and len(value) == 0:
+            continue
+        # Skip None values
+        if value is None:
+            continue
+        # Recursively clean nested dictionaries
+        if isinstance(value, dict):
+            cleaned_value = clean_query_log_data(value)
+            if cleaned_value:  # Only add if not empty
+                cleaned_data[key] = cleaned_value
+        else:
+            cleaned_data[key] = value
+    return cleaned_data
+
+async def store_memory_query_log_async(
+    query_log: "QueryLog",
+    session_token: str = None,
+    api_key: Optional[str] = None
+) -> Optional[dict]:
+    """Async function to store QueryLog in Parse Server
+    
+    Args:
+        query_log (QueryLog): The QueryLog object to store
+        session_token (str): Session token for authentication (not used, kept for compatibility)
+        api_key (Optional[str]): API key for authentication (not used, kept for compatibility)
+        
+    Returns:
+        Optional[dict]: The created QueryLog data if successful, None otherwise
+    """
+    url = f"{PARSE_SERVER_URL}/parse/classes/QueryLog"
+    
+    # Convert the Pydantic model to dict for Parse Server
+    data = query_log.model_dump(exclude_none=True)
+    logger.info(f"QueryLog data before cleaning: {data}")
+    
+    # Preserve objectId if it was intentionally set (e.g., from search_id)
+    # This allows custom objectId when Parse Server has allowCustomObjectId enabled
+    preserve_object_id = data.get('objectId') is not None
+    
+    # Extract relations for separate handling - convert ParsePointer objects to Parse format
+    related_goals = []
+    if data.get('relatedGoals'):
+        for goal in data['relatedGoals']:
+            # Handle both ParsePointer objects and dictionaries
+            if hasattr(goal, 'objectId') and hasattr(goal, 'className'):
+                # ParsePointer object
+                related_goals.append({
+                    "__type": "Pointer",
+                    "className": goal.className,
+                    "objectId": goal.objectId
+                })
+            elif isinstance(goal, dict) and 'objectId' in goal and 'className' in goal:
+                # Already in Parse format
+                related_goals.append(goal)
+    
+    related_use_cases = []
+    if data.get('relatedUseCases'):
+        for use_case in data['relatedUseCases']:
+            # Handle both ParsePointer objects and dictionaries
+            if hasattr(use_case, 'objectId') and hasattr(use_case, 'className'):
+                # ParsePointer object
+                related_use_cases.append({
+                    "__type": "Pointer",
+                    "className": use_case.className,
+                    "objectId": use_case.objectId
+                })
+            elif isinstance(use_case, dict) and 'objectId' in use_case and 'className' in use_case:
+                # Already in Parse format
+                related_use_cases.append(use_case)
+    
+    related_steps = []
+    if data.get('relatedSteps'):
+        for step in data['relatedSteps']:
+            # Handle both ParsePointer objects and dictionaries
+            if hasattr(step, 'objectId') and hasattr(step, 'className'):
+                # ParsePointer object
+                related_steps.append({
+                    "__type": "Pointer",
+                    "className": step.className,
+                    "objectId": step.objectId
+                })
+            elif isinstance(step, dict) and 'objectId' in step and 'className' in step:
+                # Already in Parse format
+                related_steps.append(step)
+    
+    # Remove relations from initial data to avoid schema mismatch
+    data.pop('relatedGoals', None)
+    data.pop('relatedUseCases', None)
+    data.pop('relatedSteps', None)
+    
+    # Clean the data to remove empty arrays and None values
+    # Preserve objectId if it was intentionally set (for custom objectId support)
+    cleaned_data = clean_query_log_data(data, preserve_object_id=preserve_object_id)
+    
+    logger.info(f"QueryLog data: {cleaned_data}")
+    if preserve_object_id and 'objectId' in cleaned_data:
+        logger.info(f"Preserving custom objectId: {cleaned_data['objectId']} (requires Parse Server allowCustomObjectId=true)")
+        logger.warning("If Parse Server rejects this, ensure allowCustomObjectId is enabled in Parse Server configuration")
+    logger.info(f"Related goals to add: {related_goals}")
+    logger.info(f"Related use cases to add: {related_use_cases}")
+    logger.info(f"Related steps to add: {related_steps}")
+    
+    headers = {
+        "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+        "X-Parse-Master-Key": PARSE_MASTER_KEY,
+        "Content-Type": "application/json"
+    }
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            # First, create the QueryLog object
+            response = await client.post(url, headers=headers, json=cleaned_data)
+            response.raise_for_status()
+            result = response.json()
+            query_log_id = result.get('objectId')
+            
+            logger.info(f"Successfully created QueryLog with objectId: {query_log_id}")
+            
+            # Add relations if we have them and the QueryLog was created successfully
+            if query_log_id:
+                # Add related goals
+                if related_goals:
+                    await _add_objects_to_relation(
+                        client=client,
+                        headers=headers,
+                        parent_object_id=query_log_id,
+                        relation_key="relatedGoals",
+                        objects=related_goals,
+                        class_name="QueryLog"
+                    )
+                    logger.info(f"Successfully added {len(related_goals)} related goals to relation")
+                
+                # Add related use cases
+                if related_use_cases:
+                    await _add_objects_to_relation(
+                        client=client,
+                        headers=headers,
+                        parent_object_id=query_log_id,
+                        relation_key="relatedUseCases",
+                        objects=related_use_cases,
+                        class_name="QueryLog"
+                    )
+                    logger.info(f"Successfully added {len(related_use_cases)} related use cases to relation")
+                
+                # Add related steps
+                if related_steps:
+                    await _add_objects_to_relation(
+                        client=client,
+                        headers=headers,
+                        parent_object_id=query_log_id,
+                        relation_key="relatedSteps",
+                        objects=related_steps,
+                        class_name="QueryLog"
+                    )
+                    logger.info(f"Successfully added {len(related_steps)} related steps to relation")
+            
+            return result
+            
+        except httpx.HTTPError as e:
+            logger.error(f"Failed to store QueryLog: {str(e)}")
+            if hasattr(e, 'response') and e.response:
+                logger.error(f"Response text: {e.response.text}")
+            return None
+        except Exception as e:
+            logger.error(f"Unexpected error storing QueryLog: {str(e)}")
+            return None
+
+
+async def store_memory_retrieval_log_async(
+    memory_retrieval_log: "MemoryRetrievalLog",
+    session_token: str = None,
+    api_key: Optional[str] = None
+) -> Optional[dict]:
+    """Async function to store MemoryRetrievalLog in Parse Server
+    
+    Args:
+        memory_retrieval_log (MemoryRetrievalLog): The MemoryRetrievalLog object to store
+        session_token (str): Session token for authentication (not used, kept for compatibility)
+        api_key (Optional[str]): API key for authentication (not used, kept for compatibility)
+        
+    Returns:
+        Optional[dict]: The created MemoryRetrievalLog data if successful, None otherwise
+    """
+    url = f"{PARSE_SERVER_URL}/parse/classes/MemoryRetrievalLog"
+    
+    # Convert the Pydantic model to dict for Parse Server
+    data = memory_retrieval_log.model_dump(exclude_none=True)
+    logger.info(f"MemoryRetrievalLog data before cleaning: {data}")
+    
+    # Extract relations for separate handling
+    retrieved_memories = []
+    if data.get('retrievedMemories'):
+        for memory in data['retrievedMemories']:
+            # Handle both ParsePointer objects and dictionaries
+            if hasattr(memory, 'objectId') and hasattr(memory, 'className'):
+                # ParsePointer object
+                retrieved_memories.append({
+                    "__type": "Pointer",
+                    "className": memory.className,
+                    "objectId": memory.objectId
+                })
+            elif isinstance(memory, dict) and 'objectId' in memory and 'className' in memory:
+                # Already in Parse format
+                retrieved_memories.append(memory)
+    
+    cited_memories = []
+    if data.get('citedMemories'):
+        for memory in data['citedMemories']:
+            # Handle both ParsePointer objects and dictionaries
+            if hasattr(memory, 'objectId') and hasattr(memory, 'className'):
+                # ParsePointer object
+                cited_memories.append({
+                    "__type": "Pointer",
+                    "className": memory.className,
+                    "objectId": memory.objectId
+                })
+            elif isinstance(memory, dict) and 'objectId' in memory and 'className' in memory:
+                # Already in Parse format
+                cited_memories.append(memory)
+    
+    predicted_grouped_memories = []
+    if data.get('predictedGroupedMemories'):
+        for memory in data['predictedGroupedMemories']:
+            # Handle both ParsePointer objects and dictionaries
+            if hasattr(memory, 'objectId') and hasattr(memory, 'className'):
+                # ParsePointer object
+                predicted_grouped_memories.append({
+                    "__type": "Pointer",
+                    "className": memory.className,
+                    "objectId": memory.objectId
+                })
+            elif isinstance(memory, dict) and 'objectId' in memory and 'className' in memory:
+                # Already in Parse format
+                predicted_grouped_memories.append(memory)
+    
+    # Remove relations from initial data to avoid schema mismatch
+    data.pop('retrievedMemories', None)
+    data.pop('citedMemories', None)
+    data.pop('predictedGroupedMemories', None)
+    
+    # Clean the data to remove empty arrays and None values
+    cleaned_data = clean_query_log_data(data)  # Reuse the same cleaning function
+    
+    logger.info(f"MemoryRetrievalLog data: {cleaned_data}")
+    logger.info(f"Retrieved memories to add: {retrieved_memories}")
+    logger.info(f"Cited memories to add: {cited_memories}")
+    logger.info(f"Predicted grouped memories to add: {predicted_grouped_memories}")
+    
+    headers = {
+        "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+        "X-Parse-Master-Key": PARSE_MASTER_KEY,
+        "Content-Type": "application/json"
+    }
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            # First, create the MemoryRetrievalLog object
+            response = await client.post(url, headers=headers, json=cleaned_data)
+            response.raise_for_status()
+            result = response.json()
+            memory_retrieval_log_id = result.get('objectId')
+            
+            logger.info(f"Successfully created MemoryRetrievalLog with objectId: {memory_retrieval_log_id}")
+            
+            # Add relations if we have them and the MemoryRetrievalLog was created successfully
+            if memory_retrieval_log_id:
+                # Add retrieved memories
+                if retrieved_memories:
+                    await _add_objects_to_relation(
+                        client=client,
+                        headers=headers,
+                        parent_object_id=memory_retrieval_log_id,
+                        relation_key="retrievedMemories",
+                        objects=retrieved_memories,
+                        class_name="MemoryRetrievalLog"
+                    )
+                    logger.info(f"Successfully added {len(retrieved_memories)} retrieved memories to relation")
+                
+                # Add cited memories
+                if cited_memories:
+                    await _add_objects_to_relation(
+                        client=client,
+                        headers=headers,
+                        parent_object_id=memory_retrieval_log_id,
+                        relation_key="citedMemories",
+                        objects=cited_memories,
+                        class_name="MemoryRetrievalLog"
+                    )
+                    logger.info(f"Successfully added {len(cited_memories)} cited memories to relation")
+                
+                # Add predicted grouped memories
+                if predicted_grouped_memories:
+                    await _add_objects_to_relation(
+                        client=client,
+                        headers=headers,
+                        parent_object_id=memory_retrieval_log_id,
+                        relation_key="predictedGroupedMemories",
+                        objects=predicted_grouped_memories,
+                        class_name="MemoryRetrievalLog"
+                    )
+                    logger.info(f"Successfully added {len(predicted_grouped_memories)} predicted grouped memories to relation")
+            
+            return result
+            
+        except httpx.HTTPError as e:
+            logger.error(f"Failed to store MemoryRetrievalLog: {str(e)}")
+            if hasattr(e, 'response') and e.response:
+                logger.error(f"Response text: {e.response.text}")
+            return None
+        except Exception as e:
+            logger.error(f"Unexpected error storing MemoryRetrievalLog: {str(e)}")
+            return None
+
+async def store_agentic_graph_log_async(
+    agentic_graph_log: "AgenticGraphLog",
+    session_token: str = None,
+    api_key: Optional[str] = None
+) -> Optional[dict]:
+    """Async function to store AgenticGraphLog in Parse Server
+    
+    Args:
+        agentic_graph_log (AgenticGraphLog): The AgenticGraphLog object to store
+        session_token (str): Session token for authentication (not used, kept for compatibility)
+        api_key (Optional[str]): API key for authentication (not used, kept for compatibility)
+        
+    Returns:
+        Optional[dict]: The created AgenticGraphLog data if successful, None otherwise
+    """
+    url = f"{PARSE_SERVER_URL}/parse/classes/AgenticGraphLog"
+    
+    # Convert the Pydantic model to dict for Parse Server
+    data = agentic_graph_log.model_dump(exclude_none=True)
+    logger.info(f"AgenticGraphLog data before cleaning: {data}")
+    
+    # Extract relations for separate handling
+    retrieved_memories = []
+    if data.get('retrievedMemories'):
+        for memory in data['retrievedMemories']:
+            # Handle both ParsePointer objects and dictionaries
+            if hasattr(memory, 'objectId') and hasattr(memory, 'className'):
+                # ParsePointer object
+                retrieved_memories.append({
+                    "__type": "Pointer",
+                    "className": memory.className,
+                    "objectId": memory.objectId
+                })
+            elif isinstance(memory, dict) and 'objectId' in memory and 'className' in memory:
+                # Already in Parse format
+                retrieved_memories.append(memory)
+    
+    # Remove relations from initial data to avoid schema mismatch
+    data.pop('retrievedMemories', None)
+    
+    # Clean the data to remove empty arrays and None values
+    cleaned_data = clean_query_log_data(data)  # Reuse the same cleaning function
+    
+    logger.info(f"AgenticGraphLog data: {cleaned_data}")
+    logger.info(f"Retrieved memories to add: {retrieved_memories}")
+    
+    headers = {
+        "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+        "X-Parse-Master-Key": PARSE_MASTER_KEY,
+        "Content-Type": "application/json"
+    }
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            # First, create the AgenticGraphLog object
+            response = await client.post(url, headers=headers, json=cleaned_data)
+            response.raise_for_status()
+            result = response.json()
+            agentic_graph_log_id = result.get('objectId')
+            
+            logger.info(f"Successfully created AgenticGraphLog with objectId: {agentic_graph_log_id}")
+            
+            # Add relations if we have them and the AgenticGraphLog was created successfully
+            if agentic_graph_log_id:
+                # Add retrieved memories
+                if retrieved_memories:
+                    await _add_objects_to_relation(
+                        client=client,
+                        headers=headers,
+                        parent_object_id=agentic_graph_log_id,
+                        relation_key="retrievedMemories",
+                        objects=retrieved_memories,
+                        class_name="AgenticGraphLog"
+                    )
+                    logger.info(f"Successfully added {len(retrieved_memories)} retrieved memories to relation")
+            
+            return result
+            
+        except httpx.HTTPError as e:
+            logger.error(f"Failed to store AgenticGraphLog: {str(e)}")
+            if hasattr(e, 'response') and e.response:
+                logger.error(f"Response text: {e.response.text}")
+            return None
+        except Exception as e:
+            logger.error(f"Unexpected error storing AgenticGraphLog: {str(e)}")
+            return None
+
+async def store_user_feedback_log_async(
+    user_feedback_log: "UserFeedbackLog",
+    session_token: str = None,
+    api_key: Optional[str] = None
+) -> Optional[dict]:
+    """Async function to store UserFeedbackLog in Parse Server
+    
+    Args:
+        user_feedback_log (UserFeedbackLog): The UserFeedbackLog object to store
+        session_token (str): Session token for authentication (not used, kept for compatibility)
+        api_key (Optional[str]): API key for authentication (not used, kept for compatibility)
+        
+    Returns:
+        Optional[dict]: The created UserFeedbackLog data if successful, None otherwise
+    """
+    url = f"{PARSE_SERVER_URL}/parse/classes/UserFeedbackLog"
+    
+    # Convert the Pydantic model to dict for Parse Server
+    data = user_feedback_log.model_dump(exclude_none=True)
+    logger.info(f"UserFeedbackLog data before cleaning: {data}")
+    
+    # Clean the data to remove empty arrays and None values
+    # Preserve objectId if it's set (for custom objectId when allowCustomObjectId is enabled)
+    preserve_object_id = data.get('objectId') is not None
+    cleaned_data = clean_query_log_data(data, preserve_object_id=preserve_object_id)
+    
+    logger.info(f"UserFeedbackLog data: {cleaned_data}")
+    if preserve_object_id and 'objectId' in cleaned_data:
+        logger.info(f"Preserving custom objectId: {cleaned_data['objectId']} (requires Parse Server allowCustomObjectId=true)")
+    
+    headers = {
+        "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+        "X-Parse-Master-Key": PARSE_MASTER_KEY,
+        "Content-Type": "application/json"
+    }
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            # Create the UserFeedbackLog object (no relations to handle separately)
+            response = await client.post(url, headers=headers, json=cleaned_data)
+            response.raise_for_status()
+            result = response.json()
+            user_feedback_log_id = result.get('objectId')
+            
+            logger.info(f"Successfully created UserFeedbackLog with objectId: {user_feedback_log_id}")
+            
+            return result
+            
+        except httpx.HTTPError as e:
+            logger.error(f"Failed to store UserFeedbackLog: {str(e)}")
+            if hasattr(e, 'response') and e.response:
+                logger.error(f"Response text: {e.response.text}")
+            return None
+        except Exception as e:
+            logger.error(f"Unexpected error storing UserFeedbackLog: {str(e)}")
+            return None
+
+async def get_query_log_by_id_async(
+    query_log_id: str,
+    session_token: str = None,
+    api_key: Optional[str] = None
+) -> Optional[dict]:
+    """Async function to get QueryLog by ID from Parse Server
+    
+    Args:
+        query_log_id (str): The QueryLog objectId to retrieve
+        session_token (str): Session token for authentication
+        api_key (Optional[str]): API key for authentication
+        
+    Returns:
+        Optional[dict]: The QueryLog data if found, None otherwise
+    """
+    url = f"{PARSE_SERVER_URL}/parse/classes/QueryLog/{query_log_id}"
+    
+    headers = {
+        "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+        "X-Parse-Master-Key": PARSE_MASTER_KEY,
+        "Content-Type": "application/json"
+    }
+    
+    if session_token:
+        headers["X-Parse-Session-Token"] = session_token
+    elif api_key:
+        headers["X-Parse-REST-API-Key"] = api_key
+    else:
+        headers["X-Parse-Master-Key"] = PARSE_MASTER_KEY
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, headers=headers)
+            
+            if response.status_code == 200:
+                return response.json()
+            elif response.status_code == 404:
+                logger.warning(f"QueryLog {query_log_id} not found")
+                return None
+            else:
+                logger.error(f"Failed to get QueryLog {query_log_id}: {response.status_code} - {response.text}")
+                return None
+                
+    except Exception as e:
+        logger.error(f"Error getting QueryLog {query_log_id}: {e}", exc_info=True)
+        return None
+
+async def get_query_log_retrieved_memories_async(
+    query_log_id: str,
+    *,
+    session_token: Optional[str] = None,
+    api_key: Optional[str] = None,
+    limit: int = 1000,
+    keys: str = "objectId,updatedAt"
+) -> List[Dict[str, Any]]:
+    """Fetch Memory objects related to a QueryLog via MemoryRetrievalLog.retrievedMemories.
+
+    Implementation details:
+    - First, resolve the `MemoryRetrievalLog` whose `queryLog` pointer matches `query_log_id`.
+    - Then, use `$relatedTo` on the `MemoryRetrievalLog.retrievedMemories` relation to fetch `Memory` rows.
+
+    Args:
+        query_log_id: The `QueryLog` objectId to resolve related memories for
+        session_token: Optional Parse session token
+        api_key: Optional REST API Key (unused when master key is available)
+        limit: Maximum number of related Memory rows to return (<=1000)
+        keys: Comma-separated list of Memory fields to return
+
+    Returns:
+        List of Memory dictionaries (raw) matching the relation.
+    """
+    if not PARSE_SERVER_URL:
+        logger.error("PARSE_SERVER_URL environment variable is not set.")
+        return []
+
+    headers = {
+        "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+        "X-Parse-Master-Key": PARSE_MASTER_KEY,
+        "Content-Type": "application/json",
+        "Accept-Encoding": "gzip",
+    }
+    if session_token:
+        headers["X-Parse-Session-Token"] = session_token
+    elif api_key:
+        headers["X-Parse-REST-API-Key"] = api_key
+
+    async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, read=20.0)) as client:
+        try:
+            # Step 1: Find MemoryRetrievalLog by queryLog pointer
+            mrl_where = {
+                "queryLog": {
+                    "__type": "Pointer",
+                    "className": "QueryLog",
+                    "objectId": query_log_id,
+                }
+            }
+            mrl_params = {
+                "where": json.dumps(mrl_where),
+                "keys": "objectId",
+                "limit": "1",
+                "order": "-createdAt",
+            }
+            mrl_url = f"{PARSE_SERVER_URL}/parse/classes/MemoryRetrievalLog"
+            mrl_resp = await client.get(mrl_url, headers=headers, params=mrl_params)
+            mrl_resp.raise_for_status()
+            mrl_results = mrl_resp.json().get("results", [])
+            if not mrl_results:
+                logger.warning(
+                    f"No MemoryRetrievalLog found for QueryLog {query_log_id}; cannot resolve related memories."
+                )
+                return []
+            memory_retrieval_log_id = mrl_results[0].get("objectId")
+            if not memory_retrieval_log_id:
+                return []
+
+            # Step 2: Fetch Memory rows via $relatedTo from MemoryRetrievalLog.retrievedMemories
+            related_where = {
+                "$relatedTo": {
+                    "object": {
+                        "__type": "Pointer",
+                        "className": "MemoryRetrievalLog",
+                        "objectId": memory_retrieval_log_id,
+                    },
+                    "key": "retrievedMemories",
+                }
+            }
+            related_params = {
+                "where": json.dumps(related_where),
+                "keys": keys,
+                "limit": str(max(1, min(int(limit), 1000))),
+                "order": "-updatedAt",
+            }
+            mem_url = f"{PARSE_SERVER_URL}/parse/classes/Memory"
+            mem_resp = await client.get(mem_url, headers=headers, params=related_params)
+            mem_resp.raise_for_status()
+            return mem_resp.json().get("results", [])
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                f"Failed fetching related memories for QueryLog {query_log_id}: {e.response.text}"
+            )
+            return []
+
+async def get_memory_retrieval_log_by_query_log_id_async(
+    query_log_id: str,
+    *,
+    session_token: Optional[str] = None,
+    api_key: Optional[str] = None,
+    keys: Optional[str] = None,
+    include: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Fetch the first MemoryRetrievalLog row associated with a QueryLog ID."""
+    if not PARSE_SERVER_URL:
+        logger.error("PARSE_SERVER_URL environment variable is not set.")
+        return None
+
+    headers = {
+        "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+        "X-Parse-Master-Key": PARSE_MASTER_KEY,
+        "Content-Type": "application/json",
+        "Accept-Encoding": "gzip",
+    }
+    if session_token:
+        headers["X-Parse-Session-Token"] = session_token
+    elif api_key:
+        headers["X-Parse-REST-API-Key"] = api_key
+
+    params: Dict[str, Any] = {
+        "where": json.dumps({
+            "queryLog": {"__type": "Pointer", "className": "QueryLog", "objectId": query_log_id}
+        }),
+        "limit": "1",
+        "order": "-createdAt",
+    }
+    if keys:
+        params["keys"] = keys
+    if include:
+        params["include"] = include
+
+    async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, read=20.0)) as client:
+        try:
+            url = f"{PARSE_SERVER_URL}/parse/classes/MemoryRetrievalLog"
+            resp = await client.get(url, headers=headers, params=params)
+            resp.raise_for_status()
+            results = resp.json().get("results", [])
+            return results[0] if results else None
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Failed to fetch MemoryRetrievalLog for QueryLog {query_log_id}: {e.response.text}")
+            return None
+        except Exception as e:
+            logger.error(f"Unexpected error fetching MemoryRetrievalLog: {e}")
+            return None
+        except Exception as e:
+            logger.error(
+                f"Unexpected error fetching related memories for QueryLog {query_log_id}: {e}"
+            )
+            return []
+
+async def get_user_feedback_log_by_id_async(
+    feedback_id: str,
+    session_token: str = None,
+    api_key: Optional[str] = None
+) -> Optional[dict]:
+    """Async function to get UserFeedbackLog by ID from Parse Server
+    
+    Args:
+        feedback_id (str): The UserFeedbackLog objectId to retrieve
+        session_token (str): Session token for authentication (for ACL validation only)
+        api_key (Optional[str]): API key for authentication (for ACL validation only)
+        
+    Returns:
+        Optional[dict]: The UserFeedbackLog data if found, None otherwise
+    """
+    url = f"{PARSE_SERVER_URL}/parse/classes/UserFeedbackLog/{feedback_id}"
+    
+    # Always use master key for UserFeedbackLog access to avoid permission issues
+    headers = {
+        "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+        "X-Parse-Master-Key": PARSE_MASTER_KEY,
+        "Content-Type": "application/json"
+    }
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, headers=headers)
+            
+            if response.status_code == 200:
+                return response.json()
+            elif response.status_code == 404:
+                logger.warning(f"UserFeedbackLog {feedback_id} not found")
+                return None
+            else:
+                logger.error(f"Failed to get UserFeedbackLog {feedback_id}: {response.status_code} - {response.text}")
+                return None
+                
+    except Exception as e:
+        logger.error(f"Error getting UserFeedbackLog {feedback_id}: {e}", exc_info=True)
+        return None
+
+async def update_query_log_engagement_async(
+    query_log_id: str,
+    engagement_signal: str,
+    feedback_score: Optional[int] = None,
+    session_token: str = None,
+    api_key: Optional[str] = None
+) -> bool:
+    """Async function to update QueryLog with engagement signals
+    
+    Args:
+        query_log_id (str): The QueryLog objectId to update
+        engagement_signal (str): The type of engagement signal (e.g., 'thumbs_feedback', 'rating_feedback')
+        feedback_score (Optional[int]): The feedback score if applicable
+        session_token (str): Session token for authentication (not used, kept for compatibility)
+        api_key (Optional[str]): API key for authentication (not used, kept for compatibility)
+        
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    url = f"{PARSE_SERVER_URL}/parse/classes/QueryLog/{query_log_id}"
+    
+    # Prepare update data
+    update_data = {
+        "engagementSignals": {
+            "__op": "AddUnique",
+            "objects": [engagement_signal]
+        }
+    }
+    
+    # Add feedback score if provided
+    if feedback_score is not None:
+        update_data["feedbackScore"] = feedback_score
+    
+    # Add timestamp for the engagement
+    update_data["lastEngagementAt"] = {
+        "__type": "Date",
+        "iso": datetime.now().isoformat()
+    }
+    
+    headers = {
+        "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+        "X-Parse-Master-Key": PARSE_MASTER_KEY,
+        "Content-Type": "application/json"
+    }
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.put(url, headers=headers, json=update_data)
+            response.raise_for_status()
+            
+            logger.info(f"Successfully updated QueryLog {query_log_id} with engagement signal: {engagement_signal}")
+            return True
+            
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                logger.warning(f"QueryLog with objectId {query_log_id} not found for engagement update")
+                return False
+            else:
+                logger.error(f"Failed to update QueryLog engagement: {str(e)}")
+                if hasattr(e, 'response') and e.response:
+                    logger.error(f"Response text: {e.response.text}")
+                return False
+        except Exception as e:
+            logger.error(f"Unexpected error updating QueryLog engagement: {str(e)}")
+            return False
+
+async def get_all_query_logs():
+    """Fetch all QueryLog objects from Parse Server with pagination."""
+    url = f"{PARSE_SERVER_URL}/parse/classes/QueryLog"
+    headers = {
+        "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+        "X-Parse-Master-Key": PARSE_MASTER_KEY,
+        "Content-Type": "application/json"
+    }
+    
+    all_results = []
+    skip = 0
+    limit = 100
+    
+    async with httpx.AsyncClient() as client:
+        while True:
+            params = {
+                "limit": limit,
+                "skip": skip
+            }
+            response = await client.get(url, headers=headers, params=params)
+            response.raise_for_status()
+            data = response.json()
+            results = data.get("results", [])
+            
+            if not results:
+                break
+                
+            all_results.extend(results)
+            skip += limit
+            
+            # If we got fewer results than the limit, we've reached the end
+            if len(results) < limit:
+                break
+    
+    return [QueryLog.model_validate(obj) for obj in all_results]
+
+async def get_feedback_logs_for_query(query_log_id):
+    """Fetch all UserFeedbackLog objects for a given QueryLog ID."""
+    url = f"{PARSE_SERVER_URL}/parse/classes/UserFeedbackLog"
+    headers = {
+        "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+        "X-Parse-Master-Key": PARSE_MASTER_KEY,
+        "Content-Type": "application/json"
+    }
+    params = {
+        "where": f'{{"queryLog":{{"__type":"Pointer","className":"QueryLog","objectId":"{query_log_id}"}}}}'
+    }
+    async with httpx.AsyncClient() as client:
+        response = await client.get(url, headers=headers, params=params)
+        response.raise_for_status()
+        results = response.json().get("results", [])
+        return [UserFeedbackLog.model_validate(obj) for obj in results]
+
+async def get_memory_retrieval_log_for_query(query_log_id):
+    """Fetch the MemoryRetrievalLog for a given QueryLog ID."""
+    url = f"{PARSE_SERVER_URL}/parse/classes/MemoryRetrievalLog"
+    headers = {
+        "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+        "X-Parse-Master-Key": PARSE_MASTER_KEY,
+        "Content-Type": "application/json"
+    }
+    params = {
+        "where": f'{{"queryLog":{{"__type":"Pointer","className":"QueryLog","objectId":"{query_log_id}"}}}}'
+    }
+    async with httpx.AsyncClient() as client:
+        response = await client.get(url, headers=headers, params=params)
+        response.raise_for_status()
+        results = response.json().get("results", [])
+        if not results:
+            return None
+        return MemoryRetrievalLog.model_validate(results[0])
+
+async def update_memory_retrieval_log(retrieval_log: MemoryRetrievalLog):
+    """Update a MemoryRetrievalLog in Parse Server."""
+    url = f"{PARSE_SERVER_URL}/parse/classes/MemoryRetrievalLog/{retrieval_log.objectId}"
+    headers = {
+        "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+        "X-Parse-Master-Key": PARSE_MASTER_KEY,
+        "Content-Type": "application/json"
+    }
+    data = retrieval_log.model_dump(exclude_none=True)
+    
+    # Convert datetime objects to ISO strings for JSON serialization
+    import datetime
+    def convert_dt(obj):
+        if isinstance(obj, dict):
+            return {k: convert_dt(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [convert_dt(v) for v in obj]
+        elif isinstance(obj, datetime.datetime):
+            return {
+                "__type": "Date",
+                "iso": obj.isoformat()
+            }
+        else:
+            return obj
+    
+    data = convert_dt(data)
+    
+    # Extract relations for separate handling
+    retrieved_memories = []
+    if data.get('retrievedMemories'):
+        for memory in data['retrievedMemories']:
+            if hasattr(memory, 'objectId') and hasattr(memory, 'className'):
+                retrieved_memories.append({
+                    "__type": "Pointer",
+                    "className": memory.className,
+                    "objectId": memory.objectId
+                })
+            elif isinstance(memory, dict) and 'objectId' in memory and 'className' in memory:
+                retrieved_memories.append(memory)
+    data.pop('retrievedMemories', None)
+
+    cited_memories = []
+    if data.get('citedMemories'):
+        for memory in data['citedMemories']:
+            if hasattr(memory, 'objectId') and hasattr(memory, 'className'):
+                cited_memories.append({
+                    "__type": "Pointer",
+                    "className": memory.className,
+                    "objectId": memory.objectId
+                })
+            elif isinstance(memory, dict) and 'objectId' in memory and 'className' in memory:
+                cited_memories.append(memory)
+    data.pop('citedMemories', None)
+
+    predicted_grouped_memories = []
+    if data.get('predictedGroupedMemories'):
+        for memory in data['predictedGroupedMemories']:
+            if hasattr(memory, 'objectId') and hasattr(memory, 'className'):
+                predicted_grouped_memories.append({
+                    "__type": "Pointer",
+                    "className": memory.className,
+                    "objectId": memory.objectId
+                })
+            elif isinstance(memory, dict) and 'objectId' in memory and 'className' in memory:
+                predicted_grouped_memories.append(memory)
+    data.pop('predictedGroupedMemories', None)
+
+    # Log the data being sent for debugging
+    logger.info(f"Updating MemoryRetrievalLog {retrieval_log.objectId} with data: {data}")
+    
+    async with httpx.AsyncClient() as client:
+        response = await client.put(url, headers=headers, json=data)
+        if not response.is_success:
+            logger.error(f"Parse Server error: {response.status_code} - {response.text}")
+        response.raise_for_status()
+        result = response.json()
+        # Add retrievedMemories as a relation if present
+        if retrieved_memories:
+            await _add_objects_to_relation(
+                client=client,
+                headers=headers,
+                parent_object_id=retrieval_log.objectId,
+                relation_key="retrievedMemories",
+                objects=retrieved_memories,
+                class_name="MemoryRetrievalLog"
+            )
+            logger.info(f"Successfully updated retrievedMemories relation for {retrieval_log.objectId}")
+        # Add citedMemories as a relation if present
+        if cited_memories:
+            await _add_objects_to_relation(
+                client=client,
+                headers=headers,
+                parent_object_id=retrieval_log.objectId,
+                relation_key="citedMemories",
+                objects=cited_memories,
+                class_name="MemoryRetrievalLog"
+            )
+            logger.info(f"Successfully updated citedMemories relation for {retrieval_log.objectId}")
+        # Add predictedGroupedMemories as a relation if present
+        if predicted_grouped_memories:
+            await _add_objects_to_relation(
+                client=client,
+                headers=headers,
+                parent_object_id=retrieval_log.objectId,
+                relation_key="predictedGroupedMemories",
+                objects=predicted_grouped_memories,
+                class_name="MemoryRetrievalLog"
+            )
+            logger.info(f"Successfully updated predictedGroupedMemories relation for {retrieval_log.objectId}")
+        return result
+
+async def retrieve_all_memory_ids_for_user(
+    session_token: str, 
+    user_id: str, 
+    api_key: Optional[str] = None
+) -> List[str]:
+    """
+    Asynchronously retrieve all memory IDs for a specific user from Parse Server.
+    
+    Args:
+        session_token (str): The session token for authentication
+        user_id (str): The user ID to fetch memories for
+        api_key (Optional[str]): Optional API key for authentication
+        
+    Returns:
+        List[str]: List of memory IDs for the user
+    """
+    url = f"{PARSE_SERVER_URL}/parse/classes/Memory"
+    
+    headers = {
+        "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+        "X-Parse-Master-Key": PARSE_MASTER_KEY,
+        "Content-Type": "application/json"
+    }
+    
+    # Query to find all memories for the user
+    query = {
+        "user": {
+            "__type": "Pointer",
+            "className": "_User",
+            "objectId": user_id
+        }
+    }
+    
+    logger.info(f"Fetching all memory IDs for user: {user_id}")
+    
+    # Handle pagination to get all memories (Parse server has a 1000 record limit per request)
+    all_memory_ids = []
+    skip = 0
+    limit = 1000
+    
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(30.0, connect=10.0),
+            limits=httpx.Limits(max_keepalive_connections=5, max_connections=10)
+        ) as client:
+            
+            while True:
+                # Build params for this batch
+                params = {
+                    "where": json.dumps(query),
+                    "keys": "memoryId",
+                    "limit": limit,
+                    "skip": skip,
+                    "order": "-createdAt"
+                }
+                
+                response = await client.get(url, headers=headers, params=params)
+                response.raise_for_status()
+                
+                data = response.json()
+                results = data.get('results', [])
+                
+                # Extract memory IDs from this batch
+                batch_memory_ids = []
+                for item in results:
+                    memory_id = item.get('memoryId')
+                    if memory_id:
+                        batch_memory_ids.append(memory_id)
+                
+                all_memory_ids.extend(batch_memory_ids)
+                
+                # If we got fewer results than the limit, we've reached the end
+                if len(results) < limit:
+                    break
+                    
+                skip += limit
+                logger.info(f"Fetched {len(all_memory_ids)} memory IDs so far for user {user_id}")
+            
+            logger.info(f"Found {len(all_memory_ids)} total memories for user {user_id}")
+            return all_memory_ids
+            
+    except httpx.HTTPError as e:
+        logger.error(f"HTTP error fetching memory IDs for user {user_id}: {e}")
+        raise Exception(f"Failed to fetch memory IDs: {str(e)}")
+    except Exception as e:
+        logger.error(f"Error fetching memory IDs for user {user_id}: {e}")
+        raise
+
+async def retrieve_memory_items_with_users_async(
+    session_token: str, 
+    memory_item_ids: list, 
+    chunk_base_ids: list, 
+    class_name: str = "Memory",
+    api_key: Optional[str] = None
+)  -> MemoryRetrievalResult:
+    """
+    Async version: Retrieves multiple memory items from Parse Server by their memoryIds.
+
+    Parameters:
+        session_token (str): The session token of the authenticated user.
+        memory_item_ids (List[str]): A list of memoryIds of the memory items to retrieve.
+        chunk_base_ids (List[str]): List of base memory IDs without chunk numbers
+        class_name (str): The class name in Parse Server to query.
+
+    Returns:
+        MemoryRetrievalResult: A dictionary containing:
+            - 'results': List[ParseStoredMemory] - List of memory items with user objects
+            - 'missing_memory_ids': List[str] - List of memory IDs that weren't found
+    """
+    url = f"{PARSE_SERVER_URL}/parse/classes/{class_name}"
+    
+    # Log input parameters for debugging
+    logger.info(f"Retrieving memory items with users. Memory IDs count: {len(memory_item_ids)}")
+    logger.info(f"First few memory IDs: {memory_item_ids[:5] if memory_item_ids else []}")
+    
+    # Deduplicate IDs
+    unique_memory_ids = list(set(memory_item_ids))
+    unique_chunk_base_ids = list(set(chunk_base_ids))
+
+    # For memoryId search, combine and dedupe both sets
+    all_ids = list(set(unique_memory_ids + unique_chunk_base_ids))
+    
+    # Strip _grouped suffix from IDs before querying Parse Server
+    # Qdrant uses _grouped to track grouped memories, but Parse Server stores original IDs
+    # We keep the chunk number suffix (_0, _1, etc.) as Parse Server stores those in memoryChunkIds
+    def strip_grouped_suffix(memory_id: str) -> str:
+        """
+        Remove only the _grouped part from memory ID for Parse Server queries.
+        Examples:
+            - f924d5ea-7926-49c3-b66d-e2e026733e20_grouped_0 -> f924d5ea-7926-49c3-b66d-e2e026733e20_0
+            - f924d5ea-7926-49c3-b66d-e2e026733e20_grouped -> f924d5ea-7926-49c3-b66d-e2e026733e20
+        """
+        import re
+        # Remove only _grouped, keeping the chunk number (_N) if present
+        memory_id = re.sub(r'_grouped(?=_\d+$|$)', '', memory_id)
+        return memory_id
+    
+    # Strip grouped suffixes from all IDs
+    all_ids_stripped = [strip_grouped_suffix(id) for id in all_ids]
+    all_ids = list(set(all_ids_stripped))  # Deduplicate again after stripping
+    
+    logger.info(f"Deduplicated memory IDs count: {len(unique_memory_ids)}")
+    logger.info(f"Deduplicated chunk base IDs count: {len(unique_chunk_base_ids)}")
+    logger.info(f"Combined unique IDs count (after stripping _grouped): {len(all_ids)}")
+
+    # Constants for batch size
+    # Reduce batch size to avoid URL length issues with ngrok and proxies
+    # Testing shows ngrok has ~8KB URL limit, each ID is ~40 chars encoded
+    MAX_IDS_PER_BATCH = 10
+    max_retries = 3
+    
+    # Specify the fields to include
+    keys = (
+        "objectId,createdAt,updatedAt,ACL,content,metadata,sourceType,context,title,location,"
+        "emojiTags,hierarchicalStructures,type,sourceUrl,conversationId,memoryId,topics,steps,"
+        "current_step,memoryChunkIds,user.objectId,user.displayName,user.fullname,user.profileimage,"
+        "user.title,user.isOnline,workspace,post,postMessage,matchingChunkIds,"
+        "developerUser,developerUser.external_id,"
+        "external_user_read_access,external_user_write_access,"
+        "user_read_access,user_write_access,"
+        "workspace_read_access,workspace_write_access,"
+        "role_read_access,role_write_access,"
+        "namespace_read_access,namespace_write_access,"
+        "organization_read_access,organization_write_access,"
+        "role,category,"
+        "customMetadata"
+    )
+
+    async def execute_batch_query(all_ids: List[str], memory_ids: List[str] = None) -> List[Dict]:
+        """Execute a single batch query using GET with small batches to avoid URL length limits"""
+        # Build query for this batch
+        query = {
+            "$or": [
+                {"memoryId": {"$in": all_ids}},  # Search memoryId in base IDs
+            ]
+        }
+        
+        # Only add memoryChunkIds search if chunk_ids is provided
+        if memory_ids:
+            query["$or"].append({"memoryChunkIds": {"$in": memory_ids}})  # Search chunks in memory IDs
+
+        # Use standard GET with URL parameters (with small batch sizes to avoid URL length limits)
+        params = {
+            "where": json.dumps(query),
+            "keys": keys
+        }
+        
+        # Add API key to headers if provided, otherwise use session token
+        headers = {
+            "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+            "X-Parse-Master-Key": PARSE_MASTER_KEY,
+            "Content-Type": "application/json",
+            "Accept-Encoding": "gzip, deflate"
+        }
+
+
+
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(30.0, connect=10.0),
+            limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
+            headers=headers
+        ) as client:
+            for attempt in range(max_retries):
+                try:
+                    # Use standard GET request with small batches to keep URLs under limits
+                    logger.info(f"Making Parse Server GET request to {url} with {len(all_ids)} IDs")
+                    response = await client.get(url, params=params, follow_redirects=True)
+                    logger.info(f"Parse Server response status: {response.status_code}")
+                    response.raise_for_status()
+                    results = response.json().get('results', [])
+                    logger.info(f"Retrieved {len(results)} memory items from Parse Server")
+                    return results
+                except httpx.HTTPError as e:
+                    logger.error(f"Parse Server query failed (attempt {attempt + 1}/{max_retries}): {str(e)}")
+                    if hasattr(e, 'response') and e.response is not None:
+                        logger.error(f"Response status: {e.response.status_code}")
+                        logger.error(f"Response body: {e.response.text[:500]}")
+                    if attempt == max_retries - 1:
+                        logger.error(f"Batch query failed after all retries: {str(e)}")
+                        raise
+                    await asyncio.sleep(1 * (attempt + 1))
+
+    async def process_batches() -> List[Dict]:
+        """Process all IDs in batches"""
+        
+        # Split into batches
+        all_ids_batches = [all_ids[i:i + MAX_IDS_PER_BATCH] 
+                       for i in range(0, len(all_ids), MAX_IDS_PER_BATCH)]
+        memory_ids_batches = [unique_memory_ids[i:i + MAX_IDS_PER_BATCH] 
+                         for i in range(0, len(unique_memory_ids), MAX_IDS_PER_BATCH)]
+        
+        # Create tasks for all batches
+        tasks = []
+        for i, all_ids_batch in enumerate(all_ids_batches):
+            # Find corresponding memory batch for chunk search
+            memory_ids_batch = memory_ids_batches[i] if i < len(memory_ids_batches) else None
+            tasks.append(execute_batch_query(all_ids_batch, memory_ids_batch))
+
+        # Execute all batches in parallel
+        batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Combine results and handle any exceptions
+        all_results = []
+        for result in batch_results:
+            if isinstance(result, Exception):
+                logger.error(f"Failed to process batch: {str(result)}")
+                continue
+            all_results.extend(result)
+            
+        return all_results
+
+    try:
+        # Process all batches
+        raw_results = await process_batches()
+        
+        # Convert raw results to ParseStoredMemory objects
+        results = []
+        for item in raw_results:
+            try:
+                # Clean up user data first
+                if 'user' in item:
+                    user_data = item['user']
+                    item['user'] = {
+                        'objectId': user_data.get('objectId'),
+                        'displayName': user_data.get('displayName'),
+                        'fullname': user_data.get('fullname'),
+                        'profileimage': user_data.get('profileimage', {}).get('url') if isinstance(user_data.get('profileimage'), dict) else user_data.get('profileimage'),
+                        'title': user_data.get('title'),
+                        'isOnline': user_data.get('isOnline')
+                    }
+
+                # Ensure required fields exist with proper types
+                cleaned_item = {
+                    'objectId': item.get('objectId'),
+                    'createdAt': item.get('createdAt'),
+                    'updatedAt': item.get('updatedAt'),
+                    'ACL': item.get('ACL', {}),
+                    'content': item.get('content', ''),
+                    'metadata': item.get('metadata', '{}'),
+                    'sourceType': item.get('sourceType', ''),
+                    'context': parse_context(item.get('context', '')),
+                    'title': item.get('title'),
+                    'location': item.get('location'),
+                    'emojiTags': item.get('emojiTags', []),
+                    'hierarchicalStructures': item.get('hierarchicalStructures', ''),
+                    'type': item.get('type', 'TextMemoryItem'),
+                    'sourceUrl': item.get('sourceUrl', ''),
+                    'conversationId': item.get('conversationId', ''),
+                    'memoryId': item.get('memoryId'),
+                    'topics': item.get('topics', []),
+                    'steps': item.get('steps', []),
+                    'current_step': item.get('current_step'),
+                    'memoryChunkIds': item.get('memoryChunkIds', []),
+                    'user': item.get('user'),
+                    'developerUser': item.get('developerUser'),
+                    'external_user_read_access': item.get('external_user_read_access', []),
+                    'external_user_write_access': item.get('external_user_write_access', []),
+                    'user_read_access': item.get('user_read_access', []),
+                    'user_write_access': item.get('user_write_access', []),
+                    'workspace_read_access': item.get('workspace_read_access', []),
+                    'workspace_write_access': item.get('workspace_write_access', []),
+                    'role_read_access': item.get('role_read_access', []),
+                    'role_write_access': item.get('role_write_access', []),
+                    'namespace_read_access': item.get('namespace_read_access', []),
+                    'namespace_write_access': item.get('namespace_write_access', []),
+                    'organization_read_access': item.get('organization_read_access', []),
+                    'organization_write_access': item.get('organization_write_access', []),
+                    'customMetadata': item.get('customMetadata'),
+                }
+
+                # Add optional pointers only if they exist
+                if 'workspace' in item and isinstance(item['workspace'], dict):
+                    cleaned_item['workspace'] = {
+                        '__type': 'Pointer',
+                        'className': 'WorkSpace',
+                        'objectId': item['workspace'].get('objectId')
+                    }
+
+                if 'post' in item and isinstance(item['post'], dict):
+                    cleaned_item['post'] = {
+                        '__type': 'Pointer',
+                        'className': 'Post',
+                        'objectId': item['post'].get('objectId')
+                    }
+
+                # Remove any None values
+                cleaned_item = {k: v for k, v in cleaned_item.items() if v is not None}
+
+                # Validate the cleaned item
+                memory = ParseStoredMemory.model_validate(cleaned_item)
+                logger.debug(f"Successfully validated memory {memory.memoryId} as ParseStoredMemory")
+                results.append(memory)
+            except Exception as e:
+                logger.error(f"Failed to validate memory item as ParseStoredMemory: {e}")
+                logger.error(f"Problematic item: {item}")
+                continue
+
+        # Helper function to strip chunk suffix (_0, _1, etc.) from memory IDs
+        def strip_chunk_suffix(memory_id: str) -> str:
+            """Strip chunk identifier (_0, _1, etc.) from memory ID to get base ID."""
+            if '_' in memory_id and memory_id.split('_')[-1].isdigit():
+                return memory_id.rsplit('_', 1)[0]
+            return memory_id
+        
+        def strip_all_suffixes(memory_id: str) -> str:
+            """Strip both _grouped and chunk suffixes to get true base ID for comparison."""
+            import re
+            # First remove _grouped (keep chunk number if present)
+            memory_id = re.sub(r'_grouped(?=_\d+$|$)', '', memory_id)
+            # Then remove chunk suffix to get base ID
+            return strip_chunk_suffix(memory_id)
+
+        # Process found vs missing memory IDs using base IDs for accurate comparison
+        found_memory_ids = [item.memoryId for item in results]
+        # Convert input memory_item_ids to base IDs for comparison (strip both _grouped and _N)
+        base_memory_item_ids = [strip_all_suffixes(mid) for mid in memory_item_ids]
+        missing_base_ids = list(set(base_memory_item_ids) - set(found_memory_ids))
+
+        if missing_base_ids:
+            logger.warning(f"Missing memory items: {len(missing_base_ids)}")
+            logger.warning(f"First few missing memory IDs: {missing_base_ids[:5]}")
+        
+        # Deduplicate results based on memoryId
+        seen_memory_ids = set()
+        deduplicated_results: List[ParseStoredMemory] = []
+        
+        for item in results:
+            if item.memoryId and item.memoryId not in seen_memory_ids:
+                seen_memory_ids.add(item.memoryId)
+                deduplicated_results.append(item)
+        
+        # Process found vs missing memory IDs using deduplicated results and base IDs  
+        # Note: base_memory_item_ids already has _grouped and _N stripped from above
+        found_memory_ids = [item.memoryId for item in deduplicated_results]
+        missing_base_ids_final = list(set(base_memory_item_ids) - set(found_memory_ids))
+        
+        logger.info(f'Retrieved {len(deduplicated_results)} deduplicated items from Parse Server.')
+        logger.info(f'Missing {len(missing_base_ids_final)} items.')
+        if missing_base_ids_final:
+            logger.info(f'First few missing IDs: {missing_base_ids_final[:5]}')
+        
+        return {
+            'results': deduplicated_results,
+            'missing_memory_ids': missing_base_ids_final
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to retrieve memory items: {str(e)}")
+        return {'results': [], 'missing_memory_ids': memory_item_ids}
+
+async def get_recent_retrieval_logs_async(
+    user_id: str,
+    session_token: Optional[str] = None,
+    workspace_id: Optional[str] = None,
+    days: int = 30,
+    limit: int = 500,
+    api_key: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    if not PARSE_SERVER_URL:
+        logger.error("PARSE_SERVER_URL environment variable is not set.")
+        return []
+
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+    where = {
+        "$and": [
+            {"user": {"__type": "Pointer", "className": "_User", "objectId": user_id}},
+            {"createdAt": {"$gte": {"__type": "Date", "iso": cutoff}}},
+        ]
+    }
+
+    if workspace_id:
+        where["$and"].append({"workspace": {"__type": "Pointer", "className": "WorkSpace", "objectId": workspace_id}})
+
+    params = {
+        "where": json.dumps(where),
+        "order": "-createdAt",
+        "limit": str(limit),
+        "include": "retrievedMemories,queryLog"
+    }
+
+    # NOTE: Parse REST API routes are under /parse; missing this prefix causes 404
+    url = f"{PARSE_SERVER_URL}/parse/classes/MemoryRetrievalLog"
+
+    headers = {
+        "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+        "X-Parse-REST-API-Key": PARSE_REST_API_KEY,
+        "X-Parse-Master-Key": PARSE_MASTER_KEY,
+        "Content-Type": "application/json",
+        "Accept-Encoding": "gzip"
+    }
+
+    if session_token:
+        headers["X-Parse-Session-Token"] = session_token
+    elif api_key:
+        headers["X-Parse-REST-API-Key"] = api_key
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(url, headers=headers, params=params)
+            response.raise_for_status()
+            logs = response.json().get('results', [])
+            
+            for log in logs:
+                retrieved = log.get("retrievedMemories", [])
+                if isinstance(retrieved, list):
+                    # Standard included pointers
+                    log["retrieved_ids"] = [m.get("objectId") for m in retrieved if isinstance(m, dict) and m.get("objectId")]
+                elif isinstance(retrieved, dict) and retrieved.get("__type") == "Relation":
+                    # Some logs may store a Parse Relation; fetch its members lazily
+                    rel_class = retrieved.get("className")
+                    log_id = log.get("objectId")
+                    ids: List[str] = []
+                    if rel_class and log_id:
+                        try:
+                            rel_url = f"{PARSE_SERVER_URL}/parse/classes/{rel_class}"
+                            rel_where = {
+                                "$relatedTo": {
+                                    "object": {"__type": "Pointer", "className": "MemoryRetrievalLog", "objectId": log_id},
+                                    "key": "retrievedMemories",
+                                }
+                            }
+                            rel_params = {"where": json.dumps(rel_where), "keys": "objectId", "limit": "1000"}
+                            rel_headers = {
+                                "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+                                "X-Parse-REST-API-Key": PARSE_REST_API_KEY,
+                                "X-Parse-Master-Key": PARSE_MASTER_KEY,
+                                "Content-Type": "application/json",
+                                "Accept-Encoding": "gzip",
+                            }
+                            rel_resp = await client.get(rel_url, headers=rel_headers, params=rel_params)
+                            rel_resp.raise_for_status()
+                            ids = [row.get("objectId") for row in rel_resp.json().get("results", []) if row.get("objectId")]
+                        except Exception as rel_err:
+                            logger.warning(f"Failed to resolve Relation retrievedMemories for log {log_id}: {rel_err}")
+                    log["retrieved_ids"] = ids
+                else:
+                    log["retrieved_ids"] = []
+                    logger.warning(f"Unexpected retrievedMemories type in log {log.get('objectId')}: {type(retrieved)}")
+            
+            return logs
+        except httpx.HTTPStatusError as e:
+            body = e.response.text if e.response is not None else None
+            logger.error(f"Failed to get retrieval logs: {e} | url={url} params={params} headers_keys={list(headers.keys())} body={body}")
+            return []
+
+async def get_feedback_logs_by_query_log_id_async(
+    query_log_id: str,
+    *,
+    session_token: Optional[str] = None,
+    api_key: Optional[str] = None,
+    keys: str = "objectId,feedbackScore,citedMemoryIds,createdAt"
+) -> List[Dict[str, Any]]:
+    """Fetch UserFeedbackLog rows associated with a QueryLog ID.
+
+    Returns a list of feedback logs. Each row may contain `citedMemoryIds` as a list of Memory pointers
+    and an optional `feedbackScore` used as citation confidence.
+    """
+    if not PARSE_SERVER_URL:
+        logger.error("PARSE_SERVER_URL environment variable is not set.")
+        return []
+
+    url = f"{PARSE_SERVER_URL}/parse/classes/UserFeedbackLog"
+    headers = {
+        "X-Parse-Application-Id": PARSE_APPLICATION_ID,
+        "X-Parse-REST-API-Key": PARSE_REST_API_KEY,
+        "X-Parse-Master-Key": PARSE_MASTER_KEY,
+        "Content-Type": "application/json",
+        "Accept-Encoding": "gzip",
+    }
+    if session_token:
+        headers["X-Parse-Session-Token"] = session_token
+    elif api_key:
+        headers["X-Parse-REST-API-Key"] = api_key
+
+    where = {
+        "queryLog": {"__type": "Pointer", "className": "QueryLog", "objectId": query_log_id}
+    }
+    params = {
+        "where": json.dumps(where),
+        "keys": keys,
+        "limit": "1000",
+        "order": "-createdAt",
+    }
+
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.get(url, headers=headers, params=params)
+            resp.raise_for_status()
+            return resp.json().get("results", [])
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Failed to fetch UserFeedbackLog for QueryLog {query_log_id}: {e.response.text}")
+            return []
+        except Exception as e:
+            logger.error(f"Unexpected error fetching UserFeedbackLog for QueryLog {query_log_id}: {e}")
+            return []
+        except httpx.HTTPError as e:
+            logger.error(f"Failed to get retrieval logs (non-status): {str(e)} | url={url} params={params}")
+            return []

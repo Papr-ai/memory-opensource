@@ -1,0 +1,513 @@
+
+{
+ "user_schema": {
+ "name": "Manufacturing Floor Knowledge Graph",
+ "description": "Ontology for cross-facility manufacturing visibility: machines, processes, manuals, alarms, maintenance, scheduling, production impact, and agent/line-leader knowledge capture.",
+ "version": "1.1.0",
+ "node_types": {
+ "Facility": {
+ "name": "Facility",
+ "label": "Facility",
+ "description": "A manufacturing plant or site.",
+ "properties": {
+ "id": { "type": "string", "required": true, "description": "Stable facility identifier (UUID or code)." },
+ "name": { "type": "string", "required": true, "min_length": 1, "max_length": 200 },
+ "location": { "type": "string", "required": false, "description": "City/Region/Country or geo URI." },
+ "timezone": { "type": "string", "required": false, "description": "IANA timezone, e.g., America/Los_Angeles." },
+ "tenant_id": { "type": "string", "required": false },
+ "workspace_id": { "type": "string", "required": false }
+ },
+ "required_properties": ["id", "name"],
+ "unique_identifiers": ["id"],
+ "color": "#34495E",
+ "icon": "factory"
+ },
+ "ProductionLine": {
+ "name": "ProductionLine",
+ "label": "ProductionLine",
+ "description": "A logical line or area executing a sequence of process steps.",
+ "properties": {
+ "id": { "type": "string", "required": true },
+ "name": { "type": "string", "required": true, "max_length": 200 },
+ "code": { "type": "string", "required": false, "description": "Line code used in MES/ERP." },
+ "status": { "type": "string", "required": false, "enum_values": ["planned","active","paused","down","retired"], "default": "active" },
+ "tenant_id": { "type": "string", "required": false },
+ "workspace_id": { "type": "string", "required": false }
+ },
+ "required_properties": ["id", "name"],
+ "unique_identifiers": ["id"],
+ "color": "#1F77B4",
+ "icon": "workflow"
+ },
+ "Machine": {
+ "name": "Machine",
+ "label": "Machine",
+ "description": "A production asset (e.g., compressor dryer, press, CNC).",
+ "properties": {
+ "id": { "type": "string", "required": true, "description": "Stable machine ID." },
+ "name": { "type": "string", "required": true },
+ "model": { "type": "string", "required": false },
+ "serial_number": { "type": "string", "required": false },
+ "vendor": { "type": "string", "required": false },
+ "status": { "type": "string", "required": false, "enum_values": ["up","idle","setup","down","maintenance","retired"], "default": "up" },
+ "rated_pressure_psi": { "type": "float", "required": false, "min_value": 0 },
+ "rated_temperature_c": { "type": "float", "required": false },
+ "commissioned_at": { "type": "datetime", "required": false },
+ "last_service_at": { "type": "datetime", "required": false },
+ "tenant_id": { "type": "string", "required": false },
+ "workspace_id": { "type": "string", "required": false },
+ "external_id": { "type": "string", "required": false, "description": "Asset tag in CMMS/ERP." }
+ },
+ "required_properties": ["id", "name"],
+ "unique_identifiers": ["id"],
+ "color": "#9B59B6",
+ "icon": "cpu"
+ },
+ "Sensor": {
+ "name": "Sensor",
+ "label": "Sensor",
+ "description": "Telemetry source mounted on a machine or in a line area.",
+ "properties": {
+ "id": { "type": "string", "required": true },
+ "name": { "type": "string", "required": true },
+ "type": { "type": "string", "required": false, "description": "e.g., temperature, vibration, dewpoint, pressure" },
+ "unit": { "type": "string", "required": false },
+ "sampling_hz": { "type": "float", "required": false, "min_value": 0 },
+ "tenant_id": { "type": "string", "required": false },
+ "workspace_id": { "type": "string", "required": false }
+ },
+ "required_properties": ["id", "name"],
+ "unique_identifiers": ["id"],
+ "color": "#27AE60",
+ "icon": "activity"
+ },
+ "ManualDocument": {
+ "name": "ManualDocument",
+ "label": "ManualDocument",
+ "description": "Machine manual or service bulletin for troubleshooting and maintenance.",
+ "properties": {
+ "id": { "type": "string", "required": true, "description": "Document ID or URI." },
+ "title": { "type": "string", "required": true, "max_length": 300 },
+ "publisher": { "type": "string", "required": false },
+ "published_at": { "type": "datetime", "required": false },
+ "language": { "type": "string", "required": false },
+ "document_type": { "type": "string", "required": false, "enum_values": ["manual","datasheet","service_bulletin","wiring_diagram","sop"] },
+ "doc_url": { "type": "string", "required": false, "description": "Link to the file in storage." },
+ "tenant_id": { "type": "string", "required": false },
+ "workspace_id": { "type": "string", "required": false }
+ },
+ "required_properties": ["id", "title"],
+ "unique_identifiers": ["id"],
+ "color": "#8E44AD",
+ "icon": "book"
+ },
+ "Procedure": {
+ "name": "Procedure",
+ "label": "Procedure",
+ "description": "SOP for setup, troubleshooting, or maintenance.",
+ "properties": {
+ "id": { "type": "string", "required": true },
+ "name": { "type": "string", "required": true },
+ "category": { "type": "string", "required": false, "enum_values": ["setup","operation","maintenance","safety","troubleshooting"] },
+ "revision": { "type": "string", "required": false },
+ "effective_at": { "type": "datetime", "required": false },
+ "estimated_duration_min": { "type": "integer", "required": false, "min_value": 0 },
+ "tenant_id": { "type": "string", "required": false },
+ "workspace_id": { "type": "string", "required": false }
+ },
+ "required_properties": ["id", "name"],
+ "unique_identifiers": ["id"],
+ "color": "#D35400",
+ "icon": "list-checks"
+ },
+ "FailureMode": {
+ "name": "FailureMode",
+ "label": "FailureMode",
+ "description": "Canonical failure mode (FMEA-style) or symptom.",
+ "properties": {
+ "id": { "type": "string", "required": true, "description": "Stable failure code, e.g., FM-0001." },
+ "name": { "type": "string", "required": true },
+ "severity": { "type": "string", "required": false, "enum_values": ["low","medium","high","critical"] },
+ "description": { "type": "string", "required": false, "max_length": 500 },
+ "tenant_id": { "type": "string", "required": false },
+ "workspace_id": { "type": "string", "required": false }
+ },
+ "required_properties": ["id", "name"],
+ "unique_identifiers": ["id"],
+ "color": "#C0392B",
+ "icon": "alert-octagon"
+ },
+ "AlarmEvent": {
+ "name": "AlarmEvent",
+ "label": "AlarmEvent",
+ "description": "Discrete alarm or event raised by a controller/PLC/HMI.",
+ "properties": {
+ "id": { "type": "string", "required": true },
+ "code": { "type": "string", "required": true, "description": "Controller code or mnemonic, e.g., H2, L2." },
+ "message": { "type": "string", "required": false, "max_length": 500 },
+ "severity": { "type": "string", "required": false, "enum_values": ["info","warning","alarm","trip"], "default": "alarm" },
+ "occurred_at": { "type": "datetime", "required": true },
+ "cleared_at": { "type": "datetime", "required": false },
+ "tenant_id": { "type": "string", "required": false },
+ "workspace_id": { "type": "string", "required": false }
+ },
+ "required_properties": ["id", "code", "occurred_at"],
+ "unique_identifiers": ["id"],
+ "color": "#E74C3C",
+ "icon": "bell-ring"
+ },
+ "WorkOrder": {
+ "name": "WorkOrder",
+ "label": "WorkOrder",
+ "description": "Maintenance or corrective work instruction.",
+ "properties": {
+ "id": { "type": "string", "required": true },
+ "title": { "type": "string", "required": true },
+ "status": { "type": "string", "required": true, "enum_values": ["open","in_progress","blocked","done","cancelled"] },
+ "priority": { "type": "string", "required": false, "enum_values": ["low","medium","high","urgent"], "default": "medium" },
+ "opened_at": { "type": "datetime", "required": false },
+ "closed_at": { "type": "datetime", "required": false },
+ "tenant_id": { "type": "string", "required": false },
+ "workspace_id": { "type": "string", "required": false },
+ "external_id": { "type": "string", "required": false, "description": "CMMS work order number." }
+ },
+ "required_properties": ["id", "title", "status"],
+ "unique_identifiers": ["id"],
+ "color": "#2980B9",
+ "icon": "wrench"
+ },
+ "ProductionOrder": {
+ "name": "ProductionOrder",
+ "label": "ProductionOrder",
+ "description": "A customer/ERP order to produce a quantity of a SKU.",
+ "properties": {
+ "id": { "type": "string", "required": true },
+ "order_number": { "type": "string", "required": true },
+ "sku": { "type": "string", "required": false },
+ "quantity": { "type": "integer", "required": false, "min_value": 0 },
+ "due_at": { "type": "datetime", "required": false },
+ "status": { "type": "string", "required": false, "enum_values": ["planned","in_process","blocked","complete","cancelled"], "default": "planned" },
+ "tenant_id": { "type": "string", "required": false },
+ "workspace_id": { "type": "string", "required": false }
+ },
+ "required_properties": ["id", "order_number"],
+ "unique_identifiers": ["id"],
+ "color": "#16A085",
+ "icon": "package"
+ },
+ "ProcessStep": {
+ "name": "ProcessStep",
+ "label": "ProcessStep",
+ "description": "A step in a routing or line sequence.",
+ "properties": {
+ "id": { "type": "string", "required": true },
+ "name": { "type": "string", "required": true },
+ "sequence": { "type": "integer", "required": false, "min_value": 0, "description": "Order within a line routing." },
+ "cycle_time_sec": { "type": "integer", "required": false, "min_value": 0 },
+ "tenant_id": { "type": "string", "required": false },
+ "workspace_id": { "type": "string", "required": false }
+ },
+ "required_properties": ["id", "name"],
+ "unique_identifiers": ["id"],
+ "color": "#F39C12",
+ "icon": "workflow"
+ },
+ "ScheduleSlot": {
+ "name": "ScheduleSlot",
+ "label": "ScheduleSlot",
+ "description": "A scheduled production or maintenance window.",
+ "properties": {
+ "id": { "type": "string", "required": true },
+ "start_at": { "type": "datetime", "required": true },
+ "end_at": { "type": "datetime", "required": true },
+ "slot_type": { "type": "string", "required": false, "enum_values": ["production","maintenance","setup","buffer"] },
+ "status": { "type": "string", "required": false, "enum_values": ["planned","in_progress","completed","cancelled"], "default": "planned" },
+ "tenant_id": { "type": "string", "required": false },
+ "workspace_id": { "type": "string", "required": false }
+ },
+ "required_properties": ["id", "start_at", "end_at"],
+ "unique_identifiers": ["id"],
+ "color": "#7F8C8D",
+ "icon": "calendar"
+ },
+ "Operator": {
+ "name": "Operator",
+ "label": "Operator",
+ "description": "A person operating or maintaining equipment.",
+ "properties": {
+ "id": { "type": "string", "required": true },
+ "name": { "type": "string", "required": true },
+ "role": { "type": "string", "required": false, "enum_values": ["operator","technician","engineer","supervisor","line_leader"] },
+ "external_user_id": { "type": "string", "required": false },
+ "tenant_id": { "type": "string", "required": false },
+ "workspace_id": { "type": "string", "required": false }
+ },
+ "required_properties": ["id", "name"],
+ "unique_identifiers": ["id"],
+ "color": "#95A5A6",
+ "icon": "user"
+ },
+ "KnowledgeNote": {
+ "name": "KnowledgeNote",
+ "label": "KnowledgeNote",
+ "description": "Human- or agent-contributed observation, fix, tip, or root-cause note captured on the floor.",
+ "properties": {
+ "id": { "type": "string", "required": true, "description": "Stable note ID." },
+ "title": { "type": "string", "required": true, "max_length": 200 },
+ "body": { "type": "string", "required": true },
+ "note_type": { "type": "string", "required": true, "enum_values": ["observation","fix","tip","caution","root_cause"] },
+ "source": { "type": "string", "required": true, "enum_values": ["operator","agent","system"], "description": "Declares who originated the note." },
+ "created_at": { "type": "datetime", "required": true },
+ "updated_at": { "type": "datetime", "required": false },
+ "visibility": { "type": "string", "required": false, "enum_values": ["private","line","facility","workspace"], "default": "line" },
+ "status": { "type": "string", "required": false, "enum_values": ["draft","approved","deprecated"], "default": "approved" },
+ "tags": { "type": "array", "required": false },
+ "tenant_id": { "type": "string", "required": false },
+ "workspace_id": { "type": "string", "required": false }
+ },
+ "required_properties": ["id", "title", "body", "note_type", "source", "created_at"],
+ "unique_identifiers": ["id"],
+ "color": "#6C5CE7",
+ "icon": "sticky-note"
+ },
+ "AgentSession": {
+ "name": "AgentSession",
+ "label": "AgentSession",
+ "description": "A conversational session between the AI agent and a user (e.g., line leader) for triage, guidance, and notifications.",
+ "properties": {
+ "id": { "type": "string", "required": true, "description": "Stable session ID." },
+ "started_at": { "type": "datetime", "required": true },
+ "ended_at": { "type": "datetime", "required": false },
+ "channel": { "type": "string", "required": false, "enum_values": ["voice","chat","terminal"] },
+ "purpose": { "type": "string", "required": false, "enum_values": ["triage","notification","how_to","status"] },
+ "summary": { "type": "string", "required": false, "max_length": 500 },
+ "tenant_id": { "type": "string", "required": false },
+ "workspace_id": { "type": "string", "required": false }
+ },
+ "required_properties": ["id", "started_at"],
+ "unique_identifiers": ["id"],
+ "color": "#00BCD4",
+ "icon": "message-square"
+ }
+ },
+ "relationship_types": {
+ "LOCATED_IN": {
+ "name": "LOCATED_IN",
+ "label": "Located In",
+ "description": "Physical containment/location hierarchy.",
+ "properties": {},
+ "allowed_source_types": ["ProductionLine", "Machine", "Sensor"],
+ "allowed_target_types": ["Facility", "ProductionLine"],
+ "cardinality": "many-to-many",
+ "color": "#BDC3C7"
+ },
+ "HAS_SENSOR": {
+ "name": "HAS_SENSOR",
+ "label": "Has Sensor",
+ "description": "Machine has a sensor attached.",
+ "properties": {},
+ "allowed_source_types": ["Machine"],
+ "allowed_target_types": ["Sensor"],
+ "cardinality": "one-to-many",
+ "color": "#27AE60"
+ },
+ "USES_MANUAL": {
+ "name": "USES_MANUAL",
+ "label": "Uses Manual",
+ "description": "Manuals relevant to a machine.",
+ "properties": {},
+ "allowed_source_types": ["Machine"],
+ "allowed_target_types": ["ManualDocument"],
+ "cardinality": "many-to-many",
+ "color": "#8E44AD"
+ },
+ "HAS_STEP": {
+ "name": "HAS_STEP",
+ "label": "Has Step",
+ "description": "Production line defines a sequence of steps.",
+ "properties": {
+ "position": { "type": "integer", "required": false, "min_value": 0 }
+ },
+ "allowed_source_types": ["ProductionLine"],
+ "allowed_target_types": ["ProcessStep"],
+ "cardinality": "one-to-many",
+ "color": "#F39C12"
+ },
+ "REQUIRES_MACHINE": {
+ "name": "REQUIRES_MACHINE",
+ "label": "Requires Machine",
+ "description": "A process step requires one or more machines.",
+ "properties": {},
+ "allowed_source_types": ["ProcessStep"],
+ "allowed_target_types": ["Machine"],
+ "cardinality": "many-to-many",
+ "color": "#9B59B6"
+ },
+ "REPORTS_ALARM": {
+ "name": "REPORTS_ALARM",
+ "label": "Reports Alarm",
+ "description": "Machine emitted an alarm event.",
+ "properties": {},
+ "allowed_source_types": ["Machine"],
+ "allowed_target_types": ["AlarmEvent"],
+ "cardinality": "one-to-many",
+ "color": "#E74C3C"
+ },
+ "ALARM_MATCHES_FAILURE": {
+ "name": "ALARM_MATCHES_FAILURE",
+ "label": "Alarm Matches Failure",
+ "description": "Maps alarms to likely failure modes with per-pair plausibility.",
+ "properties": {
+ "plausibility": { "type": "integer", "required": true, "min_value": 0, "max_value": 3, "description": "0=none,1=low,2=medium,3=high" },
+ "rationale": { "type": "string", "required": false, "max_length": 500 },
+ "source": { "type": "string", "required": false, "description": "Model, rule, or document reference." }
+ },
+ "allowed_source_types": ["AlarmEvent"],
+ "allowed_target_types": ["FailureMode"],
+ "cardinality": "many-to-many",
+ "color": "#C0392B"
+ },
+ "RESOLVED_BY": {
+ "name": "RESOLVED_BY",
+ "label": "Resolved By",
+ "description": "Failure mode can be resolved by a procedure.",
+ "properties": {},
+ "allowed_source_types": ["FailureMode"],
+ "allowed_target_types": ["Procedure"],
+ "cardinality": "one-to-many",
+ "color": "#D35400"
+ },
+ "PROCEDURE_REFERENCES": {
+ "name": "PROCEDURE_REFERENCES",
+ "label": "Procedure References",
+ "description": "Procedure references one or more manuals/diagrams.",
+ "properties": {},
+ "allowed_source_types": ["Procedure"],
+ "allowed_target_types": ["ManualDocument"],
+ "cardinality": "many-to-many",
+ "color": "#8E44AD"
+ },
+ "OPENS_TICKET": {
+ "name": "OPENS_TICKET",
+ "label": "Opens Ticket",
+ "description": "Alarm resulted in a work order.",
+ "properties": {},
+ "allowed_source_types": ["AlarmEvent"],
+ "allowed_target_types": ["WorkOrder"],
+ "cardinality": "one-to-one",
+ "color": "#2980B9"
+ },
+ "ASSIGNED_TO": {
+ "name": "ASSIGNED_TO",
+ "label": "Assigned To",
+ "description": "Work order assigned to a machine, step, or operator.",
+ "properties": {},
+ "allowed_source_types": ["WorkOrder"],
+ "allowed_target_types": ["Machine", "ProcessStep", "Operator"],
+ "cardinality": "one-to-many",
+ "color": "#3498DB"
+ },
+ "PART_OF_ORDER": {
+ "name": "PART_OF_ORDER",
+ "label": "Part of Order",
+ "description": "Work order is part of a production order.",
+ "properties": {},
+ "allowed_source_types": ["WorkOrder"],
+ "allowed_target_types": ["ProductionOrder"],
+ "cardinality": "many-to-one",
+ "color": "#16A085"
+ },
+ "SCHEDULES": {
+ "name": "SCHEDULES",
+ "label": "Schedules",
+ "description": "Machine or step is planned within a schedule slot.",
+ "properties": {},
+ "allowed_source_types": ["ScheduleSlot"],
+ "allowed_target_types": ["Machine", "ProcessStep", "ProductionOrder"],
+ "cardinality": "one-to-many",
+ "color": "#7F8C8D"
+ },
+ "IMPACTS_SCHEDULE": {
+ "name": "IMPACTS_SCHEDULE",
+ "label": "Impacts Schedule",
+ "description": "Alarm or failure impacts scheduled work; includes predicted delay and impact score.",
+ "properties": {
+ "predicted_delay_min": { "type": "integer", "required": false, "min_value": 0 },
+ "impact_score": { "type": "integer", "required": true, "min_value": 0, "max_value": 3, "description": "0=none,1=low,2=medium,3=high" }
+ },
+ "allowed_source_types": ["AlarmEvent", "FailureMode", "WorkOrder"],
+ "allowed_target_types": ["ScheduleSlot"],
+ "cardinality": "many-to-many",
+ "color": "#E67E22"
+ },
+ "RELATES_TO_ORDER": {
+ "name": "RELATES_TO_ORDER",
+ "label": "Relates To Order",
+ "description": "Maps scheduled slots to the production order they serve.",
+ "properties": {},
+ "allowed_source_types": ["ScheduleSlot"],
+ "allowed_target_types": ["ProductionOrder"],
+ "cardinality": "many-to-one",
+ "color": "#2ECC71"
+ },
+ "AUTHORED_BY": {
+ "name": "AUTHORED_BY",
+ "label": "Authored By",
+ "description": "Knowledge note authored by an operator/line leader/technician.",
+ "properties": {},
+ "allowed_source_types": ["KnowledgeNote"],
+ "allowed_target_types": ["Operator"],
+ "cardinality": "many-to-one",
+ "color": "#6C5CE7"
+ },
+ "KNOWLEDGE_APPLIES_TO": {
+ "name": "KNOWLEDGE_APPLIES_TO",
+ "label": "Knowledge Applies To",
+ "description": "Links a knowledge note to the assets or steps it applies to, with per-pair relevance.",
+ "properties": {
+ "relevance": { "type": "integer", "required": true, "min_value": 0, "max_value": 3, "description": "0=not relevant, 1=low, 2=medium, 3=high" },
+ "scope_note": { "type": "string", "required": false, "max_length": 300 }
+ },
+ "allowed_source_types": ["KnowledgeNote"],
+ "allowed_target_types": ["Machine", "ProcessStep", "FailureMode"],
+ "cardinality": "many-to-many",
+ "color": "#5E60CE"
+ },
+ "KNOWLEDGE_REFERENCES": {
+ "name": "KNOWLEDGE_REFERENCES",
+ "label": "Knowledge References",
+ "description": "Citations that a knowledge note refers to (manuals, procedures, alarms, or tickets).",
+ "properties": {
+ "confidence": { "type": "integer", "required": true, "min_value": 0, "max_value": 3, "description": "0=anecdotal,3=strong evidential support" },
+ "rationale": { "type": "string", "required": false, "max_length": 500 }
+ },
+ "allowed_source_types": ["KnowledgeNote"],
+ "allowed_target_types": ["ManualDocument", "Procedure", "AlarmEvent", "WorkOrder"],
+ "cardinality": "many-to-many",
+ "color": "#48CAE4"
+ },
+ "SESSION_STARTED_BY": {
+ "name": "SESSION_STARTED_BY",
+ "label": "Session Started By",
+ "description": "Agent session initiated by an operator (e.g., line leader).",
+ "properties": {},
+ "allowed_source_types": ["AgentSession"],
+ "allowed_target_types": ["Operator"],
+ "cardinality": "many-to-one",
+ "color": "#00ACC1"
+ },
+ "SESSION_ABOUT": {
+ "name": "SESSION_ABOUT",
+ "label": "Session About",
+ "description": "Entities discussed in or notified by the agent session.",
+ "properties": {},
+ "allowed_source_types": ["AgentSession"],
+ "allowed_target_types": ["Machine", "AlarmEvent", "FailureMode", "ProcessStep", "WorkOrder"],
+ "cardinality": "many-to-many",
+ "color": "#26C6DA"
+ }
+ },
+ "status": "ACTIVE",
+ "scope": "WORKSPACE"
+ }
+}

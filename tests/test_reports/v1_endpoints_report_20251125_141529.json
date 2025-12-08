@@ -1,0 +1,723 @@
+{
+  "summary": {
+    "total_tests": 101,
+    "passed_tests": 83,
+    "failed_tests": 15,
+    "skipped_tests": 3,
+    "success_rate": 82.17821782178217,
+    "total_duration": 10354.079907894135,
+    "average_duration": 102.51564265241717,
+    "passed_duration": 9494.977288722992,
+    "failed_duration": 612.9735460281372
+  },
+  "results": [
+    {
+      "test_name": "Add Memory - Basic",
+      "status": "passed",
+      "duration": 490.31059408187866,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Add Memory - API Key",
+      "status": "passed",
+      "duration": 191.78837394714355,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Add Memory - External User ID + Custom Metadata",
+      "status": "passed",
+      "duration": 181.22869610786438,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Add Memory - External User ID Only",
+      "status": "passed",
+      "duration": 207.00102400779724,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Add Memory - External User ID + ACL",
+      "status": "passed",
+      "duration": 113.12361693382263,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Add Memory - User ID from Created User",
+      "status": "passed",
+      "duration": 142.34849190711975,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Batch Add Memory - Basic",
+      "status": "passed",
+      "duration": 300.7617769241333,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Batch Add Memory - User ID",
+      "status": "passed",
+      "duration": 459.64462995529175,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Batch Add Memory - External User ID",
+      "status": "passed",
+      "duration": 614.3566689491272,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Batch Add Memory - Webhook Success",
+      "status": "passed",
+      "duration": 244.65835905075073,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Batch Add Memory - Webhook Partial Success",
+      "status": "passed",
+      "duration": 180.75618410110474,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Batch Add Memory - Webhook No URL",
+      "status": "passed",
+      "duration": 178.44859862327576,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Batch Add Memory - Webhook Azure Fallback",
+      "status": "passed",
+      "duration": 158.06269121170044,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Batch Add Memory - Webhook Payload Structure",
+      "status": "passed",
+      "duration": 131.09350299835205,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Batch Add Memory - Webhook Immediate (skip_background=True)",
+      "status": "passed",
+      "duration": 28.125690937042236,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Batch Add Memory - Webhook With Background Processing",
+      "status": "passed",
+      "duration": 286.1623408794403,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Update Memory - Basic",
+      "status": "failed",
+      "duration": 28.05727195739746,
+      "error": "Update failed with status 404",
+      "details": null
+    },
+    {
+      "test_name": "Update Memory - API Key",
+      "status": "failed",
+      "duration": 30.66184711456299,
+      "error": "Expected status code 200, got 500",
+      "details": null
+    },
+    {
+      "test_name": "Update Memory - ACL with Real Users",
+      "status": "failed",
+      "duration": 24.90428876876831,
+      "error": "",
+      "details": null
+    },
+    {
+      "test_name": "Get Memory - Basic",
+      "status": "passed",
+      "duration": 154.64357495307922,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Search Memory - Basic",
+      "status": "failed",
+      "duration": 37.354151010513306,
+      "error": "No memories returned with namespace_id=XhnQ7Y762d; optional namespace filter may not be applied",
+      "details": null
+    },
+    {
+      "test_name": "Search Memory - User ID ACL",
+      "status": "passed",
+      "duration": 166.32032823562622,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Search Memory - External User ID ACL",
+      "status": "passed",
+      "duration": 166.85901594161987,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Search Memory - New User Qwen Route",
+      "status": "passed",
+      "duration": 24.610142946243286,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Search Memory - Custom Metadata Filter (Qwen Only)",
+      "status": "passed",
+      "duration": 292.4714181423187,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Search Memory - Numeric Custom Metadata Filter",
+      "status": "passed",
+      "duration": 256.1723439693451,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Search Memory - List Custom Metadata Filter",
+      "status": "passed",
+      "duration": 276.6233580112457,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Search Memory - Boolean Custom Metadata Filter",
+      "status": "passed",
+      "duration": 313.5208230018616,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Search Memory - Mixed Custom Metadata Types",
+      "status": "passed",
+      "duration": 181.12382102012634,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Search Memory - Organization and Namespace Filter",
+      "status": "failed",
+      "duration": 73.94214081764221,
+      "error": "Memory has wrong namespace_id: XhnQ7Y762d",
+      "details": null
+    },
+    {
+      "test_name": "Search Memory - Agentic Graph",
+      "status": "passed",
+      "duration": 251.61074805259705,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Search Memory - Predicted Grouping Logging",
+      "status": "passed",
+      "duration": 148.64728093147278,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Search Memory - Fixed User Cache Test",
+      "status": "failed",
+      "duration": 26.81113910675049,
+      "error": "Expected 2 timings, got 0: []",
+      "details": null
+    },
+    {
+      "test_name": "Search Memory - Low-similarity Performance",
+      "status": "passed",
+      "duration": 75.0669617652893,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Auth/Dev Marking - APIKey Sets Developer",
+      "status": "passed",
+      "duration": 9.882220983505249,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Auth/Dev Marking - Bearer Only Does Not Set Developer",
+      "status": "skipped",
+      "duration": 9.288231134414673,
+      "error": null,
+      "details": "No valid Bearer token available for testing"
+    },
+    {
+      "test_name": "Auth/Dev Marking - Anon End-User Not Marked Developer When Dev API Key Used",
+      "status": "passed",
+      "duration": 135.46143698692322,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Delete Memory - Basic",
+      "status": "passed",
+      "duration": 18.993463039398193,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Delete Memory - API Key",
+      "status": "passed",
+      "duration": 17.68418002128601,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Delete All Memories - Complete Workflow",
+      "status": "failed",
+      "duration": 48.89404106140137,
+      "error": "Search failed: {\"code\":404,\"status\":\"error\",\"data\":null,\"error\":\"No relevant items found\",\"details\":null,\"search_id\":null}",
+      "details": null
+    },
+    {
+      "test_name": "Delete All Memories - External User ID",
+      "status": "passed",
+      "duration": 26.058918952941895,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Delete All Memories - No Memories Found",
+      "status": "passed",
+      "duration": 13.189579010009766,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Upload Document V2 - API Key",
+      "status": "passed",
+      "duration": 8.236907720565796,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Upload Document V2 - Session Token",
+      "status": "passed",
+      "duration": 0.6895620822906494,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Upload Document V2 - Real PDF File",
+      "status": "failed",
+      "duration": 89.64962100982666,
+      "error": "No Post created for this upload_id",
+      "details": null
+    },
+    {
+      "test_name": "Upload Document V2 - Real PDF with Custom Schema",
+      "status": "passed",
+      "duration": 974.6838181018829,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Upload Document V2 - Invalid File Type",
+      "status": "passed",
+      "duration": 0.40903306007385254,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Upload Document V2 - Malicious Content",
+      "status": "passed",
+      "duration": 0.028038740158081055,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Upload Document V2 - Large File",
+      "status": "passed",
+      "duration": 0.06307482719421387,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Upload Document V2 - With Webhook",
+      "status": "passed",
+      "duration": 0.3279900550842285,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Upload Document V2 - Multi-tenant",
+      "status": "passed",
+      "duration": 0.3399820327758789,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Upload Document V2 - Provider Preference",
+      "status": "passed",
+      "duration": 0.9026648998260498,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Upload Document V2 - Authentication Failure",
+      "status": "passed",
+      "duration": 1.1372830867767334,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Document Status Endpoint",
+      "status": "passed",
+      "duration": 0.061157941818237305,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Document Cancel Endpoint",
+      "status": "passed",
+      "duration": 0.05827188491821289,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Reducto Provider - Direct and Route",
+      "status": "passed",
+      "duration": 72.85109114646912,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Reducto Provider - Simple Upload",
+      "status": "passed",
+      "duration": 54.87204575538635,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Upload Document V2 - Gemini Provider",
+      "status": "passed",
+      "duration": 231.72847986221313,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Upload Document V2 - TensorLake Provider",
+      "status": "passed",
+      "duration": 24.01518988609314,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Create User - Basic",
+      "status": "passed",
+      "duration": 4.714415788650513,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Create User - Anonymous",
+      "status": "passed",
+      "duration": 3.585585355758667,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Create User - Batch",
+      "status": "passed",
+      "duration": 7.107063055038452,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Get User - Basic",
+      "status": "passed",
+      "duration": 4.4656267166137695,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Update User - Basic",
+      "status": "passed",
+      "duration": 5.104359865188599,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Delete User - Basic",
+      "status": "passed",
+      "duration": 3.538177013397217,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Delete User - By External ID",
+      "status": "passed",
+      "duration": 3.915337085723877,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "List Users - Basic",
+      "status": "passed",
+      "duration": 8.112517833709717,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Feedback - End to End",
+      "status": "passed",
+      "duration": 134.77647590637207,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Feedback - Get by ID",
+      "status": "passed",
+      "duration": 141.42906498908997,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Sync Tiers - Basic",
+      "status": "passed",
+      "duration": 35.33706784248352,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Sync Tiers - With Embeddings (small)",
+      "status": "passed",
+      "duration": 37.31961393356323,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Sync Delta - Cursor Pagination",
+      "status": "passed",
+      "duration": 9.92178201675415,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "QueryLog - Memory Metadata with Query Log Fields",
+      "status": "passed",
+      "duration": 0.0008139610290527344,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "QueryLog - Classification Data Detection",
+      "status": "passed",
+      "duration": 0.0017271041870117188,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "QueryLog - Search with Query Log Integration",
+      "status": "passed",
+      "duration": 0.0005691051483154297,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "QueryLog - Agentic Graph Log Model Creation",
+      "status": "passed",
+      "duration": 0.0008523464202880859,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "QueryLog - User Feedback Log Model Creation",
+      "status": "passed",
+      "duration": 0.000331878662109375,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "QueryLog - Agentic Graph Log with Relations",
+      "status": "passed",
+      "duration": 0.000293731689453125,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "QueryLog - User Feedback Log Minimal",
+      "status": "passed",
+      "duration": 0.00023484230041503906,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "QueryLog - Agentic Graph Log Storage Function",
+      "status": "passed",
+      "duration": 0.0003421306610107422,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "QueryLog - User Feedback Log Storage Function",
+      "status": "passed",
+      "duration": 0.00022411346435546875,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "QueryLog - Agentic Graph Log Data Preparation",
+      "status": "passed",
+      "duration": 0.0003311634063720703,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "QueryLog - User Feedback Log Data Preparation",
+      "status": "passed",
+      "duration": 0.00023794174194335938,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "QueryLog - Memory Retrieval Log Predicted Grouping",
+      "status": "skipped",
+      "duration": 0.00026988983154296875,
+      "error": null,
+      "details": "Requires monkeypatch fixture"
+    },
+    {
+      "test_name": "QueryLog - Persisted with Classification",
+      "status": "passed",
+      "duration": 24.328803062438965,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "QueryLog - Real creation and memory increment",
+      "status": "passed",
+      "duration": 28.58967876434326,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "QueryLog - Cache hits increment on repeated search",
+      "status": "passed",
+      "duration": 235.6941840648651,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "QueryLog - Fused confidence matches weight delta",
+      "status": "skipped",
+      "duration": 236.80364298820496,
+      "error": null,
+      "details": "No overlapping memory between first and second retrievals; rerun may yield overlap"
+    },
+    {
+      "test_name": "QueryLog - Backfill Retrieval Counters Small Batch",
+      "status": "passed",
+      "duration": 994.2982070446014,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "QueryLog - Sync Tiers Returns Ranked Tier1",
+      "status": "failed",
+      "duration": 53.961613178253174,
+      "error": "",
+      "details": null
+    },
+    {
+      "test_name": "Custom Schema - Create Security Schema",
+      "status": "passed",
+      "duration": 5.51328706741333,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Custom Schema - Add Memory with schema_id",
+      "status": "failed",
+      "duration": 166.62316799163818,
+      "error": "'success'",
+      "details": null
+    },
+    {
+      "test_name": "Custom Schema - Wait for Memory Processing",
+      "status": "failed",
+      "duration": 8.511543273925781e-05,
+      "error": "Memory must be created first - run test_v1_add_memory_with_schema_id",
+      "details": null
+    },
+    {
+      "test_name": "Custom Schema - Search Verify Neo4j Nodes",
+      "status": "failed",
+      "duration": 6.079673767089844e-05,
+      "error": "Memory must be created first",
+      "details": null
+    },
+    {
+      "test_name": "Custom Schema - Search with Agentic Graph",
+      "status": "failed",
+      "duration": 32.10977101325989,
+      "error": "Agentic search failed: {\"code\":404,\"status\":\"error\",\"data\":null,\"error\":\"No relevant items found\",\"details\":null,\"search_id\":null}",
+      "details": null
+    },
+    {
+      "test_name": "Custom Schema - Add Memory with graph_override",
+      "status": "failed",
+      "duration": 0.0042150020599365234,
+      "error": "Memory with graph_override failed: {\"detail\":[{\"type\":\"extra_forbidden\",\"loc\":[\"body\",\"graph_override\"],\"msg\":\"Extra inputs are not permitted\",\"input\":{\"nodes\":[{\"label\":\"SecurityBehavior\",\"properties\":{\"name\":\"Unauthorized Access Attempt\",\"description\":\"Detected unauthorized access attempt to admin panel\",\"severity\":\"critical\",\"category\":\"access_control\"}},{\"label\":\"Impact\",\"properties\":{\"name\":\"Potential Data Breach\",\"severity\":\"high\",\"description\":\"Could lead to exposure of customer data\"}},{\"label\":\"Tactic\",\"properties\":{\"tactic_id\":\"TA0001\",\"name\":\"Initial Access\",\"description\":\"MITRE ATT&CK Initial Access tactic\"}}],\"relationships\":[{\"type\":\"HAS_IMPACT\",\"source\":{\"label\":\"SecurityBehavior\",\"identifier\":\"name\",\"value\":\"Unauthorized Access Attempt\"},\"target\":{\"label\":\"Impact\",\"identifier\":\"name\",\"value\":\"Potential Data Breach\"}},{\"type\":\"MAPS_TO_TACTIC\",\"source\":{\"label\":\"SecurityBehavior\",\"identifier\":\"name\",\"value\":\"Unauthorized Access Attempt\"},\"target\":{\"label\":\"Tactic\",\"identifier\":\"tactic_id\",\"value\":\"TA0001\"}}]}}]}",
+      "details": null
+    },
+    {
+      "test_name": "Custom Schema - Full Workflow Validation",
+      "status": "failed",
+      "duration": 0.00013208389282226562,
+      "error": "Memory creation failed",
+      "details": null
+    },
+    {
+      "test_name": "Multi-Tenant - Auth Models",
+      "status": "passed",
+      "duration": 0.00043129920959472656,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Multi-Tenant - Memory Models Fields",
+      "status": "passed",
+      "duration": 0.0003230571746826172,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Multi-Tenant - Batch Memory Scoping",
+      "status": "passed",
+      "duration": 0.0033600330352783203,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Multi-Tenant - Backward Compatibility",
+      "status": "passed",
+      "duration": 0.0005209445953369141,
+      "error": null,
+      "details": null
+    }
+  ],
+  "timestamp": "2025-11-25T14:15:29.896476"
+}

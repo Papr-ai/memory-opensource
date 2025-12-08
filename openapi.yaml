@@ -1,0 +1,5757 @@
+openapi: 3.1.0
+info:
+  title: Papr Memory API
+  description: "API for managing personal memory items with authentication and user-specific\
+    \ data.\n## Authentication\nThis API supports three authentication methods:\n\
+    - **API Key**: Include your API key in the `X-API-Key` header\n  ```\n  X-API-Key:\
+    \ <your-api-key>\n  ```\n- **Session Token**: Include your session token in the\
+    \ `X-Session-Token` header\n  ```\n  X-Session-Token: <your-session-token>\n \
+    \ ```\n- **Bearer Token**: Include your OAuth2 token from Auth0 in the `Authorization`\
+    \ header\n  ```\n  Authorization: Bearer <token>\n  ```\nAll endpoints require\
+    \ one of these authentication methods."
+  version: 1.0.0
+paths:
+  /v1/memory:
+    post:
+      tags:
+      - v1
+      - Memory
+      summary: Add Memory V1
+      description: "Add a new memory item to the system with size validation and background\
+        \ processing.\n    \n    **Authentication Required**:\n    One of the following\
+        \ authentication methods must be used:\n    - Bearer token in `Authorization`\
+        \ header\n    - API Key in `X-API-Key` header\n    - Session token in `X-Session-Token`\
+        \ header\n    \n    **Required Headers**:\n    - Content-Type: application/json\n\
+        \    - X-Client-Type: (e.g., 'papr_plugin', 'browser_extension')\n    \n \
+        \   **Role-Based Memory Categories**:\n    - **User memories**: preference,\
+        \ task, goal, facts, context\n    - **Assistant memories**: skills, learning\n\
+        \    \n    **New Metadata Fields**:\n    - `metadata.role`: Optional field\
+        \ to specify who generated the memory (user or assistant)\n    - `metadata.category`:\
+        \ Optional field for memory categorization based on role\n    - Both fields\
+        \ are stored within metadata at the same level as topics, location, etc.\n\
+        \    \n    The API validates content size against MAX_CONTENT_LENGTH environment\
+        \ variable (defaults to 15000 bytes)."
+      operationId: add_memory
+      security:
+      - X-API-Key: []
+      - Bearer: []
+      - X-API-Key: []
+      parameters:
+      - name: skip_background_processing
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: If True, skips adding background tasks for processing
+          default: false
+          title: Skip Background Processing
+        description: If True, skips adding background tasks for processing
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddMemoryRequest'
+      responses:
+        '200':
+          description: Memory successfully added
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AddMemoryResponse'
+              example:
+                code: 200
+                status: success
+                data:
+                - id: mem_123
+                  content: Sample memory content.
+                  type: text
+                  metadata:
+                    topics: example, memory
+                    role: user
+                    category: task
+                  createdAt: '2024-06-01T12:00:00Z'
+        '207':
+          description: Memory added with degraded functionality
+          content:
+            application/json:
+              example:
+                code: 207
+                status: success
+                data:
+                - id: mem_124
+                  content: Sample memory content.
+                  type: text
+                  metadata:
+                    topics: example, memory
+                  createdAt: '2024-06-01T12:01:00Z'
+                details:
+                  warning: Neo4j unavailable, stored in Pinecone only.
+              schema:
+                $ref: '#/components/schemas/AddMemoryResponse'
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              example:
+                code: 400
+                status: error
+                error: Invalid request payload.
+                details:
+                  field: content
+                  reason: Missing required field.
+              schema:
+                $ref: '#/components/schemas/AddMemoryResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              example:
+                code: 401
+                status: error
+                error: Missing or invalid authentication.
+              schema:
+                $ref: '#/components/schemas/AddMemoryResponse'
+        '403':
+          description: Subscription limit reached
+          content:
+            application/json:
+              example:
+                code: 403
+                status: error
+                error: Subscription limit reached. Upgrade required.
+                details:
+                  limit: memory quota
+              schema:
+                $ref: '#/components/schemas/AddMemoryResponse'
+        '413':
+          description: Content too large
+          content:
+            application/json:
+              example:
+                code: 413
+                status: error
+                error: Content size (16000 bytes) exceeds maximum limit of 15000 bytes.
+                details:
+                  max_content_length: 15000
+              schema:
+                $ref: '#/components/schemas/AddMemoryResponse'
+        '415':
+          description: Unsupported Media Type
+          content:
+            application/json:
+              example:
+                code: 415
+                status: error
+                error: Unsupported media type. Use application/json.
+              schema:
+                $ref: '#/components/schemas/AddMemoryResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              example:
+                code: 500
+                status: error
+                error: Internal server error.
+                details:
+                  trace_id: abc123
+              schema:
+                $ref: '#/components/schemas/AddMemoryResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      x-openai-isConsequential: false
+  /v1/memory/{memory_id}:
+    put:
+      tags:
+      - v1
+      - Memory
+      summary: Update Memory V1
+      description: "Update an existing memory item by ID.\n    \n    **Authentication\
+        \ Required**:\n    One of the following authentication methods must be used:\n\
+        \    - Bearer token in `Authorization` header\n    - API Key in `X-API-Key`\
+        \ header\n    - Session token in `X-Session-Token` header\n    \n    **Required\
+        \ Headers**:\n    - Content-Type: application/json\n    - X-Client-Type: (e.g.,\
+        \ 'papr_plugin', 'browser_extension')\n    \n    The API validates content\
+        \ size against MAX_CONTENT_LENGTH environment variable (defaults to 15000\
+        \ bytes)."
+      operationId: update_memory
+      security:
+      - X-API-Key: []
+      - Bearer: []
+      - X-API-Key: []
+      parameters:
+      - name: memory_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Memory Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateMemoryRequest'
+      responses:
+        '200':
+          description: Memory successfully updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateMemoryResponse'
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateMemoryResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateMemoryResponse'
+        '404':
+          description: Memory not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateMemoryResponse'
+        '413':
+          description: Content too large
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateMemoryResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateMemoryResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      x-openai-isConsequential: true
+    delete:
+      tags:
+      - v1
+      - Memory
+      summary: Delete Memory V1
+      description: "Delete a memory item by ID.\n    \n    **Authentication Required**:\n\
+        \    One of the following authentication methods must be used:\n    - Bearer\
+        \ token in `Authorization` header\n    - API Key in `X-API-Key` header\n \
+        \   - Session token in `X-Session-Token` header\n    \n    **Required Headers**:\n\
+        \    - X-Client-Type: (e.g., 'papr_plugin', 'browser_extension')"
+      operationId: delete_memory
+      security:
+      - X-API-Key: []
+      - Bearer: []
+      - X-API-Key: []
+      parameters:
+      - name: memory_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Memory Id
+      - name: skip_parse
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: Skip Parse Server deletion
+          default: false
+          title: Skip Parse
+        description: Skip Parse Server deletion
+      responses:
+        '200':
+          description: Memory successfully deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteMemoryResponse'
+        '207':
+          description: Partially successful deletion
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteMemoryResponse'
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteMemoryResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteMemoryResponse'
+        '404':
+          description: Memory not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteMemoryResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteMemoryResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      x-openai-isConsequential: true
+    get:
+      tags:
+      - v1
+      - Memory
+      summary: Get Memory V1
+      description: "Retrieve a memory item by ID.\n    \n    **Authentication Required**:\n\
+        \    One of the following authentication methods must be used:\n    - Bearer\
+        \ token in `Authorization` header\n    - API Key in `X-API-Key` header\n \
+        \   - Session token in `X-Session-Token` header\n    \n    **Required Headers**:\n\
+        \    - X-Client-Type: (e.g., 'papr_plugin', 'browser_extension')"
+      operationId: get_memory
+      security:
+      - X-API-Key: []
+      - Bearer: []
+      - X-API-Key: []
+      parameters:
+      - name: memory_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Memory Id
+      responses:
+        '200':
+          description: Memory successfully retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+        '404':
+          description: Memory not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      x-openai-isConsequential: false
+  /v1/memory/batch:
+    post:
+      tags:
+      - v1
+      - Memory
+      summary: Add Memory Batch V1
+      description: "Add multiple memory items in a batch with size validation and\
+        \ background processing.\n    \n    **Authentication Required**:\n    One\
+        \ of the following authentication methods must be used:\n    - Bearer token\
+        \ in `Authorization` header\n    - API Key in `X-API-Key` header\n    - Session\
+        \ token in `X-Session-Token` header\n    \n    **Required Headers**:\n   \
+        \ - Content-Type: application/json\n    - X-Client-Type: (e.g., 'papr_plugin',\
+        \ 'browser_extension')\n    \n    The API validates individual memory content\
+        \ size against MAX_CONTENT_LENGTH environment variable (defaults to 15000\
+        \ bytes)."
+      operationId: add_memory_batch
+      security:
+      - X-API-Key: []
+      - Bearer: []
+      - X-API-Key: []
+      parameters:
+      - name: skip_background_processing
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: If True, skips adding background tasks for processing
+          default: false
+          title: Skip Background Processing
+        description: If True, skips adding background tasks for processing
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchMemoryRequest'
+      responses:
+        '200':
+          description: Memories successfully added
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchMemoryResponse'
+        '207':
+          description: Partial success - some memories failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchMemoryResponse'
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchMemoryResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchMemoryResponse'
+        '403':
+          description: Subscription limit reached
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchMemoryResponse'
+        '413':
+          description: Content too large
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchMemoryResponse'
+        '415':
+          description: Unsupported Media Type
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchMemoryResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchMemoryResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      x-openai-isConsequential: false
+  /v1/memory/all:
+    delete:
+      tags:
+      - v1
+      - Memory
+      summary: Delete All Memories V1
+      description: "Delete all memory items for a user.\n    \n    **Authentication\
+        \ Required**:\n    One of the following authentication methods must be used:\n\
+        \    - Bearer token in `Authorization` header\n    - API Key in `X-API-Key`\
+        \ header\n    - Session token in `X-Session-Token` header\n    \n    **User\
+        \ Resolution**:\n    - If only API key is provided: deletes memories for the\
+        \ developer\n    - If user_id or external_user_id is provided: resolves and\
+        \ deletes memories for that user\n    - Uses the same user resolution logic\
+        \ as other endpoints\n    \n    **Required Headers**:\n    - X-Client-Type:\
+        \ (e.g., 'papr_plugin', 'browser_extension')\n    \n    **WARNING**: This\
+        \ operation cannot be undone. All memories for the resolved user will be permanently\
+        \ deleted."
+      operationId: delete_all_memories
+      security:
+      - X-API-Key: []
+      - Bearer: []
+      - X-API-Key: []
+      parameters:
+      - name: user_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Optional user ID to delete memories for (if not provided, uses
+            authenticated user)
+          title: User Id
+        description: Optional user ID to delete memories for (if not provided, uses
+          authenticated user)
+      - name: external_user_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Optional external user ID to resolve and delete memories for
+          title: External User Id
+        description: Optional external user ID to resolve and delete memories for
+      - name: skip_parse
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: Skip Parse Server deletion
+          default: false
+          title: Skip Parse
+        description: Skip Parse Server deletion
+      responses:
+        '200':
+          description: All memories successfully deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchMemoryResponse'
+        '207':
+          description: Partial success - some memories failed to delete
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchMemoryResponse'
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchMemoryResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchMemoryResponse'
+        '404':
+          description: No memories found for user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchMemoryResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchMemoryResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      x-openai-isConsequential: true
+  /v1/memory/search:
+    post:
+      tags:
+      - v1
+      - Memory
+      summary: Search V1
+      description: "Search through memories with authentication required.\n    \n\
+        \    **Authentication Required**:\n    One of the following authentication\
+        \ methods must be used:\n    - Bearer token in `Authorization` header\n  \
+        \  - API Key in `X-API-Key` header\n    - Session token in `X-Session-Token`\
+        \ header\n    \n    **Custom Schema Support**:\n    This endpoint supports\
+        \ both system-defined and custom user-defined node types:\n    - **System\
+        \ nodes**: Memory, Person, Company, Project, Task, Insight, Meeting, Opportunity,\
+        \ Code\n    - **Custom nodes**: Defined by developers via UserGraphSchema\
+        \ (e.g., Developer, Product, Customer, Function)\n    \n    When custom schema\
+        \ nodes are returned:\n    - Each custom node includes a `schema_id` field\
+        \ referencing the UserGraphSchema\n    - The response includes a `schemas_used`\
+        \ array listing all schema IDs used\n    - Use `GET /v1/schemas/{schema_id}`\
+        \ to retrieve full schema definitions including:\n      - Node type definitions\
+        \ and properties\n      - Relationship type definitions and constraints\n\
+        \      - Validation rules and requirements\n    \n    **Recommended Headers**:\n\
+        \    ```\n    Accept-Encoding: gzip\n    ```\n    \n    The API supports response\
+        \ compression for improved performance. Responses larger than 1KB will be\
+        \ automatically compressed when this header is present.\n    \n    **HIGHLY\
+        \ RECOMMENDED SETTINGS FOR BEST RESULTS:**\n    - Set `enable_agentic_graph:\
+        \ true` for intelligent, context-aware search that can understand ambiguous\
+        \ references\n    - Use `max_memories: 15-20` for comprehensive memory coverage\n\
+        \    - Use `max_nodes: 10-15` for comprehensive graph entity relationships\n\
+        \    \n    **Agentic Graph Benefits:**\n    When enabled, the system can understand\
+        \ vague references by first identifying specific entities from your memory\
+        \ graph, then performing targeted searches. For example:\n    - \"customer\
+        \ feedback\" \u2192 identifies your customers first, then finds their specific\
+        \ feedback\n    - \"project issues\" \u2192 identifies your projects first,\
+        \ then finds related issues\n    - \"team meeting notes\" \u2192 identifies\
+        \ your team members first, then finds meeting notes\n    - \"code functions\"\
+        \ \u2192 identifies your functions first, then finds related code\n    \n\
+        \    **Role-Based Memory Filtering:**\n    Filter memories by role and category\
+        \ using metadata fields:\n    - `metadata.role`: Filter by \"user\" or \"\
+        assistant\" \n    - `metadata.category`: Filter by category (user: preference,\
+        \ task, goal, facts, context | assistant: skills, learning)\n    \n    **User\
+        \ Resolution Precedence:**\n    - If both user_id and external_user_id are\
+        \ provided, user_id takes precedence.\n    - If only external_user_id is provided,\
+        \ it will be resolved to the internal user.\n    - If neither is provided,\
+        \ the authenticated user is used."
+      operationId: search_memory
+      security:
+      - X-API-Key: []
+      - Bearer: []
+      - X-API-Key: []
+      parameters:
+      - name: max_memories
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 50
+          minimum: 10
+          description: 'HIGHLY RECOMMENDED: Maximum number of memories to return.
+            Use at least 15-20 for comprehensive results. Lower values (5-10) may
+            miss relevant information. Default is 20 for optimal coverage.'
+          default: 20
+          title: Max Memories
+        description: 'HIGHLY RECOMMENDED: Maximum number of memories to return. Use
+          at least 15-20 for comprehensive results. Lower values (5-10) may miss relevant
+          information. Default is 20 for optimal coverage.'
+      - name: max_nodes
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 50
+          minimum: 10
+          description: 'HIGHLY RECOMMENDED: Maximum number of neo nodes to return.
+            Use at least 10-15 for comprehensive graph results. Lower values may miss
+            important entity relationships. Default is 15 for optimal coverage.'
+          default: 15
+          title: Max Nodes
+        description: 'HIGHLY RECOMMENDED: Maximum number of neo nodes to return. Use
+          at least 10-15 for comprehensive graph results. Lower values may miss important
+          entity relationships. Default is 15 for optimal coverage.'
+      - name: enable_agentic_graph
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          description: 'HIGHLY RECOMMENDED: Enable agentic graph search for intelligent,
+            context-aware results. Can be set via URL parameter or JSON body. URL
+            parameter takes precedence if both are provided.'
+          title: Enable Agentic Graph
+        description: 'HIGHLY RECOMMENDED: Enable agentic graph search for intelligent,
+          context-aware results. Can be set via URL parameter or JSON body. URL parameter
+          takes precedence if both are provided.'
+      - name: Accept-Encoding
+        in: header
+        description: Recommended to use 'gzip' for response compression
+        schema:
+          type: string
+          default: gzip
+        required: false
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SearchRequest'
+      responses:
+        '200':
+          description: Successfully retrieved memories
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+              examples:
+                system_nodes_response:
+                  summary: Response with system nodes only
+                  description: Standard response when only system-defined node types
+                    are found
+                  value:
+                    code: 200
+                    status: success
+                    data:
+                      memories:
+                      - id: mem-123
+                        content: John Doe completed the quarterly report
+                        created_at: '2024-01-15T10:30:00Z'
+                      nodes:
+                      - label: Person
+                        properties:
+                          id: person-123
+                          name: John Doe
+                          role: Manager
+                      - label: Task
+                        properties:
+                          id: task-456
+                          title: Quarterly Report
+                          status: completed
+                    search_id: search-789
+                custom_schema_response:
+                  summary: Response with custom schema nodes
+                  description: Response when custom UserGraphSchema nodes are found
+                  value:
+                    code: 200
+                    status: success
+                    data:
+                      memories:
+                      - id: mem-456
+                        content: Rachel Green implemented the validateForm() function
+                        created_at: '2024-01-15T14:20:00Z'
+                      nodes:
+                      - label: Developer
+                        properties:
+                          id: dev-789
+                          name: Rachel Green
+                          expertise:
+                          - React
+                          - TypeScript
+                          years_experience: 5
+                        schema_id: schema_abc123
+                      - label: Function
+                        properties:
+                          id: func-101
+                          name: validateForm
+                          language: JavaScript
+                          description: Form validation function
+                        schema_id: schema_abc123
+                      schemas_used:
+                      - schema_abc123
+                    search_id: search-101
+                mixed_nodes_response:
+                  summary: Response with both system and custom nodes
+                  description: Response containing both system nodes and custom schema
+                    nodes
+                  value:
+                    code: 200
+                    status: success
+                    data:
+                      memories:
+                      - id: mem-789
+                        content: Product launch meeting with development team
+                        created_at: '2024-01-15T16:00:00Z'
+                      nodes:
+                      - label: Meeting
+                        properties:
+                          id: meeting-123
+                          title: Product Launch Meeting
+                          date: '2024-01-15T16:00:00Z'
+                      - label: Product
+                        properties:
+                          id: prod-456
+                          name: Mobile App v2.0
+                          category: Software
+                          price: 29.99
+                        schema_id: schema_ecommerce_456
+                      schemas_used:
+                      - schema_ecommerce_456
+                    search_id: search-202
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+        '403':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+        '404':
+          description: No relevant items found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+        '415':
+          description: Unsupported Media Type
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      x-openai-isConsequential: false
+  /v1/user:
+    post:
+      tags:
+      - v1
+      - User
+      summary: Create User
+      description: Create a new user or link existing user to developer
+      operationId: create_user
+      parameters:
+      - name: X-API-Key
+        in: header
+        required: true
+        schema:
+          type: string
+          title: X-Api-Key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUserRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      x-operation-name: create_user
+      x-operation-description: Create a new user or link existing user to developer
+      x-operation-tags:
+      - User
+    get:
+      tags:
+      - v1
+      - User
+      summary: List Users
+      description: List users for a developer
+      operationId: list_users
+      parameters:
+      - name: page
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+          title: Page
+      - name: page_size
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          default: 10
+          title: Page Size
+      - name: external_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: External Id
+      - name: email
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Email
+      - name: X-API-Key
+        in: header
+        required: true
+        schema:
+          type: string
+          title: X-Api-Key
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserListResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      x-operation-name: list_users
+      x-operation-description: List users for a developer
+      x-operation-tags:
+      - User
+  /v1/user/{user_id}:
+    get:
+      tags:
+      - v1
+      - User
+      summary: Get User
+      description: Get user details by user_id (_User.objectId) and developer association
+      operationId: get_user
+      parameters:
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: User Id
+      - name: X-API-Key
+        in: header
+        required: true
+        schema:
+          type: string
+          title: X-Api-Key
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      x-operation-name: get_user
+      x-operation-description: Get user details by user_id (_User.objectId) and developer
+        association
+      x-operation-tags:
+      - User
+    put:
+      tags:
+      - v1
+      - User
+      summary: Update User
+      description: Update user details by user_id (_User.objectId) and developer association
+      operationId: update_user
+      parameters:
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: User Id
+      - name: X-API-Key
+        in: header
+        required: true
+        schema:
+          type: string
+          title: X-Api-Key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      x-operation-name: update_user
+      x-operation-description: Update user details by user_id (_User.objectId) and
+        developer association
+      x-operation-tags:
+      - User
+    delete:
+      tags:
+      - v1
+      - User
+      summary: Delete User
+      description: Delete user association with developer and the user itself by ,
+        assume external user_id is provided, and resolve to internal user_id (_User.objectId)
+      operationId: delete_user
+      parameters:
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: User Id
+      - name: is_external
+        in: query
+        required: false
+        schema:
+          type: boolean
+          description: Is this an external user ID?
+          default: false
+          title: Is External
+        description: Is this an external user ID?
+      - name: X-API-Key
+        in: header
+        required: true
+        schema:
+          type: string
+          title: X-Api-Key
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteUserResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      x-operation-name: delete_user
+      x-operation-description: Delete user association with developer and the user
+        itself by , assume external user_id is provided, and resolve to internal user_id
+        (_User.objectId)
+      x-operation-tags:
+      - User
+  /v1/user/batch:
+    post:
+      tags:
+      - v1
+      - User
+      summary: Create User Batch
+      description: Create multiple users or link existing users to developer, and
+        add each to the developer's workspace (if one exists).
+      operationId: create_user_batch
+      parameters:
+      - name: X-API-Key
+        in: header
+        required: true
+        schema:
+          type: string
+          title: X-Api-Key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchUserCreateRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserListResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      x-operation-name: create_user_batch
+      x-operation-description: Create multiple users or link existing users to developer,
+        and add each to the developer's workspace (if one exists).
+      x-operation-tags:
+      - User
+  /v1/feedback:
+    post:
+      tags:
+      - v1
+      - Feedback
+      summary: Submit Feedback V1
+      description: "Submit feedback on search results to help improve model performance.\n\
+        \    \n    This endpoint allows developers to provide feedback on:\n    -\
+        \ Overall answer quality (thumbs up/down, ratings)\n    - Specific memory\
+        \ relevance and accuracy\n    - User engagement signals (copy, save, create\
+        \ document actions)\n    - Corrections and improvements\n    \n    The feedback\
+        \ is used to train and improve:\n    - Router model tier predictions\n   \
+        \ - Memory retrieval ranking\n    - Answer generation quality\n    - Agentic\
+        \ graph search performance\n    \n    **Authentication Required**:\n    One\
+        \ of the following authentication methods must be used:\n    - Bearer token\
+        \ in `Authorization` header\n    - API Key in `X-API-Key` header\n    - Session\
+        \ token in `X-Session-Token` header\n    \n    **Required Headers**:\n   \
+        \ - Content-Type: application/json\n    - X-Client-Type: (e.g., 'papr_plugin',\
+        \ 'browser_extension')"
+      operationId: submit_feedback
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FeedbackRequest'
+        required: true
+      responses:
+        '200':
+          description: Feedback submitted successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeedbackResponse'
+              example:
+                code: 200
+                status: success
+                feedback_id: fb_123456789
+                message: Feedback submitted successfully and will be processed for
+                  model improvement
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeedbackResponse'
+              example:
+                code: 400
+                status: error
+                message: Failed to submit feedback
+                error: Invalid search_id or feedback data
+                details:
+                  field: search_id
+                  reason: Search ID not found
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeedbackResponse'
+              example:
+                code: 401
+                status: error
+                message: Failed to submit feedback
+                error: Missing or invalid authentication
+        '404':
+          description: Search ID not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeedbackResponse'
+              example:
+                code: 404
+                status: error
+                message: Failed to submit feedback
+                error: Search ID abc123def456 not found or access denied
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeedbackResponse'
+              example:
+                code: 500
+                status: error
+                message: Failed to submit feedback
+                error: Internal server error
+                details:
+                  trace_id: abc123
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - X-API-Key: []
+      - Bearer: []
+      - X-API-Key: []
+      x-openai-isConsequential: false
+  /v1/feedback/batch:
+    post:
+      tags:
+      - v1
+      - Feedback
+      summary: Submit Batch Feedback V1
+      description: "Submit multiple feedback items in a single request.\n    \n  \
+        \  Useful for submitting session-end feedback or bulk feedback collection.\n\
+        \    Each feedback item is processed independently, so partial success is\
+        \ possible.\n    \n    **Authentication Required**:\n    One of the following\
+        \ authentication methods must be used:\n    - Bearer token in `Authorization`\
+        \ header\n    - API Key in `X-API-Key` header\n    - Session token in `X-Session-Token`\
+        \ header\n    \n    **Required Headers**:\n    - Content-Type: application/json\n\
+        \    - X-Client-Type: (e.g., 'papr_plugin', 'browser_extension')"
+      operationId: submit_batch_feedback
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchFeedbackRequest'
+        required: true
+      responses:
+        '200':
+          description: Batch feedback processed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchFeedbackResponse'
+              example:
+                code: 200
+                status: success
+                feedback_ids:
+                - fb_123
+                - fb_456
+                successful_count: 2
+                failed_count: 0
+                errors: []
+                message: Processed 2 feedback items successfully
+        '207':
+          description: Partial success - some feedback items failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchFeedbackResponse'
+              example:
+                code: 207
+                status: success
+                feedback_ids:
+                - fb_123
+                successful_count: 1
+                failed_count: 1
+                errors:
+                - index: 1
+                  search_id: abc123
+                  error: Search ID not found
+                message: Processed 1 feedback items successfully
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchFeedbackResponse'
+              example:
+                code: 400
+                status: error
+                feedback_ids: []
+                successful_count: 0
+                failed_count: 2
+                errors:
+                - index: 0
+                  search_id: abc123
+                  error: Invalid feedback data
+                message: Batch feedback processed
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchFeedbackResponse'
+              example:
+                code: 401
+                status: error
+                feedback_ids: []
+                successful_count: 0
+                failed_count: 0
+                errors: []
+                message: Failed to process batch feedback
+                error: Missing or invalid authentication
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchFeedbackResponse'
+              example:
+                code: 500
+                status: error
+                feedback_ids: []
+                successful_count: 0
+                failed_count: 0
+                errors: []
+                message: Failed to process batch feedback
+                error: Internal server error
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - X-API-Key: []
+      - Bearer: []
+      - X-API-Key: []
+      x-openai-isConsequential: false
+  /v1/feedback/{feedback_id}:
+    get:
+      tags:
+      - v1
+      - Feedback
+      summary: Get Feedback By Id V1
+      description: "Retrieve feedback by ID.\n    \n    This endpoint allows developers\
+        \ to fetch feedback details by feedback ID.\n    Only the user who created\
+        \ the feedback or users with appropriate permissions can access it.\n    \n\
+        \    **Authentication Required**:\n    One of the following authentication\
+        \ methods must be used:\n    - Bearer token in `Authorization` header\n  \
+        \  - API Key in `X-API-Key` header\n    - Session token in `X-Session-Token`\
+        \ header\n    \n    **Required Headers**:\n    - X-Client-Type: (e.g., 'papr_plugin',\
+        \ 'browser_extension')"
+      operationId: get_feedback_by_id
+      security:
+      - X-API-Key: []
+      - Bearer: []
+      - X-API-Key: []
+      parameters:
+      - name: feedback_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Feedback Id
+      responses:
+        '200':
+          description: Feedback retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeedbackResponse'
+              example:
+                code: 200
+                status: success
+                feedback_id: fb_123456789
+                message: Feedback retrieved successfully
+                details:
+                  feedback_type: thumbs_up
+                  feedback_score: 1
+                  feedback_text: This was helpful!
+                  search_id: search_123
+                  created_at: '2024-01-17T17:30:45.123456Z'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              example:
+                code: 401
+                status: error
+                message: Failed to retrieve feedback
+                error: Missing or invalid authentication
+              schema:
+                $ref: '#/components/schemas/FeedbackResponse'
+        '404':
+          description: Feedback not found
+          content:
+            application/json:
+              example:
+                code: 404
+                status: error
+                message: Failed to retrieve feedback
+                error: Feedback ID fb_123456789 not found or access denied
+              schema:
+                $ref: '#/components/schemas/FeedbackResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              example:
+                code: 500
+                status: error
+                message: Failed to retrieve feedback
+                error: Internal server error
+                details:
+                  trace_id: abc123
+              schema:
+                $ref: '#/components/schemas/FeedbackResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      x-openai-isConsequential: false
+  /v1/sync/tiers:
+    post:
+      tags:
+      - v1
+      - Sync
+      summary: Get Sync Tiers
+      description: 'Return initial Tier 0 (goals/OKRs/use-cases --> tier 0 memories)
+        and Tier 1 (hot memories) for the requesting user/workspace.
+
+
+        This is a minimal initial implementation to enable SDK integration. It uses
+        simple heuristics and will be enhanced with analytics-driven selection.'
+      operationId: get_sync_tiers_v1_sync_tiers_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SyncTiersRequest'
+        required: true
+      responses:
+        '200':
+          description: Tier assignments returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncTiersResponse'
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - X-API-Key: []
+      - Bearer: []
+      - X-API-Key: []
+  /v1/sync/delta:
+    get:
+      tags:
+      - v1
+      - Sync
+      summary: Get Sync Delta
+      description: 'Return upserts/deletes since the provided cursor for a user/workspace.
+
+        Cursor is an opaque watermark over updatedAt and objectId.'
+      operationId: get_sync_delta_v1_sync_delta_get
+      security:
+      - X-API-Key: []
+      - Bearer: []
+      - X-API-Key: []
+      parameters:
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Opaque cursor from previous sync
+          title: Cursor
+        description: Opaque cursor from previous sync
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          default: 200
+          title: Limit
+      - name: workspace_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Workspace Id
+      - name: include_embeddings
+        in: query
+        required: false
+        schema:
+          type: boolean
+          default: false
+          title: Include Embeddings
+      responses:
+        '200':
+          description: Delta since cursor returned
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Get Sync Delta V1 Sync Delta Get
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/document/v2:
+    post:
+      tags:
+      - v1
+      - Document V2
+      summary: Upload Document V2
+      description: "Upload and process documents using the new pluggable architecture.\n\
+        \n    **Authentication Required**: Bearer token or API key\n\n    **Supported\
+        \ Providers**: TensorLake.ai, Reducto AI, Gemini Vision (fallback)\n\n   \
+        \ **Features**:\n    - Multi-tenant organization/namespace scoping\n    -\
+        \ Temporal workflow for durable execution\n    - Real-time WebSocket status\
+        \ updates\n    - Integration with Parse Server (Post/PostSocial/PageVersion)\n\
+        \    - Automatic fallback between providers"
+      operationId: upload_document_v2_v1_document_v2_post
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/Body_upload_document_v2_v1_document_v2_post'
+        required: true
+      responses:
+        '200':
+          description: Document upload started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentUploadResponse'
+        '202':
+          description: Document processing queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentUploadResponse'
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentUploadResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentUploadResponse'
+        '413':
+          description: Payload too large
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentUploadResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentUploadResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - Bearer: []
+      - X-API-Key: []
+      - X-API-Key: []
+  /v1/document/v2/status/{upload_id}:
+    get:
+      tags:
+      - v1
+      - Document V2
+      summary: Get Document Status
+      description: Get processing status for an uploaded document
+      operationId: get_document_status_v1_document_v2_status__upload_id__get
+      security:
+      - Bearer: []
+      - X-API-Key: []
+      - X-API-Key: []
+      parameters:
+      - name: upload_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Upload Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Get Document Status V1 Document V2 Status  Upload
+                  Id  Get
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/document/v2/{upload_id}:
+    delete:
+      tags:
+      - v1
+      - Document V2
+      summary: Cancel Document Processing
+      description: Cancel document processing
+      operationId: cancel_document_processing_v1_document_v2__upload_id__delete
+      security:
+      - Bearer: []
+      - X-API-Key: []
+      - X-API-Key: []
+      parameters:
+      - name: upload_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Upload Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                title: Response Cancel Document Processing V1 Document V2  Upload
+                  Id  Delete
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/schemas:
+    post:
+      tags:
+      - v1
+      - Schema Management
+      summary: Create User Schema V1
+      description: "Create a new user-defined graph schema.\n    \n    This endpoint\
+        \ allows users to define custom node types and relationships for their knowledge\
+        \ graph.\n    The schema will be validated and stored for use in future memory\
+        \ extractions.\n    \n    **Features:**\n    - Define custom node types with\
+        \ properties and validation rules\n    - Define custom relationship types\
+        \ with constraints\n    - Automatic validation against system schemas\n  \
+        \  - Support for different scopes (personal, workspace, organization)\n  \
+        \  \n    **Authentication Required**:\n    One of the following authentication\
+        \ methods must be used:\n    - Bearer token in `Authorization` header\n  \
+        \  - API Key in `X-API-Key` header\n    - Session token in `X-Session-Token`\
+        \ header\n    \n    **Required Headers**:\n    - Content-Type: application/json\n\
+        \    - X-Client-Type: (e.g., 'papr_plugin', 'browser_extension')"
+      operationId: create_user_schema_v1
+      security:
+      - X-API-Key: []
+      - Bearer: []
+      - X-API-Key: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserGraphSchema-Input'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SchemaResponse'
+        '201':
+          description: Schema created successfully
+          content:
+            application/json:
+              example:
+                success: true
+                data:
+                  id: schema_123456789
+                  name: E-commerce Schema
+                  description: Schema for e-commerce operations
+                  version: 1.0.0
+                  status: active
+                  node_types:
+                    Product:
+                      name: Product
+                      label: Product
+                      properties:
+                        name:
+                          type: string
+                          required: true
+                        price:
+                          type: float
+                          required: true
+                  relationship_types:
+                    PURCHASED:
+                      name: PURCHASED
+                      allowed_source_types:
+                      - Customer
+                      allowed_target_types:
+                      - Product
+                code: 201
+              schema:
+                $ref: '#/components/schemas/SchemaResponse'
+        '400':
+          description: Invalid schema definition
+          content:
+            application/json:
+              example:
+                success: false
+                error: Node type 'Memory' conflicts with system schema
+                code: 400
+              schema:
+                $ref: '#/components/schemas/SchemaResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              example:
+                success: false
+                error: Missing or invalid authentication
+                code: 401
+              schema:
+                $ref: '#/components/schemas/SchemaResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              example:
+                success: false
+                error: Internal server error
+                code: 500
+              schema:
+                $ref: '#/components/schemas/SchemaResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      x-openai-isConsequential: false
+    get:
+      tags:
+      - v1
+      - Schema Management
+      summary: List User Schemas V1
+      description: "List all schemas accessible to the authenticated user.\n    \n\
+        \    Returns schemas that the user owns or has read access to, including:\n\
+        \    - Personal schemas created by the user\n    - Workspace schemas shared\
+        \ within the user's workspace\n    - Organization schemas available to the\
+        \ user's organization\n    \n    **Authentication Required**:\n    One of\
+        \ the following authentication methods must be used:\n    - Bearer token in\
+        \ `Authorization` header\n    - API Key in `X-API-Key` header\n    - Session\
+        \ token in `X-Session-Token` header"
+      operationId: list_user_schemas_v1
+      security:
+      - X-API-Key: []
+      - Bearer: []
+      - X-API-Key: []
+      parameters:
+      - name: workspace_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Filter by workspace ID
+          title: Workspace Id
+        description: Filter by workspace ID
+      - name: status_filter
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          description: Filter by status (draft, active, deprecated, archived)
+          title: Status Filter
+        description: Filter by status (draft, active, deprecated, archived)
+      responses:
+        '200':
+          description: Schemas retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SchemaListResponse'
+              example:
+                success: true
+                data:
+                - id: schema_123
+                  name: E-commerce Schema
+                  description: Schema for e-commerce operations
+                  status: active
+                  created_at: '2024-01-17T17:30:45.123456Z'
+                code: 200
+                total: 1
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SchemaListResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SchemaListResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      x-openai-isConsequential: false
+  /v1/schemas/{schema_id}:
+    get:
+      tags:
+      - v1
+      - Schema Management
+      summary: Get User Schema V1
+      description: "Get a specific schema by ID.\n    \n    Returns the complete schema\
+        \ definition including node types, relationship types,\n    and metadata.\
+        \ User must have read access to the schema."
+      operationId: get_user_schema_v1
+      security:
+      - X-API-Key: []
+      - Bearer: []
+      - X-API-Key: []
+      parameters:
+      - name: schema_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Schema Id
+      responses:
+        '200':
+          description: Schema retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SchemaResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SchemaResponse'
+        '404':
+          description: Schema not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SchemaResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SchemaResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      x-openai-isConsequential: false
+    put:
+      tags:
+      - v1
+      - Schema Management
+      summary: Update User Schema V1
+      description: "Update an existing schema.\n    \n    Allows modification of schema\
+        \ properties, node types, and relationship types.\n    User must have write\
+        \ access to the schema. Updates create a new version\n    while preserving\
+        \ the existing data."
+      operationId: update_user_schema_v1
+      security:
+      - X-API-Key: []
+      - Bearer: []
+      - X-API-Key: []
+      parameters:
+      - name: schema_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Schema Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              title: Updates
+      responses:
+        '200':
+          description: Schema updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SchemaResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SchemaResponse'
+        '403':
+          description: Insufficient permissions
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SchemaResponse'
+        '404':
+          description: Schema not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SchemaResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SchemaResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      x-openai-isConsequential: false
+    delete:
+      tags:
+      - v1
+      - Schema Management
+      summary: Delete User Schema V1
+      description: "Delete a schema.\n    \n    Soft deletes the schema by marking\
+        \ it as archived. The schema data and\n    associated graph nodes/relationships\
+        \ are preserved for data integrity.\n    User must have write access to the\
+        \ schema."
+      operationId: delete_user_schema_v1
+      security:
+      - X-API-Key: []
+      - Bearer: []
+      - X-API-Key: []
+      parameters:
+      - name: schema_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Schema Id
+      responses:
+        '200':
+          description: Schema deleted successfully
+          content:
+            application/json:
+              schema: {}
+        '401':
+          description: Unauthorized
+        '403':
+          description: Insufficient permissions
+        '404':
+          description: Schema not found
+        '500':
+          description: Internal server error
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      x-openai-isConsequential: false
+  /v1/schemas/{schema_id}/activate:
+    post:
+      tags:
+      - v1
+      - Schema Management
+      summary: Activate User Schema V1
+      description: "Activate or deactivate a schema.\n    \n    Active schemas are\
+        \ used for memory extraction and graph generation.\n    Multiple schemas can\
+        \ be active simultaneously and will be merged during\n    the extraction process."
+      operationId: activate_user_schema_v1
+      security:
+      - X-API-Key: []
+      - Bearer: []
+      - X-API-Key: []
+      parameters:
+      - name: schema_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Schema Id
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: boolean
+              description: True to activate, False to deactivate
+              default: true
+              title: Activate
+      responses:
+        '200':
+          description: Schema activated successfully
+          content:
+            application/json:
+              schema: {}
+        '401':
+          description: Unauthorized
+        '403':
+          description: Insufficient permissions
+        '404':
+          description: Schema not found
+        '500':
+          description: Internal server error
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      x-openai-isConsequential: false
+  /v1/messages:
+    post:
+      tags:
+      - v1
+      - Messages
+      summary: Store Message
+      description: "Store a chat message and queue it for AI analysis and memory creation.\n\
+        \    \n    **Authentication Required**: Bearer token, API key, or session\
+        \ token\n    \n    **Processing Control**:\n    - Set `process_messages: true`\
+        \ (default) to enable full AI analysis and memory creation\n    - Set `process_messages:\
+        \ false` to store messages only without processing into memories\n    \n \
+        \   **Processing Flow** (when process_messages=true):\n    1. Message is immediately\
+        \ stored in PostMessage class\n    2. Background processing analyzes the message\
+        \ for memory-worthiness\n    3. If worthy, creates a memory with appropriate\
+        \ role-based categorization\n    4. Links the message to the created memory\n\
+        \    \n    **Role-Based Categories**:\n    - **User messages**: preference,\
+        \ task, goal, facts, context\n    - **Assistant messages**: skills, learning\n\
+        \    \n    **Session Management**:\n    - `sessionId` is required to group\
+        \ related messages\n    - Use the same `sessionId` for an entire conversation\n\
+        \    - Retrieve conversation history using GET /messages/sessions/{sessionId}"
+      operationId: store_message_v1_messages_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MessageRequest'
+        required: true
+      responses:
+        '200':
+          description: Message stored and queued for processing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '500':
+          description: Internal server error
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - X-API-Key: []
+      - Bearer: []
+      - X-API-Key: []
+  /v1/messages/sessions/{session_id}:
+    get:
+      tags:
+      - v1
+      - Messages
+      summary: Get Session History
+      description: "Retrieve message history for a specific conversation session.\n\
+        \    \n    **Authentication Required**: Bearer token, API key, or session\
+        \ token\n    \n    **Pagination**:\n    - Use `limit` and `skip` parameters\
+        \ for pagination\n    - Messages are returned in chronological order (oldest\
+        \ first)\n    - `total_count` indicates total messages in the session\n  \
+        \  \n    **Access Control**:\n    - Only returns messages for the authenticated\
+        \ user\n    - Workspace scoping is applied if available"
+      operationId: get_session_history_v1_messages_sessions__session_id__get
+      security:
+      - X-API-Key: []
+      - Bearer: []
+      - X-API-Key: []
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 100
+          minimum: 1
+          description: Maximum number of messages to return
+          default: 50
+          title: Limit
+        description: Maximum number of messages to return
+      - name: skip
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 0
+          description: Number of messages to skip for pagination
+          default: 0
+          title: Skip
+        description: Number of messages to skip for pagination
+      responses:
+        '200':
+          description: Message history retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageHistoryResponse'
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '404':
+          description: Session not found
+        '500':
+          description: Internal server error
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/messages/sessions/{session_id}/status:
+    get:
+      tags:
+      - v1
+      - Messages
+      summary: Get Session Status
+      description: "Get processing status for messages in a session.\n    \n    **Authentication\
+        \ Required**: Bearer token, API key, or session token\n    \n    **Status\
+        \ Information**:\n    - Total messages in session\n    - Processing status\
+        \ breakdown (queued, analyzing, completed, failed)\n    - Any messages with\
+        \ processing errors"
+      operationId: get_session_status_v1_messages_sessions__session_id__status_get
+      security:
+      - Bearer: []
+      - X-API-Key: []
+      - X-API-Key: []
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Session Id
+      responses:
+        '200':
+          description: Session processing status
+          content:
+            application/json:
+              schema: {}
+        '401':
+          description: Unauthorized
+        '404':
+          description: Session not found
+        '500':
+          description: Internal server error
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /v1/messages/sessions/{sessionId}/process:
+    post:
+      tags:
+      - v1
+      - Messages
+      summary: Process Session Messages
+      description: "Process all stored messages in a session that were previously\
+        \ stored with process_messages=false.\n    \n    **Authentication Required**:\
+        \ Bearer token, API key, or session token\n    \n    This endpoint allows\
+        \ you to retroactively process messages that were initially stored \n    without\
+        \ processing. Useful for:\n    - Processing messages after deciding you want\
+        \ them as memories\n    - Batch processing large conversation sessions\n \
+        \   - Re-processing sessions with updated AI models\n    \n    **Processing\
+        \ Behavior**:\n    - Only processes messages with status 'stored_only' or\
+        \ 'pending'\n    - Uses the same smart batch analysis (every 15 messages)\n\
+        \    - Respects existing memory creation pipeline"
+      operationId: process_session_messages_v1_messages_sessions__sessionId__process_post
+      security:
+      - Bearer: []
+      - X-API-Key: []
+      - X-API-Key: []
+      parameters:
+      - name: sessionId
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Sessionid
+      responses:
+        '200':
+          description: Session messages queued for processing
+          content:
+            application/json:
+              schema: {}
+        '400':
+          description: Bad request
+        '401':
+          description: Unauthorized
+        '404':
+          description: Session not found
+        '500':
+          description: Internal server error
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /login:
+    get:
+      tags:
+      - Authentication
+      summary: Login
+      description: "OAuth2 login endpoint. Initiates the OAuth2 authorization code\
+        \ flow.\n    \n    **Query Parameters:**\n    - `redirect_uri`: The URI to\
+        \ redirect to after authentication (required)\n    - `state`: A random string\
+        \ for CSRF protection (optional but recommended)\n    \n    **Flow:**\n  \
+        \  1. Client redirects user to this endpoint with `redirect_uri` and `state`\n\
+        \    2. This endpoint redirects user to Auth0 for authentication\n    3. After\
+        \ authentication, Auth0 redirects to `/callback` with authorization code\n\
+        \    4. `/callback` redirects back to the original `redirect_uri` with code\
+        \ and state\n    \n    **Example:**\n    ```\n    GET /login?redirect_uri=https://chat.openai.com&state=abc123\n\
+        \    ```"
+      operationId: oauth2_login
+      responses:
+        '200':
+          description: OAuth2 login initiated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '400':
+          description: Bad request - missing redirect URI
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /callback:
+    get:
+      tags:
+      - Authentication
+      summary: Callback
+      description: "OAuth2 callback endpoint. Processes the authorization code from\
+        \ Auth0.\n    \n    **Query Parameters:**\n    - `code`: Authorization code\
+        \ from Auth0 (required)\n    - `state`: State parameter for CSRF protection\
+        \ (required)\n    \n    **Flow:**\n    1. Auth0 redirects to this endpoint\
+        \ after successful authentication\n    2. This endpoint validates the authorization\
+        \ code and state\n    3. Redirects back to the original `redirect_uri` with\
+        \ code and state\n    4. Client can then exchange the code for tokens at `/token`\
+        \ endpoint\n    \n    **Security:**\n    - Validates state parameter to prevent\
+        \ CSRF attacks\n    - Checks authorization code expiration\n    - Cleans up\
+        \ session data after processing"
+      operationId: oauth2_callback
+      responses:
+        '200':
+          description: OAuth2 callback processed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CallbackResponse'
+        '400':
+          description: Bad request - missing code or state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /token:
+    post:
+      tags:
+      - Authentication
+      summary: Token
+      description: "OAuth2 token endpoint. Exchanges authorization code for access\
+        \ tokens.\n    \n    **Request Body (JSON or Form):**\n    - `grant_type`:\
+        \ OAuth2 grant type - \"authorization_code\" or \"refresh_token\" (required)\n\
+        \    - `code`: Authorization code from OAuth2 callback (required for authorization_code\
+        \ grant)\n    - `redirect_uri`: Redirect URI used in authorization (required\
+        \ for authorization_code grant)\n    - `client_type`: Client type - \"papr_plugin\"\
+        \ or \"browser_extension\" (optional, default: papr_plugin)\n    - `refresh_token`:\
+        \ Refresh token for token refresh (required for refresh_token grant)\n   \
+        \ \n    **Response:**\n    - `access_token`: OAuth2 access token for API authentication\n\
+        \    - `token_type`: Token type (Bearer)\n    - `expires_in`: Token expiration\
+        \ time in seconds\n    - `refresh_token`: Refresh token for getting new access\
+        \ tokens\n    - `scope`: OAuth2 scopes granted\n    - `user_id`: User ID from\
+        \ Auth0\n    \n    **Example Request:**\n    ```json\n    {\n        \"grant_type\"\
+        : \"authorization_code\",\n        \"code\": \"abc123...\",\n        \"redirect_uri\"\
+        : \"https://chat.openai.com\",\n        \"client_type\": \"papr_plugin\"\n\
+        \    }\n    ```"
+      operationId: oauth2_token
+      responses:
+        '200':
+          description: OAuth2 token exchange successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '400':
+          description: Bad request - invalid grant type or missing parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized - invalid authorization code
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '415':
+          description: Unsupported Media Type
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /me:
+    get:
+      tags:
+      - Authentication
+      summary: Me
+      description: "Get current user information. Validates authentication and returns\
+        \ user details.\n    \n    **Authentication Required:**\n    One of the following\
+        \ authentication methods must be used:\n    - Bearer token in `Authorization`\
+        \ header: `Authorization: Bearer <access_token>`\n    - Session token in `Authorization`\
+        \ header: `Authorization: Session <session_token>`\n    - API Key in `Authorization`\
+        \ header: `Authorization: APIKey <api_key>`\n    \n    **Headers:**\n    -\
+        \ `Authorization`: Authentication token (required)\n    - `X-Client-Type`:\
+        \ Client type for logging (optional, default: papr_plugin)\n    \n    **Response:**\n\
+        \    - `user_id`: Internal user ID\n    - `sessionToken`: Session token for\
+        \ API access (if available)\n    - `imageUrl`: User profile image URL (if\
+        \ available)\n    - `displayName`: User display name (if available)\n    -\
+        \ `email`: User email address (if available)\n    - `message`: Authentication\
+        \ status message\n    \n    **Example:**\n    ```\n    GET /me\n    Authorization:\
+        \ Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...\n    X-Client-Type: papr_plugin\n\
+        \    ```"
+      operationId: get_user_info
+      responses:
+        '200':
+          description: User information retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserInfoResponse'
+        '401':
+          description: Unauthorized - invalid authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /logout:
+    get:
+      tags:
+      - Authentication
+      summary: Logout
+      description: "OAuth2 logout endpoint. Logs out the user from Auth0 and redirects\
+        \ to specified URL.\n    \n    **Query Parameters:**\n    - `returnTo`: URL\
+        \ to redirect to after logout (optional, default: extension logout page)\n\
+        \    - `client_type`: Client type for determining Auth0 client ID (optional,\
+        \ default: papr_plugin)\n    \n    **Flow:**\n    1. Client redirects user\
+        \ to this endpoint\n    2. This endpoint redirects to Auth0 logout URL\n \
+        \   3. Auth0 logs out the user and redirects to the specified return URL\n\
+        \    \n    **Example:**\n    ```\n    GET /logout?returnTo=https://chat.openai.com\n\
+        \    ```\n    \n    **Note:** This endpoint initiates the logout process.\
+        \ The actual logout completion happens on Auth0's side."
+      operationId: oauth2_logout
+      responses:
+        '200':
+          description: Logout initiated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LogoutResponse'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+components:
+  schemas:
+    AddMemoryItem:
+      properties:
+        memoryId:
+          type: string
+          title: Memoryid
+        createdAt:
+          type: string
+          format: date-time
+          title: Createdat
+        objectId:
+          type: string
+          title: Objectid
+        memoryChunkIds:
+          items:
+            type: string
+          type: array
+          title: Memorychunkids
+      additionalProperties: false
+      type: object
+      required:
+      - memoryId
+      - createdAt
+      - objectId
+      title: AddMemoryItem
+      description: Response model for a single memory item in add_memory response
+    AddMemoryRequest:
+      properties:
+        content:
+          type: string
+          title: Content
+          description: The content of the memory item you want to add to memory
+        type:
+          $ref: '#/components/schemas/MemoryType'
+        metadata:
+          anyOf:
+          - $ref: '#/components/schemas/MemoryMetadata'
+          - type: 'null'
+          description: Metadata used in Neo4J and Pinecone for a memory item. Include
+            role and category here.
+        context:
+          anyOf:
+          - items:
+              $ref: '#/components/schemas/ContextItem'
+            type: array
+          - type: 'null'
+          title: Context
+          description: Context can be conversation history or any relevant context
+            for a memory item
+        relationships_json:
+          anyOf:
+          - items:
+              $ref: '#/components/schemas/RelationshipItem'
+            type: array
+          - type: 'null'
+          title: Relationships Json
+          description: Array of relationships that we can use in Graph DB (neo4J)
+        organization_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Organization Id
+          description: Optional organization ID for multi-tenant memory scoping. When
+            provided, memory is associated with this organization.
+        namespace_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Namespace Id
+          description: Optional namespace ID for multi-tenant memory scoping. When
+            provided, memory is associated with this namespace.
+        schema_ids:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Schema Ids
+          description: Optional list of user-defined schema IDs to use for graph extraction.
+            If provided, only these schemas (plus system schema) will be used for
+            LLM graph generation. If not provided, system will automatically select
+            relevant schemas based on memory content.
+        simple_schema_mode:
+          type: boolean
+          title: Simple Schema Mode
+          description: 'If true, uses simple schema mode: system schema + ONE most
+            relevant user schema. This ensures better consistency between add/search
+            operations and reduces graph extraction complexity. Recommended for production
+            use.'
+          default: false
+        graph_override:
+          anyOf:
+          - $ref: '#/components/schemas/GraphOverrideSpecification'
+          - type: 'null'
+          description: "**OPTIONAL**: Override automatic graph creation with your\
+            \ own exact nodes and relationships. **\u26A1 AUTOMATIC BY DEFAULT**:\
+            \ If not provided, the system automatically extracts and creates a knowledge\
+            \ graph from your memory content using AI - no action required! **\U0001F3AF\
+            \ USE WHEN**: You want precise control over the graph structure, have\
+            \ pre-structured data, or want to bypass AI extraction for performance.\
+            \ **\U0001F4CB VALIDATION**: All nodes and relationships must comply with\
+            \ your UserGraphSchema definitions."
+      additionalProperties: false
+      type: object
+      required:
+      - content
+      - type
+      title: AddMemoryRequest
+      description: Request model for adding a new memory
+      example:
+        content: Meeting with John Smith from Acme Corp about the Q4 project timeline
+        context:
+        - content: Let's discuss the Q4 project timeline with John
+          role: user
+        - content: I'll help you prepare for the timeline discussion. What are your
+            key milestones?
+          role: assistant
+        graph_override:
+          nodes:
+          - id: person_john_smith
+            label: Person
+            properties:
+              name: John Smith
+              role: Project Manager
+              description: Senior PM at Acme Corp
+          - id: company_acme_corp
+            label: Company
+            properties:
+              name: Acme Corp
+              description: Client company for Q4 project
+          relationships:
+          - properties:
+              role: Project Manager
+            relationship_type: WORKS_FOR
+            source_node_id: person_john_smith
+            target_node_id: company_acme_corp
+        metadata:
+          conversationId: conv-123
+          createdAt: '2024-10-04T10:00:00Z'
+          emoji_tags: "\U0001F4C5,\U0001F465,\U0001F4CB"
+          emotion_tags: focused, productive
+          external_user_id: external_user_123
+          external_user_read_access:
+          - external_user_123
+          - external_user_789
+          external_user_write_access:
+          - external_user_123
+          hierarchical_structures: Business/Meetings/Project Planning
+          location: Conference Room A
+          sourceUrl: https://calendar.example.com/meeting/123
+          topics:
+          - product
+          - planning
+        type: text
+    AddMemoryResponse:
+      properties:
+        code:
+          type: integer
+          title: Code
+          description: HTTP status code
+          default: 200
+        status:
+          type: string
+          title: Status
+          description: '''success'' or ''error'''
+          default: success
+        data:
+          anyOf:
+          - items:
+              $ref: '#/components/schemas/AddMemoryItem'
+            type: array
+          - type: 'null'
+          title: Data
+          description: List of memory items if successful
+        error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error
+          description: Error message if failed
+        details:
+          anyOf:
+          - {}
+          - type: 'null'
+          title: Details
+          description: Additional error details or context
+      additionalProperties: false
+      type: object
+      title: AddMemoryResponse
+      description: Unified response model for add_memory API endpoint (success or
+        error).
+    BatchFeedbackRequest:
+      properties:
+        feedback_items:
+          items:
+            $ref: '#/components/schemas/FeedbackRequest'
+          type: array
+          maxItems: 100
+          minItems: 1
+          title: Feedback Items
+          description: List of feedback items to submit
+        session_context:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Session Context
+          description: Session-level context for batch feedback
+      type: object
+      required:
+      - feedback_items
+      title: BatchFeedbackRequest
+      description: Request model for submitting multiple feedback items
+    BatchFeedbackResponse:
+      properties:
+        code:
+          type: integer
+          title: Code
+          description: HTTP status code
+        status:
+          type: string
+          title: Status
+          description: '''success'' or ''error'''
+        feedback_ids:
+          items:
+            type: string
+          type: array
+          title: Feedback Ids
+          description: List of feedback IDs
+        successful_count:
+          type: integer
+          title: Successful Count
+          description: Number of successfully processed feedback items
+          default: 0
+        failed_count:
+          type: integer
+          title: Failed Count
+          description: Number of failed feedback items
+          default: 0
+        errors:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Errors
+          description: List of error details
+        message:
+          type: string
+          title: Message
+          description: Human-readable message
+        error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error
+          description: Error message if status is 'error'
+      type: object
+      required:
+      - code
+      - status
+      - message
+      title: BatchFeedbackResponse
+      description: Response model for batch feedback submission
+    BatchMemoryError:
+      properties:
+        index:
+          type: integer
+          title: Index
+        error:
+          type: string
+          title: Error
+        code:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Code
+        status:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Status
+        details:
+          anyOf:
+          - {}
+          - type: 'null'
+          title: Details
+      additionalProperties: false
+      type: object
+      required:
+      - index
+      - error
+      title: BatchMemoryError
+    BatchMemoryRequest:
+      properties:
+        user_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: User Id
+          description: Internal user ID for all memories in the batch. If not provided,
+            developer's user ID will be used.
+        external_user_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: External User Id
+          description: External user ID for all memories in the batch. If provided
+            and user_id is not, will be resolved to internal user ID.
+        organization_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Organization Id
+          description: Optional organization ID for multi-tenant batch memory scoping.
+            When provided, all memories in the batch are associated with this organization.
+        namespace_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Namespace Id
+          description: Optional namespace ID for multi-tenant batch memory scoping.
+            When provided, all memories in the batch are associated with this namespace.
+        memories:
+          items:
+            $ref: '#/components/schemas/AddMemoryRequest'
+          type: array
+          maxItems: 50
+          minItems: 1
+          title: Memories
+          description: List of memory items to add in batch
+        batch_size:
+          anyOf:
+          - type: integer
+            maximum: 50.0
+            minimum: 1.0
+          - type: 'null'
+          title: Batch Size
+          description: Number of items to process in parallel
+          default: 10
+        webhook_url:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Webhook Url
+          description: Optional webhook URL to notify when batch processing is complete.
+            The webhook will receive a POST request with batch completion details.
+        webhook_secret:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Webhook Secret
+          description: Optional secret key for webhook authentication. If provided,
+            will be included in the webhook request headers as 'X-Webhook-Secret'.
+      type: object
+      required:
+      - memories
+      title: BatchMemoryRequest
+      description: Request model for batch adding memories
+      example:
+        batch_size: 10
+        external_user_id: external_user_abcde
+        memories:
+        - content: Meeting notes from the product planning session
+          metadata:
+            createdAt: '2024-03-21T10:00:00Z'
+            emoji tags: "\U0001F4CA,\U0001F4A1,\U0001F4DD"
+            emotion tags: focused, productive
+            hierarchical structures: Business/Planning/Product
+            topics: product, planning
+          type: text
+        - content: Follow-up tasks from the planning meeting
+          metadata:
+            createdAt: '2024-03-21T11:00:00Z'
+            emoji tags: "\u2705,\U0001F4CB"
+            emotion tags: organized
+            hierarchical structures: Business/Tasks/Planning
+            topics: tasks, planning
+          type: text
+        user_id: internal_user_id_12345
+    BatchMemoryResponse:
+      properties:
+        code:
+          type: integer
+          title: Code
+          description: HTTP status code for the batch operation
+          default: 200
+        status:
+          type: string
+          title: Status
+          description: '''success'', ''partial'', or ''error'''
+          default: success
+        message:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Message
+          description: Human-readable status message
+        error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error
+          description: Batch-level error message, if any
+        details:
+          anyOf:
+          - {}
+          - type: 'null'
+          title: Details
+          description: Additional error details or context
+        successful:
+          items:
+            $ref: '#/components/schemas/AddMemoryResponse'
+          type: array
+          title: Successful
+          description: List of successful add responses
+        errors:
+          items:
+            $ref: '#/components/schemas/BatchMemoryError'
+          type: array
+          title: Errors
+          description: List of errors for failed items
+        total_processed:
+          type: integer
+          title: Total Processed
+          default: 0
+        total_successful:
+          type: integer
+          title: Total Successful
+          default: 0
+        total_failed:
+          type: integer
+          title: Total Failed
+          default: 0
+        total_content_size:
+          type: integer
+          title: Total Content Size
+          default: 0
+        total_storage_size:
+          type: integer
+          title: Total Storage Size
+          default: 0
+      additionalProperties: false
+      type: object
+      title: BatchMemoryResponse
+    BatchUserCreateRequest:
+      properties:
+        users:
+          items:
+            $ref: '#/components/schemas/CreateUserRequest'
+          type: array
+          title: Users
+      type: object
+      required:
+      - users
+      title: BatchUserCreateRequest
+    Body_upload_document_v2_v1_document_v2_post:
+      properties:
+        file:
+          type: string
+          format: binary
+          title: File
+        metadata:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Metadata
+        preferred_provider:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Preferred Provider
+        namespace:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Namespace
+        webhook_url:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Webhook Url
+        webhook_secret:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Webhook Secret
+      type: object
+      required:
+      - file
+      title: Body_upload_document_v2_v1_document_v2_post
+    CallbackResponse:
+      properties:
+        message:
+          type: string
+          title: Message
+          description: Callback status message
+          default: Authorization successful
+        code:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Code
+          description: Authorization code
+        state:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: State
+          description: State parameter for security
+      type: object
+      title: CallbackResponse
+      description: Response model for OAuth2 callback endpoint
+    ContextItem:
+      properties:
+        role:
+          type: string
+          enum:
+          - user
+          - assistant
+          title: Role
+        content:
+          type: string
+          title: Content
+      additionalProperties: false
+      type: object
+      required:
+      - role
+      - content
+      title: ContextItem
+      description: Context item for memory request
+    CreateUserRequest:
+      properties:
+        email:
+          anyOf:
+          - type: string
+            format: email
+          - type: 'null'
+          title: Email
+        external_id:
+          type: string
+          title: External Id
+        metadata:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Metadata
+        type:
+          $ref: '#/components/schemas/UserType'
+          default: developerUser
+      type: object
+      required:
+      - external_id
+      title: CreateUserRequest
+      description: Request model for creating a user
+      example:
+        email: user@example.com
+        external_id: user123
+        metadata:
+          name: John Doe
+          preferences:
+            theme: dark
+        type: developerUser
+    DeleteMemoryResponse:
+      properties:
+        code:
+          type: integer
+          title: Code
+          description: HTTP status code
+          default: 200
+        status:
+          type: string
+          title: Status
+          description: '''success'' or ''error'''
+          default: success
+        message:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Message
+        error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error
+        memoryId:
+          type: string
+          title: Memoryid
+          default: ''
+        objectId:
+          type: string
+          title: Objectid
+          default: ''
+        deletion_status:
+          anyOf:
+          - $ref: '#/components/schemas/DeletionStatus'
+          - type: 'null'
+        details:
+          anyOf:
+          - {}
+          - type: 'null'
+          title: Details
+      additionalProperties: false
+      type: object
+      title: DeleteMemoryResponse
+    DeleteUserResponse:
+      properties:
+        code:
+          type: integer
+          title: Code
+          description: HTTP status code
+        status:
+          type: string
+          title: Status
+          description: '''success'' or ''error'''
+        user_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: User Id
+          description: ID of the user attempted to delete
+        message:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Message
+          description: Success or error message
+        error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error
+          description: Error message if failed
+        details:
+          anyOf:
+          - {}
+          - type: 'null'
+          title: Details
+          description: Additional error details or context
+      type: object
+      required:
+      - code
+      - status
+      title: DeleteUserResponse
+      example:
+        code: 200
+        message: User and association deleted successfully
+        status: success
+        user_id: abc123
+    DeletionStatus:
+      properties:
+        pinecone:
+          type: boolean
+          title: Pinecone
+          default: false
+        neo4j:
+          type: boolean
+          title: Neo4J
+          default: false
+        parse:
+          type: boolean
+          title: Parse
+          default: false
+        qdrant:
+          type: boolean
+          title: Qdrant
+          default: false
+      type: object
+      title: DeletionStatus
+    DocumentUploadResponse:
+      properties:
+        code:
+          type: integer
+          title: Code
+          description: HTTP status code
+          default: 200
+        status:
+          type: string
+          title: Status
+          description: '''success'', ''processing'', ''error'', etc.'
+          default: success
+        message:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Message
+          description: Human-readable status message
+        error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error
+          description: Error message if failed
+        details:
+          anyOf:
+          - {}
+          - type: 'null'
+          title: Details
+          description: Additional error details or context
+        document_status:
+          $ref: '#/components/schemas/DocumentUploadStatus'
+          description: Status and progress of the document upload
+        memory_items:
+          items:
+            $ref: '#/components/schemas/AddMemoryItem'
+          type: array
+          title: Memory Items
+          description: List of memory items created from the document
+        memories:
+          anyOf:
+          - items:
+              $ref: '#/components/schemas/AddMemoryItem'
+            type: array
+          - type: 'null'
+          title: Memories
+          description: For backward compatibility
+      additionalProperties: false
+      type: object
+      required:
+      - document_status
+      title: DocumentUploadResponse
+    DocumentUploadStatus:
+      properties:
+        progress:
+          type: number
+          title: Progress
+          description: 0.0 to 1.0 for percentage
+        current_page:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Current Page
+        total_pages:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Total Pages
+        current_filename:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Current Filename
+        upload_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Upload Id
+        status_type:
+          anyOf:
+          - $ref: '#/components/schemas/DocumentUploadStatusType'
+          - type: 'null'
+          description: Processing status type
+        error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error
+          description: Error message if failed
+      additionalProperties: false
+      type: object
+      required:
+      - progress
+      title: DocumentUploadStatus
+    DocumentUploadStatusType:
+      type: string
+      enum:
+      - processing
+      - completed
+      - failed
+      - not_found
+      - queued
+      - cancelled
+      title: DocumentUploadStatusType
+    ErrorResponse:
+      properties:
+        error:
+          type: string
+          title: Error
+          description: Error message
+        detail:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Detail
+          description: Additional error details
+        code:
+          type: integer
+          title: Code
+          description: HTTP error code
+          default: 400
+      type: object
+      required:
+      - error
+      title: ErrorResponse
+      description: Generic error response model
+    FeedbackData:
+      properties:
+        userMessage:
+          anyOf:
+          - $ref: '#/components/schemas/ParsePointer'
+          - type: 'null'
+        assistantMessage:
+          anyOf:
+          - $ref: '#/components/schemas/ParsePointer'
+          - type: 'null'
+        feedbackType:
+          $ref: '#/components/schemas/FeedbackType'
+        feedbackValue:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Feedbackvalue
+        feedbackScore:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Feedbackscore
+        feedbackText:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Feedbacktext
+        feedbackSource:
+          $ref: '#/components/schemas/FeedbackSource'
+        citedMemoryIds:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Citedmemoryids
+        citedNodeIds:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Citednodeids
+        feedbackProcessed:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Feedbackprocessed
+        feedbackImpact:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Feedbackimpact
+      type: object
+      required:
+      - feedbackType
+      - feedbackSource
+      title: FeedbackData
+      description: Developer-friendly feedback data model for requests
+    FeedbackRequest:
+      properties:
+        search_id:
+          type: string
+          title: Search Id
+          description: The search_id from SearchResponse that this feedback relates
+            to
+        feedbackData:
+          $ref: '#/components/schemas/FeedbackData'
+          description: The feedback data containing all feedback information
+        user_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: User Id
+          description: Internal user ID (if not provided, will be resolved from authentication)
+        external_user_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: External User Id
+          description: External user ID for developer API keys acting on behalf of
+            end users
+        organization_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Organization Id
+          description: Optional organization ID for multi-tenant feedback scoping.
+            When provided, feedback is scoped to this organization.
+        namespace_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Namespace Id
+          description: Optional namespace ID for multi-tenant feedback scoping. When
+            provided, feedback is scoped to this namespace.
+      type: object
+      required:
+      - search_id
+      - feedbackData
+      title: FeedbackRequest
+      description: Request model for submitting feedback on search results
+      example:
+        external_user_id: dev_api_key_123
+        feedbackData:
+          assistantMessage:
+            __type: Pointer
+            className: PostMessage
+            objectId: abc123def456
+          citedMemoryIds:
+          - mem_123
+          - mem_456
+          citedNodeIds:
+          - node_123
+          - node_456
+          feedbackImpact: positive
+          feedbackProcessed: true
+          feedbackScore: 1
+          feedbackSource: inline
+          feedbackText: This answer was very helpful and accurate
+          feedbackType: thumbs_up
+          feedbackValue: helpful
+          userMessage:
+            __type: Pointer
+            className: PostMessage
+            objectId: abc123def456
+        search_id: abc123def456
+        user_id: abc123def456
+    FeedbackResponse:
+      properties:
+        code:
+          type: integer
+          title: Code
+          description: HTTP status code
+        status:
+          type: string
+          title: Status
+          description: '''success'' or ''error'''
+        feedback_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Feedback Id
+          description: Unique feedback ID
+        message:
+          type: string
+          title: Message
+          description: Human-readable message
+        error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error
+          description: Error message if status is 'error'
+        details:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Details
+          description: Additional error details
+      type: object
+      required:
+      - code
+      - status
+      - message
+      title: FeedbackResponse
+      description: Response model for feedback submission
+    FeedbackSource:
+      type: string
+      enum:
+      - inline
+      - post_query
+      - session_end
+      - memory_citation
+      - answer_panel
+      title: FeedbackSource
+      description: Where the feedback was provided from
+    FeedbackType:
+      type: string
+      enum:
+      - thumbs_up
+      - thumbs_down
+      - rating
+      - correction
+      - report
+      - copy_action
+      - save_action
+      - create_document
+      - memory_relevance
+      - answer_quality
+      title: FeedbackType
+      description: Types of feedback that can be provided
+    GraphOverrideNode:
+      properties:
+        id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Id
+          description: Optional node ID. If not provided, will be auto-generated using
+            UUID4.
+        label:
+          type: string
+          title: Label
+          description: Node label/type. Must match a node type from your UserGraphSchema
+            or system schema (Memory, Person, Company, Project, Task, Insight, Meeting,
+            Opportunity, Code).
+        properties:
+          additionalProperties: true
+          type: object
+          title: Properties
+          description: Node properties as key-value pairs. Must include all required
+            properties defined in your schema.
+      additionalProperties: false
+      type: object
+      required:
+      - label
+      - properties
+      title: GraphOverrideNode
+      description: Developer-specified node for graph override
+    GraphOverrideRelationship:
+      properties:
+        source_node_id:
+          type: string
+          title: Source Node Id
+          description: ID of the source node. Can reference nodes defined in this
+            request or existing nodes in your graph.
+        target_node_id:
+          type: string
+          title: Target Node Id
+          description: ID of the target node. Can reference nodes defined in this
+            request or existing nodes in your graph.
+        relationship_type:
+          type: string
+          title: Relationship Type
+          description: Relationship type. Must match a relationship type from your
+            UserGraphSchema or system schema (e.g., WORKS_FOR, HAS_PARTICIPANT, DISCUSSES).
+        properties:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Properties
+          description: Optional relationship properties as key-value pairs.
+      additionalProperties: false
+      type: object
+      required:
+      - source_node_id
+      - target_node_id
+      - relationship_type
+      title: GraphOverrideRelationship
+      description: Developer-specified relationship for graph override
+    GraphOverrideSpecification:
+      properties:
+        nodes:
+          items:
+            $ref: '#/components/schemas/GraphOverrideNode'
+          type: array
+          minItems: 1
+          title: Nodes
+          description: List of nodes to create in the knowledge graph.
+        relationships:
+          items:
+            $ref: '#/components/schemas/GraphOverrideRelationship'
+          type: array
+          title: Relationships
+          description: List of relationships to create between nodes.
+      additionalProperties: false
+      type: object
+      required:
+      - nodes
+      title: GraphOverrideSpecification
+      description: Complete graph override specification provided by developer
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    LoginResponse:
+      properties:
+        message:
+          type: string
+          title: Message
+          default: Redirecting to Auth0 for authentication
+        redirect_url:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Redirect Url
+      type: object
+      title: LoginResponse
+      description: Response model for OAuth2 login endpoint
+    LogoutResponse:
+      properties:
+        message:
+          type: string
+          title: Message
+          description: Logout status message
+          default: Redirecting to logout
+        logout_url:
+          type: string
+          title: Logout Url
+          description: URL to complete logout process
+      type: object
+      required:
+      - logout_url
+      title: LogoutResponse
+      description: Response model for logout endpoint
+    Memory:
+      properties:
+        id:
+          type: string
+          title: Id
+        content:
+          type: string
+          title: Content
+        title:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Title
+        type:
+          type: string
+          title: Type
+        metadata:
+          anyOf:
+          - type: string
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Metadata
+        external_user_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: External User Id
+        customMetadata:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Custommetadata
+        source_type:
+          type: string
+          title: Source Type
+          default: papr
+        context:
+          anyOf:
+          - items:
+              $ref: '#/components/schemas/ContextItem'
+            type: array
+          - type: 'null'
+          title: Context
+        location:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Location
+        tags:
+          items:
+            type: string
+          type: array
+          title: Tags
+        hierarchical_structures:
+          type: string
+          title: Hierarchical Structures
+          default: ''
+        source_url:
+          type: string
+          title: Source Url
+          default: ''
+        conversation_id:
+          type: string
+          title: Conversation Id
+          default: ''
+        topics:
+          items:
+            type: string
+          type: array
+          title: Topics
+        steps:
+          items:
+            type: string
+          type: array
+          title: Steps
+        current_step:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Current Step
+        role:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Role
+          description: Role that generated this memory (user or assistant)
+        category:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Category
+          description: Memory category based on role
+        created_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Created At
+        updated_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Updated At
+        acl:
+          additionalProperties:
+            additionalProperties:
+              type: boolean
+            type: object
+          type: object
+          title: Acl
+        user_id:
+          type: string
+          title: User Id
+        workspace_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Workspace Id
+        organization_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Organization Id
+          description: Organization ID that owns this memory
+        namespace_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Namespace Id
+          description: Namespace ID this memory belongs to
+        source_document_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Source Document Id
+        source_message_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Source Message Id
+        page_number:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Page Number
+        total_pages:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Total Pages
+        file_url:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: File Url
+        filename:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Filename
+        page:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Page
+        external_user_read_access:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: External User Read Access
+        external_user_write_access:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: External User Write Access
+        user_read_access:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: User Read Access
+        user_write_access:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: User Write Access
+        workspace_read_access:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Workspace Read Access
+        workspace_write_access:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Workspace Write Access
+        role_read_access:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Role Read Access
+        role_write_access:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Role Write Access
+      additionalProperties: true
+      type: object
+      required:
+      - id
+      - content
+      - type
+      - acl
+      - user_id
+      title: Memory
+      description: A memory item in the knowledge base
+    MemoryMetadata:
+      properties:
+        hierarchical_structures:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Hierarchical Structures
+          description: Hierarchical structures to enable navigation from broad topics
+            to specific ones
+        createdAt:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Createdat
+          description: ISO datetime when the memory was created
+        location:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Location
+        topics:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Topics
+        emoji tags:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Emoji Tags
+        emotion tags:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Emotion Tags
+        conversationId:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Conversationid
+        sourceUrl:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Sourceurl
+        role:
+          anyOf:
+          - $ref: '#/components/schemas/MessageRole'
+          - type: 'null'
+          description: Role that generated this memory (user or assistant)
+        category:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Category
+          description: 'Memory category based on role. For users: preference, task,
+            goal, facts, context. For assistants: skills, learning.'
+        user_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: User Id
+        external_user_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: External User Id
+        external_user_read_access:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: External User Read Access
+        external_user_write_access:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: External User Write Access
+        user_read_access:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: User Read Access
+        user_write_access:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: User Write Access
+        workspace_read_access:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Workspace Read Access
+        workspace_write_access:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Workspace Write Access
+        role_read_access:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Role Read Access
+        role_write_access:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Role Write Access
+        pageId:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Pageid
+        sourceType:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Sourcetype
+        workspace_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Workspace Id
+        sessionId:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Sessionid
+        post:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Post
+        userMessage:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Usermessage
+        assistantMessage:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Assistantmessage
+        relatedGoals:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Relatedgoals
+        relatedUseCases:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Relatedusecases
+        relatedSteps:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Relatedsteps
+        goalClassificationScores:
+          anyOf:
+          - items:
+              type: number
+            type: array
+          - type: 'null'
+          title: Goalclassificationscores
+        useCaseClassificationScores:
+          anyOf:
+          - items:
+              type: number
+            type: array
+          - type: 'null'
+          title: Usecaseclassificationscores
+        stepClassificationScores:
+          anyOf:
+          - items:
+              type: number
+            type: array
+          - type: 'null'
+          title: Stepclassificationscores
+        customMetadata:
+          anyOf:
+          - additionalProperties:
+              anyOf:
+              - type: string
+              - type: integer
+              - type: number
+              - type: boolean
+              - items:
+                  type: string
+                type: array
+            type: object
+          - type: 'null'
+          title: Custommetadata
+          description: Optional object for arbitrary custom metadata fields. Only
+            string, number, boolean, or list of strings allowed. Nested dicts are
+            not allowed.
+      additionalProperties: true
+      type: object
+      title: MemoryMetadata
+      description: Metadata for memory request
+    MemoryType:
+      type: string
+      enum:
+      - text
+      - code_snippet
+      - document
+      title: MemoryType
+      description: Valid memory types
+    MessageHistoryResponse:
+      properties:
+        sessionId:
+          type: string
+          title: Sessionid
+          description: Session ID of the conversation
+        messages:
+          items:
+            $ref: '#/components/schemas/MessageResponse'
+          type: array
+          title: Messages
+          description: List of messages in chronological order
+        total_count:
+          type: integer
+          title: Total Count
+          description: Total number of messages in the session
+      type: object
+      required:
+      - sessionId
+      - messages
+      - total_count
+      title: MessageHistoryResponse
+      description: Response model for retrieving message history
+      example:
+        messages:
+        - content: Can you help me plan the Q4 product roadmap?
+          createdAt: '2024-01-15T10:30:00Z'
+          objectId: msg_abc123
+          processing_status: completed
+          role: user
+          sessionId: session_123
+        - content: I'd be happy to help you plan your Q4 roadmap. Let's start by identifying
+            your key objectives.
+          createdAt: '2024-01-15T10:31:00Z'
+          objectId: msg_def456
+          processing_status: completed
+          role: assistant
+          sessionId: session_123
+        sessionId: session_123
+        total_count: 2
+    MessageRequest:
+      properties:
+        content:
+          anyOf:
+          - type: string
+          - items:
+              additionalProperties: true
+              type: object
+            type: array
+          title: Content
+          description: The content of the chat message - can be a simple string or
+            structured content objects
+        role:
+          $ref: '#/components/schemas/MessageRole'
+          description: Role of the message sender (user or assistant)
+        sessionId:
+          type: string
+          title: Sessionid
+          description: Session ID to group related messages in a conversation
+        metadata:
+          anyOf:
+          - $ref: '#/components/schemas/MemoryMetadata'
+          - type: 'null'
+          description: Optional metadata for the message
+        process_messages:
+          type: boolean
+          title: Process Messages
+          description: Whether to process messages into memories (true) or just store
+            them (false). Default is true.
+          default: true
+        organization_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Organization Id
+          description: Optional organization ID for multi-tenant message scoping
+        namespace_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Namespace Id
+          description: Optional namespace ID for multi-tenant message scoping
+      type: object
+      required:
+      - content
+      - role
+      - sessionId
+      title: MessageRequest
+      description: Request model for storing a chat message
+      examples:
+      - content: Can you help me plan the Q4 product roadmap?
+        metadata:
+          location: Office
+          topics:
+          - product
+          - planning
+          - roadmap
+        process_messages: true
+        role: user
+        sessionId: session_123
+      - content:
+        - text: Here's a story about a character trapped in an emerald egg...
+          type: text
+        metadata:
+          location: Home
+          topics:
+          - creative
+          - storytelling
+        process_messages: true
+        role: user
+        sessionId: session_456
+    MessageResponse:
+      properties:
+        objectId:
+          type: string
+          title: Objectid
+          description: Parse Server objectId of the stored message
+        sessionId:
+          type: string
+          title: Sessionid
+          description: Session ID of the conversation
+        role:
+          $ref: '#/components/schemas/MessageRole'
+        content:
+          anyOf:
+          - type: string
+          - items:
+              additionalProperties: true
+              type: object
+            type: array
+          title: Content
+          description: Content of the message - can be a simple string or structured
+            content objects
+        createdAt:
+          type: string
+          format: date-time
+          title: Createdat
+          description: When the message was created
+        processing_status:
+          type: string
+          title: Processing Status
+          description: Status of background processing (queued, analyzing, completed,
+            failed)
+          default: queued
+      type: object
+      required:
+      - objectId
+      - sessionId
+      - role
+      - content
+      - createdAt
+      title: MessageResponse
+      description: Response model for message storage
+      example:
+        content: Can you help me plan the Q4 product roadmap?
+        createdAt: '2024-01-15T10:30:00Z'
+        objectId: msg_abc123
+        processing_status: queued
+        role: user
+        sessionId: session_123
+    MessageRole:
+      type: string
+      enum:
+      - user
+      - assistant
+      title: MessageRole
+      description: Role of the message sender
+    Node:
+      properties:
+        label:
+          type: string
+          title: Label
+          description: Node type label - can be system type (Memory, Person, etc.)
+            or custom type from UserGraphSchema
+        properties:
+          additionalProperties: true
+          type: object
+          title: Properties
+          description: Node properties - structure depends on node type and schema
+        schema_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Schema Id
+          description: Reference to UserGraphSchema ID for custom nodes. Use GET /v1/schemas/{schema_id}
+            to get full schema definition. Null for system nodes.
+      type: object
+      required:
+      - label
+      - properties
+      title: Node
+      description: Public-facing node structure - supports both system and custom
+        schema nodes
+      examples:
+      - name: System Node Example
+        summary: Standard system node (Person)
+        value:
+          label: Person
+          properties:
+            id: person-123
+            name: John Doe
+            role: Manager
+            user_id: user-456
+      - name: Custom Node Example
+        summary: Custom schema node (Developer)
+        value:
+          label: Developer
+          properties:
+            id: dev-789
+            name: Rachel Green
+            expertise:
+            - React
+            - TypeScript
+            years_experience: 5
+            user_id: user-456
+          schema_id: schema_abc123
+    ParsePointer:
+      properties:
+        objectId:
+          type: string
+          title: Objectid
+        __type:
+          type: string
+          title: Type
+          default: Pointer
+        className:
+          type: string
+          title: Classname
+      additionalProperties: false
+      type: object
+      required:
+      - objectId
+      - className
+      title: ParsePointer
+      description: A pointer to a Parse object
+    PropertyDefinition:
+      properties:
+        type:
+          $ref: '#/components/schemas/PropertyType'
+        required:
+          type: boolean
+          title: Required
+          default: false
+        default:
+          anyOf:
+          - {}
+          - type: 'null'
+          title: Default
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+        min_length:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Min Length
+        max_length:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Max Length
+        min_value:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Min Value
+        max_value:
+          anyOf:
+          - type: number
+          - type: 'null'
+          title: Max Value
+        enum_values:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Enum Values
+        pattern:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Pattern
+      additionalProperties: false
+      type: object
+      required:
+      - type
+      title: PropertyDefinition
+      description: Property definition for nodes/relationships
+    PropertyType:
+      type: string
+      enum:
+      - string
+      - integer
+      - float
+      - boolean
+      - array
+      - datetime
+      - object
+      title: PropertyType
+    RelationshipItem:
+      properties:
+        relation_type:
+          type: string
+          title: Relation Type
+        related_item_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Related Item Id
+        relationship_type:
+          anyOf:
+          - $ref: '#/components/schemas/RelationshipType'
+          - type: 'null'
+        related_item_type:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Related Item Type
+          description: Legacy field - not used in processing
+          default: Memory
+        metadata:
+          additionalProperties: true
+          type: object
+          title: Metadata
+      additionalProperties: false
+      type: object
+      required:
+      - relation_type
+      title: RelationshipItem
+      description: Relationship item for memory request
+    RelationshipType:
+      type: string
+      enum:
+      - previous_memory_item_id
+      - all_previous_memory_items
+      - link_to_id
+      title: RelationshipType
+      description: Enum for relationship types
+    SchemaListResponse:
+      properties:
+        success:
+          type: boolean
+          title: Success
+        data:
+          anyOf:
+          - items:
+              $ref: '#/components/schemas/UserGraphSchema-Output'
+            type: array
+          - type: 'null'
+          title: Data
+        error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error
+        code:
+          type: integer
+          title: Code
+          default: 200
+        total:
+          type: integer
+          title: Total
+          default: 0
+      type: object
+      required:
+      - success
+      title: SchemaListResponse
+      description: Response model for listing schemas
+    SchemaResponse:
+      properties:
+        success:
+          type: boolean
+          title: Success
+        data:
+          anyOf:
+          - $ref: '#/components/schemas/UserGraphSchema-Output'
+          - type: 'null'
+        error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error
+        code:
+          type: integer
+          title: Code
+          default: 200
+      type: object
+      required:
+      - success
+      title: SchemaResponse
+      description: Response model for schema operations
+    SchemaScope:
+      type: string
+      enum:
+      - personal
+      - workspace
+      - organization
+      title: SchemaScope
+    SchemaStatus:
+      type: string
+      enum:
+      - draft
+      - active
+      - deprecated
+      - archived
+      title: SchemaStatus
+    SearchOverrideFilter:
+      properties:
+        node_type:
+          type: string
+          title: Node Type
+          description: Node type to filter (e.g., 'Person', 'Memory', 'Company')
+        property_name:
+          type: string
+          title: Property Name
+          description: Property name to filter on (e.g., 'name', 'content', 'role')
+        operator:
+          type: string
+          title: Operator
+          description: 'Filter operator: ''CONTAINS'', ''EQUALS'', ''STARTS_WITH'',
+            ''IN'''
+        value:
+          anyOf:
+          - type: string
+          - items:
+              type: string
+            type: array
+          - type: integer
+          - type: number
+          - type: boolean
+          title: Value
+          description: Filter value(s). Use list for 'IN' operator.
+      additionalProperties: false
+      type: object
+      required:
+      - node_type
+      - property_name
+      - operator
+      - value
+      title: SearchOverrideFilter
+      description: Property filters for search override
+    SearchOverridePattern:
+      properties:
+        source_label:
+          type: string
+          title: Source Label
+          description: Source node label (e.g., 'Memory', 'Person', 'Company'). Must
+            match schema node types.
+        relationship_type:
+          type: string
+          title: Relationship Type
+          description: Relationship type (e.g., 'ASSOCIATED_WITH', 'WORKS_FOR'). Must
+            match schema relationship types.
+        target_label:
+          type: string
+          title: Target Label
+          description: Target node label (e.g., 'Person', 'Company', 'Project'). Must
+            match schema node types.
+        direction:
+          type: string
+          title: Direction
+          description: 'Relationship direction: ''->'' (outgoing), ''<-'' (incoming),
+            or ''-'' (bidirectional)'
+          default: ->
+      additionalProperties: false
+      type: object
+      required:
+      - source_label
+      - relationship_type
+      - target_label
+      title: SearchOverridePattern
+      description: Developer-specified search pattern for search override
+    SearchOverrideSpecification:
+      properties:
+        pattern:
+          $ref: '#/components/schemas/SearchOverridePattern'
+          description: Graph pattern to search for (source)-[relationship]->(target)
+        filters:
+          items:
+            $ref: '#/components/schemas/SearchOverrideFilter'
+          type: array
+          title: Filters
+          description: Property filters to apply to the search pattern
+          default: []
+        return_properties:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Return Properties
+          description: Specific properties to return. If not specified, returns all
+            properties.
+      additionalProperties: false
+      type: object
+      required:
+      - pattern
+      title: SearchOverrideSpecification
+      description: Complete search override specification provided by developer
+      example:
+        filters:
+        - node_type: Person
+          operator: CONTAINS
+          property_name: name
+          value: John
+        - node_type: Memory
+          operator: IN
+          property_name: topics
+          value:
+          - project
+          - meeting
+        pattern:
+          direction: ->
+          relationship_type: ASSOCIATED_WITH
+          source_label: Memory
+          target_label: Person
+        return_properties:
+        - name
+        - content
+        - createdAt
+    SearchRequest:
+      properties:
+        query:
+          type: string
+          title: Query
+          description: 'Detailed search query describing what you''re looking for.
+            For best results, write 2-3 sentences that include specific details, context,
+            and time frame. Examples: ''Find recurring customer complaints about API
+            performance from the last month. Focus on issues where customers specifically
+            mentioned timeout errors or slow response times in their conversations.''
+            ''What are the main issues and blockers in my current projects? Focus
+            on technical challenges and timeline impacts.'' ''Find insights about
+            team collaboration and communication patterns from recent meetings and
+            discussions.'''
+          examples:
+          - Show me the most critical customer pain points from my recent conversations.
+            Focus on issues that multiple customers have mentioned and any specific
+            feature requests or workflow improvements they've suggested.
+          - What are the main issues and blockers in my current projects? Focus on
+            technical challenges and timeline impacts.
+          - Find insights about team collaboration and communication patterns from
+            recent meetings and discussions.
+        rank_results:
+          type: boolean
+          title: Rank Results
+          description: Whether to enable additional ranking of search results. Default
+            is false because results are already ranked when using an LLM for search
+            (recommended approach). Only enable this if you're not using an LLM in
+            your search pipeline and need additional result ranking.
+          default: false
+        enable_agentic_graph:
+          type: boolean
+          title: Enable Agentic Graph
+          description: "HIGHLY RECOMMENDED: Enable agentic graph search for intelligent,\
+            \ context-aware results. When enabled, the system can understand ambiguous\
+            \ references by first identifying specific entities from your memory graph,\
+            \ then performing targeted searches. Examples: 'customer feedback' \u2192\
+            \ identifies your customers first, then finds their specific feedback;\
+            \ 'project issues' \u2192 identifies your projects first, then finds related\
+            \ issues; 'team meeting notes' \u2192 identifies team members first, then\
+            \ finds meeting notes. This provides much more relevant and comprehensive\
+            \ results. Set to false only if you need faster, simpler keyword-based\
+            \ search."
+          default: false
+        user_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: User Id
+          description: Optional internal user ID to filter search results by a specific
+            user. If not provided, results are not filtered by user. If both user_id
+            and external_user_id are provided, user_id takes precedence.
+        external_user_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: External User Id
+          description: Optional external user ID to filter search results by a specific
+            external user. If both user_id and external_user_id are provided, user_id
+            takes precedence.
+        organization_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Organization Id
+          description: Optional organization ID for multi-tenant search scoping. When
+            provided, search is scoped to memories within this organization.
+        namespace_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Namespace Id
+          description: Optional namespace ID for multi-tenant search scoping. When
+            provided, search is scoped to memories within this namespace.
+        schema_ids:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Schema Ids
+          description: Optional list of user-defined schema IDs to use for this search.
+            If provided, only these schemas (plus system schema) will be used for
+            query generation. If not provided, system will automatically select relevant
+            schemas based on query content.
+        simple_schema_mode:
+          type: boolean
+          title: Simple Schema Mode
+          description: 'If true, uses simple schema mode: system schema + ONE most
+            relevant user schema. This ensures better consistency between add/search
+            operations and reduces query complexity. Recommended for production use.'
+          default: false
+        metadata:
+          anyOf:
+          - $ref: '#/components/schemas/MemoryMetadata'
+          - type: 'null'
+          description: Optional metadata filter. Any field in MemoryMetadata (including
+            custom fields) can be used for filtering.
+        search_override:
+          anyOf:
+          - $ref: '#/components/schemas/SearchOverrideSpecification'
+          - type: 'null'
+          description: "**OPTIONAL**: Override automatic search query generation with\
+            \ your own exact graph pattern and filters. **\u26A1 AUTOMATIC BY DEFAULT**:\
+            \ If not provided, the system automatically generates optimized Cypher\
+            \ queries using AI - no action required! **\U0001F3AF USE WHEN**: You\
+            \ want precise control over search patterns, have specific graph traversals\
+            \ in mind, or want to bypass AI query generation for performance. **\U0001F4CB\
+            \ VALIDATION**: All patterns and filters must comply with your schema\
+            \ definitions."
+      type: object
+      required:
+      - query
+      title: SearchRequest
+      description: Search request parameters
+      example:
+        enable_agentic_graph: false
+        external_user_id: external_user_123
+        query: Find recurring customer complaints about API performance from the last
+          month. Focus on issues that multiple customers have mentioned and any specific
+          feature requests or workflow improvements they've suggested.
+        rank_results: true
+      search_override:
+        filters:
+        - node_type: Person
+          operator: CONTAINS
+          property_name: role
+          value: customer
+        - node_type: Memory
+          operator: IN
+          property_name: topics
+          value:
+          - API
+          - performance
+          - complaints
+        pattern:
+          direction: ->
+          relationship_type: ASSOCIATED_WITH
+          source_label: Memory
+          target_label: Person
+        return_properties:
+        - name
+        - content
+        - createdAt
+        - topics
+    SearchResponse:
+      properties:
+        code:
+          type: integer
+          title: Code
+          description: HTTP status code
+          default: 200
+        status:
+          type: string
+          title: Status
+          description: '''success'' or ''error'''
+          default: success
+        data:
+          anyOf:
+          - $ref: '#/components/schemas/SearchResult'
+          - type: 'null'
+          description: Search results if successful
+        error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error
+          description: Error message if failed
+        details:
+          anyOf:
+          - {}
+          - type: 'null'
+          title: Details
+          description: Additional error details or context
+        search_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Search Id
+          description: Unique identifier for this search query, maps to QueryLog objectId
+            in Parse Server
+      type: object
+      title: SearchResponse
+      example:
+        code: 200
+        data:
+          memories: []
+          nodes: []
+        search_id: abc123def456
+        status: success
+    SearchResult:
+      properties:
+        memories:
+          items:
+            $ref: '#/components/schemas/Memory'
+          type: array
+          title: Memories
+        nodes:
+          items:
+            $ref: '#/components/schemas/Node'
+          type: array
+          title: Nodes
+        schemas_used:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Schemas Used
+          description: List of UserGraphSchema IDs used in this response. Use GET
+            /v1/schemas/{id} to get full schema definitions.
+      type: object
+      required:
+      - memories
+      - nodes
+      title: SearchResult
+      description: Return type for SearchResult
+    SyncTiersRequest:
+      properties:
+        max_tier0:
+          type: integer
+          maximum: 2000.0
+          minimum: 0.0
+          title: Max Tier0
+          description: Max Tier 0 items (goals/OKRs/use-cases)
+          default: 300
+        max_tier1:
+          type: integer
+          maximum: 5000.0
+          minimum: 0.0
+          title: Max Tier1
+          description: Max Tier 1 items (hot memories)
+          default: 1000
+        workspace_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Workspace Id
+          description: Optional workspace id to scope tiers
+        include_embeddings:
+          type: boolean
+          title: Include Embeddings
+          description: Include float32 embeddings for Tier 0 and INT8 for Tier 1
+          default: false
+        embed_model:
+          type: string
+          title: Embed Model
+          description: 'Embedding model hint: ''sbert'' or ''bigbird'' or ''Qwen4B'''
+          default: Qwen4B
+        embed_limit:
+          type: integer
+          maximum: 1000.0
+          minimum: 0.0
+          title: Embed Limit
+          description: Max items to embed per tier to control latency
+          default: 200
+        user_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: User Id
+          description: Optional internal user ID to filter tiers by a specific user.
+            If not provided, results are not filtered by user. If both user_id and
+            external_user_id are provided, user_id takes precedence.
+        external_user_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: External User Id
+          description: Optional external user ID to filter tiers by a specific external
+            user. If both user_id and external_user_id are provided, user_id takes
+            precedence.
+      type: object
+      title: SyncTiersRequest
+      description: Request model for sync tiers endpoint
+      example:
+        embed_limit: 200
+        embed_model: sbert
+        external_user_id: external_user_abc
+        include_embeddings: false
+        max_tier0: 300
+        max_tier1: 1000
+        user_id: internal_user_123
+        workspace_id: workspace_123
+    SyncTiersResponse:
+      properties:
+        code:
+          type: integer
+          title: Code
+          description: HTTP status code
+          default: 200
+        status:
+          type: string
+          title: Status
+          description: '''success'' or ''error'''
+          default: success
+        tier0:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Tier0
+          description: Tier 0 items (goals/OKRs/use-cases)
+        tier1:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Tier1
+          description: Tier 1 items (hot memories)
+        transitions:
+          items:
+            additionalProperties: true
+            type: object
+          type: array
+          title: Transitions
+          description: Transition items between tiers
+        next_cursor:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Next Cursor
+          description: Cursor for pagination
+        has_more:
+          type: boolean
+          title: Has More
+          description: Whether there are more items available
+          default: false
+        error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error
+          description: Error message if failed
+        details:
+          anyOf:
+          - {}
+          - type: 'null'
+          title: Details
+          description: Additional error details or context
+      type: object
+      title: SyncTiersResponse
+      description: Response model for sync tiers endpoint
+      example:
+        code: 200
+        has_more: false
+        status: success
+        tier0:
+        - content: Improve API performance
+          id: goal_123
+          metadata:
+            class: goal
+            sourceType: papr
+          topics:
+          - performance
+          - api
+          type: goal
+        tier1:
+        - content: Customer complained about slow API response times
+          id: memory_456
+          metadata:
+            sourceType: papr
+          topics:
+          - customer
+          - api
+          - performance
+          type: text
+        transitions: []
+    SystemUpdateStatus:
+      properties:
+        pinecone:
+          type: boolean
+          title: Pinecone
+          default: false
+        neo4j:
+          type: boolean
+          title: Neo4J
+          default: false
+        parse:
+          type: boolean
+          title: Parse
+          default: false
+      type: object
+      title: SystemUpdateStatus
+      description: Status of update operation for each system
+    TokenResponse:
+      properties:
+        access_token:
+          type: string
+          title: Access Token
+          description: OAuth2 access token
+        token_type:
+          type: string
+          title: Token Type
+          description: Token type
+          default: Bearer
+        expires_in:
+          type: integer
+          title: Expires In
+          description: Token expiration time in seconds
+        refresh_token:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Refresh Token
+          description: Refresh token for getting new access tokens
+        scope:
+          type: string
+          title: Scope
+          description: OAuth2 scopes granted
+        user_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: User Id
+          description: User ID from Auth0
+        message:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Message
+          description: Additional message or status
+      type: object
+      required:
+      - access_token
+      - expires_in
+      - scope
+      title: TokenResponse
+      description: Response model for OAuth2 token endpoint
+    UpdateMemoryItem:
+      properties:
+        objectId:
+          type: string
+          title: Objectid
+        memoryId:
+          type: string
+          title: Memoryid
+        content:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Content
+          default: ''
+        updatedAt:
+          type: string
+          format: date-time
+          title: Updatedat
+        memoryChunkIds:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
+          title: Memorychunkids
+          default:
+          - []
+        metadata:
+          anyOf:
+          - $ref: '#/components/schemas/MemoryMetadata'
+          - type: 'null'
+      additionalProperties: false
+      type: object
+      required:
+      - objectId
+      - memoryId
+      - updatedAt
+      title: UpdateMemoryItem
+      description: Model for a single updated memory item
+    UpdateMemoryRequest:
+      properties:
+        content:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Content
+          description: The new content of the memory item
+        type:
+          anyOf:
+          - $ref: '#/components/schemas/MemoryType'
+          - type: 'null'
+          description: Content type of the memory item
+        metadata:
+          anyOf:
+          - $ref: '#/components/schemas/MemoryMetadata'
+          - type: 'null'
+          description: Updated metadata for Neo4J and Pinecone
+        context:
+          anyOf:
+          - items:
+              $ref: '#/components/schemas/ContextItem'
+            type: array
+          - type: 'null'
+          title: Context
+          description: Updated context for the memory item
+        relationships_json:
+          anyOf:
+          - items:
+              $ref: '#/components/schemas/RelationshipItem'
+            type: array
+          - type: 'null'
+          title: Relationships Json
+          description: Updated relationships for Graph DB (neo4J)
+        organization_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Organization Id
+          description: Optional organization ID for multi-tenant memory scoping. When
+            provided, update is scoped to memories within this organization.
+        namespace_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Namespace Id
+          description: Optional namespace ID for multi-tenant memory scoping. When
+            provided, update is scoped to memories within this namespace.
+      additionalProperties: false
+      type: object
+      title: UpdateMemoryRequest
+      description: Request model for updating an existing memory
+      example:
+        content: Updated meeting notes from the product planning session
+        context:
+        - content: Let's update the Q2 product roadmap
+          role: user
+        - content: I'll help you update the roadmap. What changes would you like to
+            make?
+          role: assistant
+        metadata:
+          emoji tags: "\U0001F4CA,\U0001F4A1,\U0001F4DD,\u2728"
+          emotion tags: focused, productive, satisfied
+          hierarchical structures: Business/Planning/Product/Updates
+          topics: product, planning, updates
+        relationships_json:
+        - metadata:
+            relevance: high
+          related_item_id: previous_memory_item_id
+          related_item_type: TextMemoryItem
+          relation_type: updates
+        type: text
+    UpdateMemoryResponse:
+      properties:
+        code:
+          type: integer
+          title: Code
+          description: HTTP status code
+          default: 200
+        status:
+          type: string
+          title: Status
+          description: '''success'' or ''error'''
+          default: success
+        memory_items:
+          anyOf:
+          - items:
+              $ref: '#/components/schemas/UpdateMemoryItem'
+            type: array
+          - type: 'null'
+          title: Memory Items
+          description: List of updated memory items if successful
+        error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error
+          description: Error message if failed
+        details:
+          anyOf:
+          - {}
+          - type: 'null'
+          title: Details
+          description: Additional error details or context
+        message:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Message
+          description: Status message
+        status_obj:
+          anyOf:
+          - $ref: '#/components/schemas/SystemUpdateStatus'
+          - type: 'null'
+          description: System update status (pinecone, neo4j, parse)
+      additionalProperties: false
+      type: object
+      title: UpdateMemoryResponse
+      description: Unified response model for update_memory API endpoint (success
+        or error).
+    UpdateUserRequest:
+      properties:
+        email:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Email
+        external_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: External Id
+        metadata:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Metadata
+        type:
+          anyOf:
+          - $ref: '#/components/schemas/UserType'
+          - type: 'null'
+      type: object
+      title: UpdateUserRequest
+      description: Request model for updating a user
+      example:
+        email: updated.user@example.com
+        external_id: updated_user_123
+        metadata:
+          name: Updated User
+          preferences:
+            theme: light
+        type: developerUser
+    UserGraphSchema-Input:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          maxLength: 100
+          minLength: 1
+          title: Name
+        description:
+          anyOf:
+          - type: string
+            maxLength: 500
+          - type: 'null'
+          title: Description
+        version:
+          type: string
+          pattern: ^\d+\.\d+\.\d+$
+          title: Version
+          default: 1.0.0
+        user_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: User Id
+        workspace_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Workspace Id
+        organization_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Organization Id
+        node_types:
+          additionalProperties:
+            $ref: '#/components/schemas/UserNodeType-Input'
+          type: object
+          title: Node Types
+          description: Custom node types (max 15 per schema)
+        relationship_types:
+          additionalProperties:
+            $ref: '#/components/schemas/UserRelationshipType-Input'
+          type: object
+          title: Relationship Types
+          description: Custom relationship types (max 20 per schema)
+        status:
+          $ref: '#/components/schemas/SchemaStatus'
+          default: draft
+        scope:
+          $ref: '#/components/schemas/SchemaScope'
+          default: workspace
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Updated At
+        read_access:
+          items:
+            type: string
+          type: array
+          title: Read Access
+        write_access:
+          items:
+            type: string
+          type: array
+          title: Write Access
+        usage_count:
+          type: integer
+          title: Usage Count
+          default: 0
+        last_used_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Last Used At
+      additionalProperties: false
+      type: object
+      required:
+      - name
+      title: UserGraphSchema
+      description: Complete user-defined graph schema
+    UserGraphSchema-Output:
+      properties:
+        id:
+          type: string
+          title: Id
+        name:
+          type: string
+          maxLength: 100
+          minLength: 1
+          title: Name
+        description:
+          anyOf:
+          - type: string
+            maxLength: 500
+          - type: 'null'
+          title: Description
+        version:
+          type: string
+          pattern: ^\d+\.\d+\.\d+$
+          title: Version
+          default: 1.0.0
+        user_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: User Id
+        workspace_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Workspace Id
+        organization_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Organization Id
+        node_types:
+          additionalProperties:
+            $ref: '#/components/schemas/UserNodeType-Output'
+          type: object
+          title: Node Types
+          description: Custom node types (max 15 per schema)
+        relationship_types:
+          additionalProperties:
+            $ref: '#/components/schemas/UserRelationshipType-Output'
+          type: object
+          title: Relationship Types
+          description: Custom relationship types (max 20 per schema)
+        status:
+          $ref: '#/components/schemas/SchemaStatus'
+          default: draft
+        scope:
+          $ref: '#/components/schemas/SchemaScope'
+          default: workspace
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        updated_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Updated At
+        read_access:
+          items:
+            type: string
+          type: array
+          title: Read Access
+        write_access:
+          items:
+            type: string
+          type: array
+          title: Write Access
+        usage_count:
+          type: integer
+          title: Usage Count
+          default: 0
+        last_used_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Last Used At
+      additionalProperties: false
+      type: object
+      required:
+      - name
+      title: UserGraphSchema
+      description: Complete user-defined graph schema
+    UserInfoResponse:
+      properties:
+        user_id:
+          type: string
+          title: User Id
+          description: Internal user ID
+        sessionToken:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Sessiontoken
+          description: Session token for API access
+        imageUrl:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Imageurl
+          description: User profile image URL
+        displayName:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Displayname
+          description: User display name
+        email:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Email
+          description: User email address
+        message:
+          type: string
+          title: Message
+          description: Authentication status message
+          default: You are authenticated!
+      type: object
+      required:
+      - user_id
+      title: UserInfoResponse
+      description: Response model for /me endpoint
+    UserListResponse:
+      properties:
+        code:
+          type: integer
+          title: Code
+          description: HTTP status code
+        status:
+          type: string
+          title: Status
+          description: '''success'' or ''error'''
+        data:
+          anyOf:
+          - items:
+              $ref: '#/components/schemas/UserResponse'
+            type: array
+          - type: 'null'
+          title: Data
+        total:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Total
+        page:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Page
+        page_size:
+          anyOf:
+          - type: integer
+          - type: 'null'
+          title: Page Size
+        error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error
+        details:
+          anyOf:
+          - {}
+          - type: 'null'
+          title: Details
+      type: object
+      required:
+      - code
+      - status
+      title: UserListResponse
+      example:
+        code: 200
+        data:
+        - created_at: '2024-03-20T10:00:00.000Z'
+          email: user1@example.com
+          external_id: user123
+          metadata:
+            name: John Doe
+            preferences:
+              theme: dark
+          updated_at: '2024-03-20T10:00:00.000Z'
+          user_id: abc123
+        page: 1
+        page_size: 10
+        status: success
+        total: 1
+    UserNodeType-Input:
+      properties:
+        name:
+          type: string
+          pattern: ^[A-Za-z][A-Za-z0-9_]*$
+          title: Name
+        label:
+          type: string
+          title: Label
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+        properties:
+          additionalProperties:
+            $ref: '#/components/schemas/PropertyDefinition'
+          type: object
+          title: Properties
+          description: Node properties (max 15 per node type)
+        required_properties:
+          items:
+            type: string
+          type: array
+          title: Required Properties
+        unique_identifiers:
+          items:
+            type: string
+          type: array
+          title: Unique Identifiers
+          description: 'Properties that uniquely identify this node type. Used for
+            MERGE operations to avoid duplicates. Example: [''name'', ''email''] for
+            Customer nodes.'
+        color:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Color
+          default: '#3498db'
+        icon:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Icon
+      additionalProperties: false
+      type: object
+      required:
+      - name
+      - label
+      title: UserNodeType
+      description: User-defined node type
+    UserNodeType-Output:
+      properties:
+        name:
+          type: string
+          pattern: ^[A-Za-z][A-Za-z0-9_]*$
+          title: Name
+        label:
+          type: string
+          title: Label
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+        properties:
+          additionalProperties:
+            $ref: '#/components/schemas/PropertyDefinition'
+          type: object
+          title: Properties
+          description: Node properties (max 15 per node type)
+        required_properties:
+          items:
+            type: string
+          type: array
+          title: Required Properties
+        unique_identifiers:
+          items:
+            type: string
+          type: array
+          title: Unique Identifiers
+          description: 'Properties that uniquely identify this node type. Used for
+            MERGE operations to avoid duplicates. Example: [''name'', ''email''] for
+            Customer nodes.'
+        color:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Color
+          default: '#3498db'
+        icon:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Icon
+      additionalProperties: false
+      type: object
+      required:
+      - name
+      - label
+      title: UserNodeType
+      description: User-defined node type
+    UserRelationshipType-Input:
+      properties:
+        name:
+          type: string
+          pattern: ^[A-Z][A-Z0-9_]*$
+          title: Name
+        label:
+          type: string
+          title: Label
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+        properties:
+          additionalProperties:
+            $ref: '#/components/schemas/PropertyDefinition'
+          type: object
+          title: Properties
+        allowed_source_types:
+          items:
+            type: string
+          type: array
+          title: Allowed Source Types
+        allowed_target_types:
+          items:
+            type: string
+          type: array
+          title: Allowed Target Types
+        cardinality:
+          type: string
+          enum:
+          - one-to-one
+          - one-to-many
+          - many-to-many
+          title: Cardinality
+          default: many-to-many
+        color:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Color
+          default: '#e74c3c'
+      additionalProperties: false
+      type: object
+      required:
+      - name
+      - label
+      - allowed_source_types
+      - allowed_target_types
+      title: UserRelationshipType
+      description: User-defined relationship type
+    UserRelationshipType-Output:
+      properties:
+        name:
+          type: string
+          pattern: ^[A-Z][A-Z0-9_]*$
+          title: Name
+        label:
+          type: string
+          title: Label
+        description:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Description
+        properties:
+          additionalProperties:
+            $ref: '#/components/schemas/PropertyDefinition'
+          type: object
+          title: Properties
+        allowed_source_types:
+          items:
+            type: string
+          type: array
+          title: Allowed Source Types
+        allowed_target_types:
+          items:
+            type: string
+          type: array
+          title: Allowed Target Types
+        cardinality:
+          type: string
+          enum:
+          - one-to-one
+          - one-to-many
+          - many-to-many
+          title: Cardinality
+          default: many-to-many
+        color:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Color
+          default: '#e74c3c'
+      additionalProperties: false
+      type: object
+      required:
+      - name
+      - label
+      - allowed_source_types
+      - allowed_target_types
+      title: UserRelationshipType
+      description: User-defined relationship type
+    UserResponse:
+      properties:
+        code:
+          type: integer
+          title: Code
+          description: HTTP status code
+        status:
+          type: string
+          title: Status
+          description: '''success'' or ''error'''
+        user_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: User Id
+        email:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Email
+        external_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: External Id
+        metadata:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Metadata
+        created_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Created At
+        updated_at:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Updated At
+        error:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Error
+        details:
+          anyOf:
+          - {}
+          - type: 'null'
+          title: Details
+      type: object
+      required:
+      - code
+      - status
+      title: UserResponse
+      description: Response model for user operations
+      example:
+        code: 200
+        created_at: '2024-03-20T10:00:00.000Z'
+        email: user@example.com
+        external_id: user123
+        metadata:
+          name: John Doe
+          preferences:
+            theme: dark
+        status: success
+        updated_at: '2024-03-20T10:00:00.000Z'
+        user_id: abc123
+    UserType:
+      type: string
+      enum:
+      - developerUser
+      - user
+      - agent
+      title: UserType
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError
+  securitySchemes:
+    Bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Bearer token (JWT) from Auth0 OAuth2 or similar
+    X-Session-Token:
+      type: apiKey
+      in: header
+      name: X-Session-Token
+      description: Session token for authentication
+    X-API-Key:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: API key for authentication
+    OAuth2:
+      type: oauth2
+      flows:
+        authorizationCode:
+          authorizationUrl: http://localhost:8000/login
+          tokenUrl: http://localhost:8000/token
+          refreshUrl: http://localhost:8000/token
+          scopes:
+            openid: OpenID
+            profile: Profile access
+            email: Email access
+            offline_access: Offline access
+servers:
+- url: http://localhost:8000
+  description: Production server

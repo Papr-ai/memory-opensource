@@ -1,0 +1,267 @@
+# ============================================
+# Papr Memory - Open Source Docker Compose
+# ============================================
+# Quick Start:
+#   1. cp .env.example .env.opensource
+#   2. Edit .env.opensource with your API keys (OpenAI, Groq, Deep Infra)
+#   3. docker-compose up -d
+#   4. Visit http://localhost:5001/docs
+#
+# Optional Parse Dashboard:
+#   docker-compose --profile dashboard up -d parse-dashboard
+#   Access at http://localhost:4040 (admin / password)
+# ============================================
+
+services:
+
+  # Main Papr Memory Application
+  papr-memory:
+    build: .
+    container_name: papr-memory
+    image: "${IMAGE_NAME:-papr_memory_oss}:${IMAGE_TAG:-latest}"
+    entrypoint: ["/app/scripts/opensource/docker_entrypoint_opensource.sh"]
+    command: python main.py
+    ports:
+      - "5001:5001"
+    # volumes:
+    #   - ./logs:/app/logs  # Optional: mount logs for debugging (requires Docker file sharing)
+    env_file:
+      - .env.opensource
+    environment:
+      # Force open source edition
+      PAPR_EDITION: opensource
+      # Database connections (override .env for Docker networking)
+      MONGO_URI: mongodb://${MONGODB_USERNAME:-admin}:${MONGODB_PASSWORD:-password}@mongodb:27017/${MONGODB_DATABASE:-papr_memory}?authSource=admin
+      REDIS_URL: redis://:${REDIS_PASSWORD:-password}@redis:6379/0
+      NEO4J_URL: bolt://neo4j:7687
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_COLLECTION_QWEN4B: ${QDRANT_COLLECTION_QWEN4B:-Qwen4B}
+      QDRANT_PROPERTY_COLLECTION: ${QDRANT_PROPERTY_COLLECTION:-neo4j_properties_dev}
+      PARSE_SERVER_URL: http://parse-server:1337/parse
+      # Parse Server credentials (set both naming conventions for compatibility)
+      # Defaults match .env.opensource convention (papr-oss-*)
+      PARSE_APPLICATION_ID: ${PARSE_SERVER_APPLICATION_ID:-papr-oss-app-id}
+      PARSE_MASTER_KEY: ${PARSE_SERVER_MASTER_KEY:-papr-oss-master-key}
+      PARSE_SERVER_APPLICATION_ID: ${PARSE_SERVER_APPLICATION_ID:-papr-oss-app-id}
+      PARSE_SERVER_MASTER_KEY: ${PARSE_SERVER_MASTER_KEY:-papr-oss-master-key}
+      # Memory Server URL (for open source, set to localhost)
+      PYTHON_SERVER_URL: ${PYTHON_SERVER_URL:-http://localhost:5001}
+      # SSL certificates - unset to let httpx use system defaults (prevents FileNotFoundError)
+      # The code will auto-detect and set SSL_CERT_FILE only if the file exists
+      SSL_CERT_FILE: ""
+      REQUESTS_CA_BUNDLE: ""
+      # Fix protobuf compatibility issue with sentencepiece (BigBird tokenizer)
+      # This uses pure-Python protobuf implementation to avoid version conflicts
+      PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python
+    depends_on:
+      mongodb:
+        condition: service_started
+      redis:
+        condition: service_started
+      neo4j:
+        condition: service_healthy  # Wait for Neo4j health check to pass
+      qdrant:
+        condition: service_started
+      parse-server:
+        condition: service_started
+    networks:
+      - papr-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # MongoDB - Primary document storage
+  mongodb:
+    image: mongo:8.0.12
+    container_name: papr-mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+      - mongodb_config:/data/configdb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGODB_USERNAME:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGODB_PASSWORD:-password}
+      MONGO_INITDB_DATABASE: ${MONGODB_DATABASE:-papr_memory}
+    networks:
+      - papr-network
+    restart: unless-stopped
+
+  # Redis - Caching layer
+  redis:
+    image: redis:7-alpine
+    container_name: papr-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-password}
+    networks:
+      - papr-network
+    restart: unless-stopped
+
+  # Neo4j - Graph database for memory relationships
+  neo4j:
+    image: neo4j:2025.10.1
+    container_name: papr-neo4j
+    ports:
+      - "7474:7474"   # HTTP
+      - "7687:7687"   # Bolt
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+      - neo4j_import:/var/lib/neo4j/import
+      - neo4j_plugins:/plugins
+    environment:
+      NEO4J_AUTH: ${NEO4J_USERNAME:-neo4j}/${NEO4J_PASSWORD:-password}
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_dbms_security_procedures_unrestricted: "apoc.*"
+      NEO4J_dbms_security_procedures_allowlist: "apoc.*"
+      NEO4J_dbms_memory_heap_initial__size: "512m"
+      NEO4J_dbms_memory_heap_max__size: "2G"
+      # Allow connections from Docker network
+      NEO4J_dbms_connector_bolt_listen__address: 0.0.0.0:7687
+      NEO4J_dbms_connector_http_listen__address: 0.0.0.0:7474
+    networks:
+      - papr-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "password", "RETURN 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Qdrant - Vector database for semantic search
+  qdrant:
+    image: qdrant/qdrant:v1.16.0
+    container_name: papr-qdrant
+    ports:
+      - "6333:6333"   # HTTP API
+      - "6334:6334"   # gRPC API
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      QDRANT__SERVICE__HTTP_PORT: 6333
+      QDRANT__SERVICE__GRPC_PORT: 6334
+    networks:
+      - papr-network
+    restart: unless-stopped
+
+  # Parse Server - User management and ACL
+  parse-server:
+    image: parseplatform/parse-server:8.4.0
+    container_name: papr-parse-server
+    ports:
+      - "1337:1337"
+    # volumes:
+    #   - parse_data:/parse-server/cloud  # Commented out - no custom cloud code needed for testing
+    environment:
+      PARSE_SERVER_APPLICATION_ID: ${PARSE_SERVER_APPLICATION_ID:-papr-oss-app-id}
+      PARSE_SERVER_MASTER_KEY: ${PARSE_SERVER_MASTER_KEY:-papr-oss-master-key}
+      PARSE_SERVER_DATABASE_URI: mongodb://${MONGODB_USERNAME:-admin}:${MONGODB_PASSWORD:-password}@mongodb:27017/${MONGODB_DATABASE:-papr_memory}?authSource=admin
+      PARSE_SERVER_URL: http://parse-server:1337/parse
+      PARSE_SERVER_PUBLIC_SERVER_URL: http://localhost:1337/parse
+      PARSE_SERVER_MOUNT_PATH: /parse
+      PARSE_SERVER_ALLOW_ORIGIN: "*"
+      # PARSE_SERVER_CLOUD: /parse-server/cloud/main.js  # No cloud code for opensource testing
+      PARSE_SERVER_APP_NAME: Papr Memory
+      PARSE_SERVER_ENABLE_EXPERIMENTAL_DIRECT_ACCESS: 1
+      # Allow class creation during initial setup - can be disabled after schema is initialized
+      PARSE_SERVER_ALLOW_CLIENT_CLASS_CREATION: true
+      PARSE_SERVER_ENABLE_PRIVATE_USERS: true
+      # Allow custom objectId during object creation (required for search_id functionality)
+      # Note: Parse Server 8.x may not support this as an environment variable
+      # If this doesn't work, you may need to configure allowCustomObjectId in Parse Server
+      # initialization code or use a separate search_id field instead of objectId
+      # This allows setting objectId when creating QueryLog entries to match search_id
+      PARSE_SERVER_ALLOW_CUSTOM_OBJECT_ID: true
+      # Parse Server 8.x security settings for local development
+      PARSE_SERVER_ALLOW_INSECURE_HTTP: 1
+      PARSE_SERVER_ENABLE_CHECK_LOG: 0
+      # Allow master key from all sources for local development
+      # In production, restrict this to specific IPs
+      PARSE_SERVER_MASTER_KEY_IPS: "0.0.0.0/0,::/0"
+      # Enable GraphQL API
+      PARSE_SERVER_MOUNT_GRAPHQL: "true"
+      PARSE_SERVER_MOUNT_PLAYGROUND: "true"
+    depends_on:
+      - mongodb
+    networks:
+      - papr-network
+    restart: unless-stopped
+
+  # Parse Dashboard (Optional - for development)
+  # Start with: docker-compose --profile dashboard up -d parse-dashboard
+  # Access Parse Dashboard: http://localhost:4040
+  # Access GraphQL Console: http://localhost:4040/apps/papr-oss-app-id/api_console/graphql
+  # Access GraphQL Playground: http://localhost:1337/playground
+  # Login credentials: admin / password
+  parse-dashboard:
+    image: parseplatform/parse-dashboard:8.0.0
+    # Multi-arch image - supports both ARM64 (Apple Silicon) and AMD64 (Intel)
+    container_name: papr-parse-dashboard
+    ports:
+      - "4040:4040"
+    command: --dev
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      PARSE_DASHBOARD_TRUST_PROXY: 1
+      PARSE_DASHBOARD_COOKIE_SESSION_SECRET: ${PARSE_DASHBOARD_SESSION_SECRET:-your-secret-key}
+      PARSE_DASHBOARD_CONFIG: |
+        {
+          "apps": [
+            {
+              "serverURL": "http://localhost:1337/parse",
+              "graphQLServerURL": "http://localhost:1337/graphql",
+              "appId": "papr-oss-app-id",
+              "masterKey": "papr-oss-master-key",
+              "appName": "Papr Memory",
+              "allowInsecureHTTP": true
+            }
+          ],
+          "users": [
+            {
+              "user": "admin",
+              "pass": "$2b$10$/.J.hoDpJjXsJl.deEeeU.bAa8Dgwurprhh2DXheQkjsmNFZEJ7nS"
+            }
+          ],
+          "useEncryptedPasswords": true
+        }
+    depends_on:
+      - parse-server
+    networks:
+      - papr-network
+    restart: unless-stopped
+    profiles:
+      - dashboard
+
+volumes:
+  mongodb_data:
+    driver: local
+  mongodb_config:
+    driver: local
+  redis_data:
+    driver: local
+  neo4j_data:
+    driver: local
+  neo4j_logs:
+    driver: local
+  neo4j_import:
+    driver: local
+  neo4j_plugins:
+    driver: local
+  qdrant_data:
+    driver: local
+  parse_data:
+    driver: local
+
+networks:
+  papr-network:
+    driver: bridge
+      
