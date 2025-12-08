@@ -24,16 +24,20 @@ from memory.memory_graph import MemoryGraph
 # This check happens early to prevent httpx errors when OpenAI client initializes
 if 'SSL_CERT_FILE' in os.environ:
     ssl_cert_file = os.environ['SSL_CERT_FILE']
-    cert_path = Path(ssl_cert_file)
-    if not cert_path.exists() or not cert_path.is_file() or not os.access(ssl_cert_file, os.R_OK):
-        # Unset if file doesn't exist or isn't readable - httpx will use system defaults
+    # Handle empty string (httpx will fail if SSL_CERT_FILE is empty)
+    if not ssl_cert_file or not ssl_cert_file.strip():
         del os.environ['SSL_CERT_FILE']
-        try:
-            logger = LoggerSingleton.get_logger(__name__)
-            logger.warning(f"SSL_CERT_FILE points to non-existent or unreadable file: {ssl_cert_file}, unsetting to use system defaults")
-        except:
-            # Logger might not be initialized yet, just print
-            print(f"WARNING: SSL_CERT_FILE points to non-existent or unreadable file: {ssl_cert_file}, unsetting to use system defaults")
+    else:
+        cert_path = Path(ssl_cert_file)
+        if not cert_path.exists() or not cert_path.is_file() or not os.access(ssl_cert_file, os.R_OK):
+            # Unset if file doesn't exist or isn't readable - httpx will use system defaults
+            del os.environ['SSL_CERT_FILE']
+            try:
+                logger = LoggerSingleton.get_logger(__name__)
+                logger.warning(f"SSL_CERT_FILE points to non-existent or unreadable file: {ssl_cert_file}, unsetting to use system defaults")
+            except:
+                # Logger might not be initialized yet, just print
+                print(f"WARNING: SSL_CERT_FILE points to non-existent or unreadable file: {ssl_cert_file}, unsetting to use system defaults")
 from fastapi.security import HTTPBearer, APIKeyHeader
 from core.services.telemetry import get_telemetry
 from routers.v1 import v1_router
@@ -344,13 +348,18 @@ def create_app() -> FastAPI:
     # httpx (used by OpenAI) reads SSL_CERT_FILE directly and fails if file doesn't exist
     if 'SSL_CERT_FILE' in os.environ:
         ssl_cert_file = os.environ['SSL_CERT_FILE']
-        cert_path = Path(ssl_cert_file)
-        if not cert_path.exists() or not cert_path.is_file() or not os.access(ssl_cert_file, os.R_OK):
-            # Unset if file doesn't exist or isn't readable - httpx will use system defaults
+        # Handle empty string (httpx will fail if SSL_CERT_FILE is empty)
+        if not ssl_cert_file or not ssl_cert_file.strip():
             del os.environ['SSL_CERT_FILE']
-            logger.warning(f"SSL_CERT_FILE points to non-existent or unreadable file: {ssl_cert_file}, unsetting to use system defaults")
+            logger.debug("SSL_CERT_FILE was empty, unset to use system defaults")
         else:
-            logger.debug(f"SSL_CERT_FILE validated: {ssl_cert_file}")
+            cert_path = Path(ssl_cert_file)
+            if not cert_path.exists() or not cert_path.is_file() or not os.access(ssl_cert_file, os.R_OK):
+                # Unset if file doesn't exist or isn't readable - httpx will use system defaults
+                del os.environ['SSL_CERT_FILE']
+                logger.warning(f"SSL_CERT_FILE points to non-existent or unreadable file: {ssl_cert_file}, unsetting to use system defaults")
+            else:
+                logger.debug(f"SSL_CERT_FILE validated: {ssl_cert_file}")
 
     chat_gpt = ChatGPTCompletion(api_key, organization_id, env.get("LLM_MODEL"), env.get("LLM_LOCATION_CLOUD", default=True), env.get("EMBEDDING_MODEL_LOCAL"))
     app.state.chat_gpt = chat_gpt

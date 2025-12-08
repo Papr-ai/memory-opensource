@@ -46,10 +46,9 @@ services:
       PARSE_SERVER_MASTER_KEY: ${PARSE_SERVER_MASTER_KEY:-papr-oss-master-key}
       # Memory Server URL (for open source, set to localhost)
       PYTHON_SERVER_URL: ${PYTHON_SERVER_URL:-http://localhost:5001}
-      # SSL certificates - unset to let httpx use system defaults (prevents FileNotFoundError)
+      # SSL certificates - don't set SSL_CERT_FILE (let httpx use system defaults)
+      # If SSL_CERT_FILE is set to empty string, httpx will fail
       # The code will auto-detect and set SSL_CERT_FILE only if the file exists
-      SSL_CERT_FILE: ""
-      REQUESTS_CA_BUNDLE: ""
       # Fix protobuf compatibility issue with sentencepiece (BigBird tokenizer)
       # This uses pure-Python protobuf implementation to avoid version conflicts
       PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python

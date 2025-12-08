@@ -417,15 +417,6 @@ This project is licensed under the GNU Affero General Public License v3.0 - see 
 - **Discussions**: [GitHub Discussions](https://github.com/Papr-ai/memory-opensource/discussions)
 - **Discord**: Join our community for real-time support: https://discord.gg/sWpR5a3H
 
-## 🗺️ Roadmap
-
-- [ ] **Enhanced Graph Relationships**: Automatic relationship extraction from content
-- [ ] **Multi-Modal Support**: Image and audio memory storage
-- [ ] **Advanced Search**: Hybrid search combining vector and graph traversal
-- [ ] **Real-time Collaboration**: Live memory sharing and editing
-- [ ] **Mobile SDK**: Native mobile app integration
-- [ ] **Enterprise Features**: Advanced ACL, audit logs, and compliance
-- [ ] **MongoDB Migration**: Remove Parse Server dependency (planned)
 
 ---
 
