@@ -5225,8 +5225,9 @@ class MemoryGraph:
             neo_time = (time.time() - start_neo_time) * 1000
             logger.warning(f"Neo4j connection ensure took {neo_time:.2f}ms (fallback_mode: {self.async_neo_conn.fallback_mode})")
             if self.async_neo_conn.fallback_mode:
-                logger.warning("Neo4j in fallback mode, skipping Neo4j query")
-                return result
+                logger.warning("Neo4j in fallback mode, skipping Neo4j query but continuing with Qdrant search")
+                # Set skip_neo to True so we skip Neo4j operations but continue with Qdrant search
+                skip_neo = True
 
         # Only use the query for better accuracy
         query_context_combined = query
@@ -5782,11 +5783,10 @@ class MemoryGraph:
         if not skip_neo:
             # Check circuit breaker before attempting Neo4j operations
             if not await self.async_neo_conn.circuit_breaker.can_try():
-                logger.warning("Circuit breaker is open, skipping Neo4j operations")
+                logger.warning("Circuit breaker is open, skipping Neo4j operations but continuing with Qdrant results")
                 self.async_neo_conn.fallback_mode = True
-                # Return early with existing results
-                result.total_fetch_time = time.time() - fetch_start
-                return result
+                # Set skip_neo to True so we skip Neo4j operations but continue to fetch Qdrant memory items
+                skip_neo = True
             
             # Create Neo4j session if we don't have one, using proper context manager
             if not neo_session:
@@ -5819,12 +5819,21 @@ class MemoryGraph:
                         except asyncio.TimeoutError:
                             # Record failure in circuit breaker for timeout
                             await self.async_neo_conn.circuit_breaker.record_failure()
-                            logger.error("Neo4j operation timed out after 60 seconds, recording failure")
+                            logger.error("Neo4j operation timed out after 30 seconds, recording failure")
                             self.async_neo_conn.fallback_mode = True
-                            # Return early with existing results (no total_fetch_time field in RelatedMemoryResult)
-                            return result
-                        result.neo_nodes = other_nodes
-                        result.neo_context = text_context
+                            # Set skip_neo to True and continue to fetch Qdrant memory items
+                            skip_neo = True
+                            # Set empty neo results and variables to prevent errors
+                            memory_nodes = []
+                            other_nodes = []
+                            text_context = None
+                            result.neo_nodes = []
+                            result.neo_context = None
+                            result.neo_query = None
+                        else:
+                            # Only set these if the operation succeeded (not in timeout handler)
+                            result.neo_nodes = other_nodes
+                            result.neo_context = text_context
                         
                         # Add memory nodes to memory_items if they exist
                         if memory_nodes:
@@ -5845,6 +5854,9 @@ class MemoryGraph:
                     except asyncio.TimeoutError:
                         logger.warning("Neo4j operation timed out after 60 seconds. Continuing without Neo4j results.")
                         # Reset Neo4j related fields to empty/None values
+                        memory_nodes = []
+                        other_nodes = []
+                        text_context = None
                         result.neo_nodes = []
                         result.neo_context = None
                         result.neo_query = None
@@ -5852,7 +5864,10 @@ class MemoryGraph:
                         pass
                     except Exception as e:
                         logger.warning(f"Error querying Neo4j: {e}. Continuing without Neo4j results.")
-                        # Reset Neo4j related fields to empty/None values
+                        # Reset Neo4j related fields to empty/None values and initialize variables
+                        memory_nodes = []
+                        other_nodes = []
+                        text_context = None
                         result.neo_nodes = []
                         result.neo_context = None
                         result.neo_query = None
@@ -5890,11 +5905,19 @@ class MemoryGraph:
                         await self.async_neo_conn.circuit_breaker.record_failure()
                         logger.error("Neo4j operation timed out after 30 seconds, recording failure")
                         self.async_neo_conn.fallback_mode = True
-                        # Return early with existing results
-                        result.total_fetch_time = time.time() - fetch_start
-                        return result
-                    result.neo_nodes = other_nodes
-                    result.neo_context = text_context
+                        # Set skip_neo to True and continue to fetch Qdrant memory items
+                        skip_neo = True
+                        # Set empty neo results and variables to prevent errors
+                        memory_nodes = []
+                        other_nodes = []
+                        text_context = None
+                        result.neo_nodes = []
+                        result.neo_context = None
+                        result.neo_query = None
+                    else:
+                        # Only set these if the operation succeeded (not in timeout handler)
+                        result.neo_nodes = other_nodes
+                        result.neo_context = text_context
                     
                     # Add memory nodes to memory_items if they exist
                     if memory_nodes:
@@ -5914,7 +5937,10 @@ class MemoryGraph:
 
                 except asyncio.TimeoutError:
                     logger.warning("Neo4j operation timed out after 60 seconds. Continuing without Neo4j results.")
-                    # Reset Neo4j related fields to empty/None values
+                    # Reset Neo4j related fields to empty/None values and initialize variables
+                    memory_nodes = []
+                    other_nodes = []
+                    text_context = None
                     result.neo_nodes = []
                     result.neo_context = None
                     result.neo_query = None
@@ -5922,7 +5948,10 @@ class MemoryGraph:
                     pass
                 except Exception as e:
                     logger.warning(f"Error querying Neo4j: {e}. Continuing without Neo4j results.")
-                    # Reset Neo4j related fields to empty/None values
+                    # Reset Neo4j related fields to empty/None values and initialize variables
+                    memory_nodes = []
+                    other_nodes = []
+                    text_context = None
                     result.neo_nodes = []
                     result.neo_context = None
                     result.neo_query = None
@@ -5943,6 +5972,10 @@ class MemoryGraph:
         memory_base_ids = [get_base_id(mid) for mid in memory_item_ids]
         #bigbird_base_ids = [get_base_id(mid) for mid in predicted_grouped_memory_ids]
         neo_base_ids = [get_base_id(mid) for mid in neo_memory_ids]
+        
+        # Initialize combined_memory_item_ids_unsorted to ensure it's always defined
+        # This will be populated by stratified sampling below, or fallback to memory_item_ids if needed
+        combined_memory_item_ids_unsorted = []
         
         # STRATIFIED SAMPLING FOR DIVERSITY ACROSS SOURCES
         # Extract IDs from each source separately for quota-based sampling
@@ -6107,6 +6140,12 @@ class MemoryGraph:
                 logger.info(f"After adaptive filling: {len(combined_memory_item_ids_unsorted)} total memories")
         
         logger.info(f'Stratified sampling: {len(combined_memory_item_ids_unsorted)} unique IDs after quota-based sampling')
+        
+        # Fallback: If stratified sampling didn't populate any IDs (e.g., Neo4j timeout prevented execution),
+        # use memory_item_ids directly from Qdrant results
+        if not combined_memory_item_ids_unsorted and memory_item_ids:
+            logger.warning(f"Stratified sampling produced no results, falling back to memory_item_ids: {len(memory_item_ids)} IDs")
+            combined_memory_item_ids_unsorted = memory_item_ids.copy()
         
         # Sort combined memory IDs by similarity score (highest first) for quality within diversity
         # This ensures we get the best results within our diversified sample
@@ -7849,6 +7888,11 @@ class MemoryGraph:
                 neo_session=neo_session  # Pass neo_session for node count checks in property enhancement
             )
             logger.warning(f"LLM query generation took: {time.time() - llm_start:.2f}s")
+            
+            # ALWAYS log the generated query, even if empty or invalid
+            logger.warning(f"🔍 GENERATED CYPHER QUERY (is_llm_generated={is_llm_generated}): {cipher_query}")
+            logger.warning(f"🔍 QUERY LENGTH: {len(cipher_query) if cipher_query else 0} characters")
+            
             if enhancement_params:
                 logger.info(f"🔧 ENHANCEMENT PARAMS: Received {len(enhancement_params)} parameters from property enhancement: {list(enhancement_params.keys())}")
 
@@ -8144,6 +8188,9 @@ class MemoryGraph:
             
             except asyncio.TimeoutError:
                 logger.error("Neo4j query timed out after 180 seconds")
+                logger.error(f"⏱️ TIMEOUT - Cypher query that timed out: {cipher_query}")
+                logger.error(f"⏱️ TIMEOUT - Query parameters: {parameters}")
+                logger.error(f"⏱️ TIMEOUT - Query length: {len(cipher_query) if cipher_query else 0} characters")
                 # Record failure in circuit breaker for timeout
                 await self.async_neo_conn.circuit_breaker.record_failure()
                 # Record failure in circuit breaker for timeout
@@ -8154,8 +8201,11 @@ class MemoryGraph:
 
             except Exception as e:
                 logger.error(f"Error executing Neo4j query: {str(e)}")
-                logger.error(f"Failed query: {cipher_query}")
-                logger.error(f"Failed parameters: {parameters}")
+                logger.error(f"❌ FAILED - Cypher query: {cipher_query}")
+                logger.error(f"❌ FAILED - Query parameters: {parameters}")
+                logger.error(f"❌ FAILED - Query length: {len(cipher_query) if cipher_query else 0} characters")
+                logger.error(f"❌ FAILED - Exception type: {type(e).__name__}")
+                logger.error(f"❌ FAILED - Exception details: {str(e)}")
                 
                 # FALLBACK: If query failed and we have property filters, retry without them
                 if enhancement_params:

@@ -127,8 +127,10 @@ class ChatGPTCompletion:
             mode=instructor.Mode.JSON,
             )
         else:       
-            self.client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
-            self.async_client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+            openai_api_key = os.environ.get("OPENAI_API_KEY")
+            openai_organization = os.environ.get("OPENAI_ORGANIZATION")
+            self.client = OpenAI(api_key=openai_api_key, organization=openai_organization)
+            self.async_client = AsyncOpenAI(api_key=openai_api_key, organization=openai_organization)
             self.cost_per_input_token  = 0.0000001000  # cost for gpt-4o-mini
             self.cost_per_output_token = 0.0000004000  # cost for gpt-4o-mini
             self.groq_client = groq.Groq(api_key=os.environ.get("GROQ_API_KEY"))
@@ -2115,15 +2117,22 @@ RETURN {
                 try:
                     fallback_start = time.time()
                     
-                    # Use the same tool and messages with OpenAI using LLM_MODEL from env
-                    fallback_model = os.environ.get("LLM_MODEL", "gpt-5-nano")
-                    logger.info(f"🔄 FALLBACK: Using model {fallback_model} from LLM_MODEL env var")
+                    # Use the same tool and messages with OpenAI using LLM_MODEL_NANO or LLM_MODEL from env
+                    # Try LLM_MODEL_NANO first (user preference), then LLM_MODEL, then default
+                    fallback_model = os.environ.get("LLM_MODEL_NANO") or os.environ.get("LLM_MODEL", "gpt-5-nano")
+                    logger.info(f"🔄 FALLBACK: Using model {fallback_model} (from LLM_MODEL_NANO={os.environ.get('LLM_MODEL_NANO')} or LLM_MODEL={os.environ.get('LLM_MODEL')} or default)")
                     
-                    openai_completion = await self.async_client.chat.completions.create(
-                        model=fallback_model,  # Use LLM_MODEL from environment (gpt-5-nano)
-                        messages=messages,
-                        tools=[cypher_tool],
-                        tool_choice=tool_choice_setting
+                    # Add timeout to prevent hanging (20 seconds for OpenAI fallback)
+                    # Use _create_completion_async to ensure proper normalization for gpt-5 models
+                    import asyncio
+                    openai_completion = await asyncio.wait_for(
+                        self._create_completion_async(
+                            model=fallback_model,  # Use LLM_MODEL_NANO or LLM_MODEL from environment (gpt-5-nano)
+                            messages=messages,
+                            tools=[cypher_tool],
+                            tool_choice=tool_choice_setting
+                        ),
+                        timeout=20.0  # 20 second timeout for OpenAI fallback
                     )
                     
                     fallback_end = time.time()
@@ -2185,13 +2194,23 @@ RETURN {
                         logger.error(f"🔄 FALLBACK FAILED: OpenAI also didn't make tool call")
                         raise Exception("OpenAI fallback also failed to make tool call")
                         
-                except Exception as fallback_error:
-                    logger.error(f"🔄 FALLBACK FAILED: OpenAI fallback also failed: {fallback_error}")
+                except asyncio.TimeoutError:
+                    logger.error(f"🔄 FALLBACK TIMEOUT: OpenAI fallback timed out after 20 seconds")
+                    logger.error(f"🔄 FALLBACK TIMEOUT: This means OpenAI API call hung or took too long")
                     # Final fallback: simple base query
                     left_label = available_node_enums[0].value if available_node_enums else 'Memory'
                     right_label = available_node_enums[1].value if len(available_node_enums) > 1 else left_label
-                    generated_query = f"MATCH (m:{left_label})-[r]-(n:{right_label}) RETURN m, r, n"
-                    logger.warning(f"🔄 FINAL FALLBACK: Using simple base query: {generated_query}")
+                    generated_query = f"MATCH (m:{left_label})-[r]-(n:{right_label}) RETURN m, r, n LIMIT {top_k}"
+                    logger.warning(f"🔄 FINAL FALLBACK: Using simple base query with LIMIT: {generated_query}")
+                    return generated_query, False, {}  # Final fallback query (no enhancement params)
+                except Exception as fallback_error:
+                    logger.error(f"🔄 FALLBACK FAILED: OpenAI fallback also failed: {fallback_error}")
+                    logger.error(f"🔄 FALLBACK FAILED: Error type: {type(fallback_error).__name__}")
+                    # Final fallback: simple base query
+                    left_label = available_node_enums[0].value if available_node_enums else 'Memory'
+                    right_label = available_node_enums[1].value if len(available_node_enums) > 1 else left_label
+                    generated_query = f"MATCH (m:{left_label})-[r]-(n:{right_label}) RETURN m, r, n LIMIT {top_k}"
+                    logger.warning(f"🔄 FINAL FALLBACK: Using simple base query with LIMIT: {generated_query}")
                     return generated_query, False, {}  # Final fallback query (no enhancement params)
             
             
