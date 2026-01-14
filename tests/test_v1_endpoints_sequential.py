@@ -147,15 +147,12 @@ from tests.test_query_log_integration import (
     test_sync_tiers_returns_ranked_tier1,
 )
 
-# Import security schema tests
-from tests.test_security_schema_v1 import (
-    test_v1_create_security_schema,
-    test_v1_add_memory_with_schema_id,
-    test_v1_wait_for_memory_processing,
-    test_v1_search_verify_neo4j_nodes,
-    test_v1_search_with_agentic_graph,
-    test_v1_add_memory_with_graph_override,
-    test_v1_security_schema_full_workflow,
+
+# Import graph generation mode tests
+from tests.test_graph_generation_modes import (
+    test_auto_mode_with_schema_id_only,
+    test_auto_mode_with_property_overrides,
+    test_manual_mode_with_explicit_graph,
 )
 
 # Import document processing tests
@@ -545,6 +542,20 @@ class V1EndpointTester:
             result = await self.run_test(test_name, test_func, app_instance)
             self.results.append(result)
     
+    async def run_graph_generation_tests(self, app_instance):
+        """Run graph generation mode tests."""
+        logger.info("🧪 Running Graph Generation Mode Tests...")
+
+        graph_generation_tests = [
+            ("Graph Generation - Auto Mode with Schema ID Only", test_auto_mode_with_schema_id_only),
+            ("Graph Generation - Auto Mode with Property Overrides", test_auto_mode_with_property_overrides),
+            ("Graph Generation - Manual Mode with Explicit Graph", test_manual_mode_with_explicit_graph),
+        ]
+
+        for test_name, test_func in graph_generation_tests:
+            result = await self.run_test(test_name, test_func, app_instance)
+            self.results.append(result)
+    
     async def run_multi_tenant_tests(self, app_instance):
         """Run multi-tenant authentication and scoping tests."""
         logger.info("🧪 Running Multi-Tenant Tests...")
@@ -592,6 +603,8 @@ class V1EndpointTester:
             await self.run_query_log_tests(app_instance)
             # Run security schema tests
             await self.run_security_schema_tests(app_instance)
+            # Run graph generation mode tests
+            await self.run_graph_generation_tests(app_instance)
             # Run multi-tenant tests
             await self.run_multi_tenant_tests(app_instance)
         except Exception as e:
