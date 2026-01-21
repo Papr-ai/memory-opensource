@@ -15,7 +15,8 @@ __pycache__/main.cpython-311.pyc
 *.pyc
 # Environment files (add these lines)
 .env*
+!.env.example
 .env.local
-.env.development  
+.env.development
 .env.production
 keys/jwt-private.pem
