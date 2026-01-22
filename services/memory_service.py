@@ -588,14 +588,15 @@ async def handle_incoming_memory(
             schema_id = memory_policy_dict.get('schema_id')
 
             # Extract mode and configure accordingly
+            # Note: 'structured' is accepted as deprecated alias for 'manual'
             mode = memory_policy_dict.get('mode', 'auto')
-            if mode == 'structured':
-                # Structured mode: developer provides exact nodes
+            if mode in ('manual', 'structured'):
+                # Manual mode: developer provides exact nodes (no LLM extraction)
                 nodes = memory_policy_dict.get('nodes')
                 relationships = memory_policy_dict.get('relationships')
                 if nodes:
                     graph_override = {'nodes': nodes, 'relationships': relationships or []}
-                    logger.info(f"🎯 STRUCTURED MODE (memory_policy): Using developer-provided graph structure")
+                    logger.info(f"🎯 MANUAL MODE (memory_policy): Using developer-provided graph structure")
             elif mode in ['auto', 'hybrid']:
                 # Auto/Hybrid mode: LLM extraction with optional constraints
                 logger.info(f"🤖 {mode.upper()} MODE (memory_policy): schema_id={schema_id}")

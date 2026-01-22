@@ -306,8 +306,20 @@ class MemoryMetadata(BaseModel):
         description="Memory category based on role. For users: preference, task, goal, fact, context. For assistants: skills, learning, task, goal, fact, context."
     )
 
-    user_id: Optional[str] = None
-    external_user_id: Optional[str] = None
+    # DEPRECATED: Use request-level fields instead
+    # These fields are kept for backwards compatibility but will be removed in v2
+    user_id: Optional[str] = Field(
+        default=None,
+        deprecated=True,
+        description="DEPRECATED: Use 'external_user_id' at request level instead. "
+                   "This field will be removed in v2."
+    )
+    external_user_id: Optional[str] = Field(
+        default=None,
+        deprecated=True,
+        description="DEPRECATED: Use 'external_user_id' at request level instead. "
+                   "This field will be removed in v2."
+    )
 
     # ACL fields for fine-grained access control
     external_user_read_access: Optional[List[str]] = Field(default_factory=list)
@@ -328,8 +340,19 @@ class MemoryMetadata(BaseModel):
     workspace_id: Optional[str] = None
     upload_id: Optional[str] = Field(None, description="Upload ID for document processing workflows")
     # Multi-tenant context (IDs only; pointers are set only in Parse payload)
-    organization_id: Optional[str] = None
-    namespace_id: Optional[str] = None
+    # DEPRECATED: Use request-level fields instead
+    organization_id: Optional[str] = Field(
+        default=None,
+        deprecated=True,
+        description="DEPRECATED: Use 'organization_id' at request level instead. "
+                   "This field will be removed in v2."
+    )
+    namespace_id: Optional[str] = Field(
+        default=None,
+        deprecated=True,
+        description="DEPRECATED: Use 'namespace_id' at request level instead. "
+                   "This field will be removed in v2."
+    )
 
     # OMO (Open Memory Object) Safety Standards
     # These fields implement the OMO standard for consent, risk, and access control
@@ -707,15 +730,20 @@ class FeedbackSource(str, Enum):
 
 class PolicyMode(str, Enum):
     """
-    Memory processing mode.
+    Memory processing mode - describes WHO controls graph generation.
 
     - AUTO: LLM extracts entities freely (default)
-    - STRUCTURED: Developer provides exact nodes (graph override)
-    - HYBRID: LLM extracts with constraints
+    - MANUAL: Developer provides exact nodes (no LLM extraction)
+    - HYBRID: LLM extracts with developer constraints
+
+    Note: 'structured' is accepted as a deprecated alias for 'manual'.
     """
     AUTO = "auto"
-    STRUCTURED = "structured"
+    MANUAL = "manual"  # Renamed from STRUCTURED - developer provides exact nodes
     HYBRID = "hybrid"
+
+    # DEPRECATED: Keep for backwards compatibility (maps to MANUAL)
+    # Note: Can't have duplicate values in Enum, so we handle 'structured' via validation
 
 
 class SearchMode(str, Enum):
@@ -918,8 +946,10 @@ class MemoryPolicy(BaseModel):
 
     **Graph Generation Modes:**
     - auto: LLM extracts entities freely (default)
-    - structured: Developer provides exact nodes (no LLM extraction)
+    - manual: Developer provides exact nodes (no LLM extraction)
     - hybrid: LLM extracts with constraints
+
+    Note: 'structured' is accepted as a deprecated alias for 'manual'.
 
     **OMO Safety Standards:**
     - consent: How data owner allowed storage (explicit, implicit, terms, none)
@@ -939,19 +969,20 @@ class MemoryPolicy(BaseModel):
         default=PolicyMode.AUTO,
         description="How to generate graph from this memory. "
                    "'auto': LLM extracts entities freely. "
-                   "'structured': You provide exact nodes (no LLM). "
-                   "'hybrid': LLM extracts with your constraints applied."
+                   "'manual': You provide exact nodes (no LLM). "
+                   "'hybrid': LLM extracts with your constraints applied. "
+                   "Note: 'structured' is accepted as deprecated alias for 'manual'."
     )
 
-    # For STRUCTURED mode: Direct graph specification
+    # For MANUAL mode: Direct graph specification
     nodes: Optional[List[NodeSpec]] = Field(
         default=None,
-        description="For structured mode: Exact nodes to create (no LLM extraction). "
-                   "Required when mode='structured'. Each node needs id, type, and properties."
+        description="For manual mode: Exact nodes to create (no LLM extraction). "
+                   "Required when mode='manual'. Each node needs id, type, and properties."
     )
     relationships: Optional[List[RelationshipSpec]] = Field(
         default=None,
-        description="For structured mode: Exact relationships between nodes. "
+        description="For manual mode: Exact relationships between nodes. "
                    "References node IDs defined in 'nodes' array."
     )
 
@@ -1010,6 +1041,22 @@ class MemoryPolicy(BaseModel):
     # VALIDATION
     # =========================================================================
 
+    @field_validator('mode', mode='before')
+    @classmethod
+    def normalize_mode(cls, v):
+        """
+        Normalize mode value, accepting 'structured' as deprecated alias for 'manual'.
+        """
+        if v == 'structured':
+            # Log deprecation warning (import logger at module level)
+            import logging
+            logging.getLogger(__name__).warning(
+                "mode='structured' is deprecated, use mode='manual' instead. "
+                "This alias will be removed in a future version."
+            )
+            return 'manual'
+        return v
+
     @field_validator('consent')
     @classmethod
     def validate_consent(cls, v):
@@ -1031,10 +1078,10 @@ class MemoryPolicy(BaseModel):
     @model_validator(mode='after')
     def validate_mode_requirements(self):
         """Validate that mode-specific fields are properly set."""
-        if self.mode == PolicyMode.STRUCTURED:
+        if self.mode == PolicyMode.MANUAL:
             if not self.nodes:
                 raise ValueError(
-                    "mode='structured' requires 'nodes' to be provided. "
+                    "mode='manual' requires 'nodes' to be provided. "
                     "Use mode='auto' for LLM extraction or provide exact nodes."
                 )
         return self
@@ -1051,10 +1098,10 @@ class MemoryPolicy(BaseModel):
                     }
                 },
                 {
-                    "name": "Structured Mode with Exact Nodes",
+                    "name": "Manual Mode with Exact Nodes",
                     "summary": "Developer provides exact graph structure",
                     "value": {
-                        "mode": "structured",
+                        "mode": "manual",
                         "nodes": [
                             {"id": "txn_001", "type": "Transaction", "properties": {"amount": 5.50}}
                         ],

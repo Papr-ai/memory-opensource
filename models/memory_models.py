@@ -1215,7 +1215,7 @@ class SchemaSpecificationMixin(BaseModel):
     Provides a unified way to control:
     1. **Graph Generation**: How knowledge graph nodes are created
        - auto: LLM extracts entities (default)
-       - structured: You provide exact nodes
+       - manual: You provide exact nodes (no LLM extraction)
        - hybrid: LLM with your constraints
 
     2. **OMO Safety Standards**: Consent, risk, and access control
@@ -1227,15 +1227,18 @@ class SchemaSpecificationMixin(BaseModel):
        - schema_id: Inherit memory_policy from schema
 
     **Precedence**: Request-level > Schema-level > System defaults
+
+    Note: 'structured' is accepted as deprecated alias for 'manual'.
     """
 
     # PRIMARY: Unified memory policy (RECOMMENDED)
     memory_policy: Optional[MemoryPolicy] = Field(
         default=None,
         description="Unified policy for graph generation and OMO safety. "
-                   "Use mode='auto' (LLM extraction), 'structured' (exact nodes), "
+                   "Use mode='auto' (LLM extraction), 'manual' (exact nodes), "
                    "or 'hybrid' (LLM with constraints). Includes consent, risk, and ACL settings. "
-                   "If schema_id is set, schema's memory_policy is used as defaults."
+                   "If schema_id is set, schema's memory_policy is used as defaults. "
+                   "Note: 'structured' is accepted as deprecated alias for 'manual'."
     )
 
     # DEPRECATED: Legacy graph generation (kept for backwards compatibility)
@@ -1289,15 +1292,8 @@ class AddMemoryRequest(SchemaSpecificationMixin):
         description="Optional namespace ID for multi-tenant memory scoping. When provided, memory is associated with this namespace."
     )
 
-    # Memory Policy (NEW - unified node constraints and processing control)
-    memory_policy: Optional[MemoryPolicy] = Field(
-        default=None,
-        description="Policies for how this memory should be processed and stored. "
-                   "Use mode='auto' for LLM extraction (default), 'structured' for exact nodes, "
-                   "'hybrid' for LLM with constraints. See MemoryPolicy for full options."
-    )
-
-    # schema_id, simple_schema_mode, graph_override, property_overrides inherited from SchemaSpecificationMixin
+    # memory_policy and graph_generation inherited from SchemaSpecificationMixin
+    # DO NOT redefine here - use the inherited field
 
     # Deprecated fields (kept for backwards compatibility)
     user_id: Optional[str] = Field(
