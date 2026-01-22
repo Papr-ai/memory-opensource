@@ -1,9 +1,12 @@
 from pydantic import BaseModel, Field, ConfigDict, field_validator
-from typing import Dict, Any, List, Optional, Union, Literal
+from typing import Dict, Any, List, Optional, Union, Literal, TYPE_CHECKING
 from enum import Enum
 from datetime import datetime, timezone
 from uuid import uuid4
 import re
+
+if TYPE_CHECKING:
+    from models.shared_types import MemoryPolicy
 
 class PropertyType(str, Enum):
     STRING = "string"
@@ -162,7 +165,15 @@ class UserGraphSchema(BaseModel):
         default_factory=dict,
         description="Custom relationship types (max 20 per schema)"
     )
-    
+
+    # Memory Policy - default processing rules for memories using this schema
+    memory_policy: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Default memory policy for memories using this schema. "
+                   "Includes mode ('auto', 'structured', 'hybrid'), node_constraints, "
+                   "and OMO safety settings (consent, risk). Memory-level policies override schema-level."
+    )
+
     # Metadata
     status: SchemaStatus = SchemaStatus.DRAFT
     scope: SchemaScope = SchemaScope.ORGANIZATION  # Default to organization scope for multi-tenant isolation

@@ -55,7 +55,7 @@ async def main():
         client = await get_temporal_client()
         logger.info("Successfully connected to Temporal")
 
-        task_queue = "document-processing"
+        task_queue = "document-processing-v2"
 
         # Build ID format: v{semver}+{feature}.{timestamp}
         # See start_all_workers.py for full explanation

@@ -11064,6 +11064,7 @@ class MemoryGraph:
     ):
         """
         Stores the LLM-generated graph structure in Neo4j, applying proper metadata and access controls.
+        Integrates with OMO (Open Memory Object) safety standards for consent, risk, and audit tracking.
         """
         # Fallback mode check: skip Neo4j operations if in fallback
         if self.async_neo_conn.fallback_mode:
@@ -11075,6 +11076,30 @@ class MemoryGraph:
 
         # Extract customMetadata for multi-tenant fields
         custom_metadata = metadata.get('customMetadata', {})
+
+        # OMO Safety Standards: Extract consent, risk, and ACL from metadata
+        omo_consent = metadata.get("consent", "implicit")  # Default to implicit consent
+        omo_risk = metadata.get("risk", "none")  # Default to no risk
+        omo_acl = metadata.get("omo_acl")  # Optional explicit ACL
+        external_user_id = metadata.get("external_user_id")
+        memory_id = memory_item.get("id") or memory_item.get("memoryId")
+
+        # OMO Consent Enforcement: Skip graph extraction if consent is 'none'
+        if omo_consent == "none":
+            logger.warning(
+                f"Memory {memory_id} has consent='none' - skipping graph storage. "
+                "Memories with no consent should not have graph nodes created."
+            )
+            return
+
+        # OMO Audit Trail: Track extraction metadata
+        omo_audit = {
+            "source_memory_id": memory_id,
+            "extracted_at": datetime.now(timezone.utc).isoformat(),
+            "consent": omo_consent,
+            "risk": omo_risk,
+            "extraction_method": "llm"  # This function handles LLM-extracted graphs
+        }
 
         # Common metadata fields to include for all nodes
         common_metadata = {
@@ -11099,8 +11124,33 @@ class MemoryGraph:
             "namespace_write_access": metadata.get("namespace_write_access", []),
             "external_user_read_access": metadata.get("external_user_read_access", []),
             "external_user_write_access": metadata.get("external_user_write_access", []),
-            "createdAt": metadata.get("createdAt") or datetime.now(timezone.utc).isoformat()
+            "createdAt": metadata.get("createdAt") or datetime.now(timezone.utc).isoformat(),
+            # OMO Safety Standard annotations
+            "_omo_consent": omo_consent,
+            "_omo_risk": omo_risk,
+            "_omo_source_memory_id": memory_id,
+            "_omo_audit": json.dumps(omo_audit) if omo_audit else None
         }
+
+        # OMO Risk Enforcement: For flagged content, restrict ACL to owner only
+        if omo_risk == "flagged":
+            logger.warning(f"Memory {memory_id} has risk='flagged' - restricting ACL to owner only")
+            common_metadata["_omo_requires_review"] = True
+            if external_user_id:
+                # Override ACL to restrict to owner only
+                common_metadata["external_user_read_access"] = [external_user_id]
+                common_metadata["external_user_write_access"] = [external_user_id]
+
+        # OMO ACL Propagation: Use explicit ACL if provided
+        if omo_acl:
+            logger.debug(f"Using explicit omo_acl for memory {memory_id}: {omo_acl}")
+            if isinstance(omo_acl, dict):
+                if omo_acl.get("read"):
+                    common_metadata["external_user_read_access"] = omo_acl["read"]
+                if omo_acl.get("write"):
+                    common_metadata["external_user_write_access"] = omo_acl["write"]
+
+        logger.info(f"OMO Safety: Processing graph for memory {memory_id} with consent={omo_consent}, risk={omo_risk}")
 
         # Convert dictionary nodes to Node objects if needed
         nodes_objects = [

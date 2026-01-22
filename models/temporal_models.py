@@ -67,14 +67,46 @@ class BatchWorkflowData(BaseModel):
 
 class SchemaSpecification(BaseModel):
     """Temporal-safe schema specification to avoid heavy imports in workflows.
-    
+
     Note: property_overrides uses Dict[str, Any] instead of PropertyOverrideRule to avoid
     circular imports. The actual PropertyOverrideRule validation happens in shared_types.py.
+
+    This model now supports the full memory_policy API including:
+    - mode: Processing mode (auto, structured, hybrid)
+    - node_constraints: Rules for LLM-extracted nodes
+    - OMO fields: consent, risk, omo_acl for safety standards
     """
+    # Core schema fields
     schema_id: Optional[str] = Field(default=None, description="Schema ID to enforce")
     simple_schema_mode: bool = Field(default=False, description="Use simplified schema mode")
     graph_override: Optional[Dict[str, Any]] = Field(default=None, description="Graph override structure")
     property_overrides: Optional[List[Dict[str, Any]]] = Field(default=None, description="Property overrides with match conditions (PropertyOverrideRule dicts)")
+
+    # Memory Policy fields (from unified API)
+    mode: Optional[str] = Field(
+        default="auto",
+        description="Processing mode: 'auto' (LLM extracts freely), 'structured' (exact nodes), 'hybrid' (LLM with constraints)"
+    )
+    node_constraints: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description="Rules for how LLM-extracted nodes should be created/updated (for auto/hybrid modes)"
+    )
+
+    # OMO Safety Standards
+    consent: Optional[str] = Field(
+        default="implicit",
+        description="How the data owner allowed this memory to be stored/used. "
+                   "Values: 'explicit', 'implicit', 'terms', 'none'"
+    )
+    risk: Optional[str] = Field(
+        default="none",
+        description="Post-ingest safety assessment. "
+                   "Values: 'none', 'sensitive', 'flagged'"
+    )
+    omo_acl: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Access control list. Format: {'read': [...], 'write': [...]}"
+    )
 
 
 class DocumentFileReference(BaseModel):

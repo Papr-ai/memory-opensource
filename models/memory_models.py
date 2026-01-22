@@ -1,6 +1,11 @@
 from pydantic import BaseModel, Field, ConfigDict, ValidationError, field_validator, RootModel
 from typing import Dict, Any, List, Optional, Union, Literal
-from models.shared_types import MemoryMetadata, NodeLabel, ContextItem, MemoryType, MessageRole, UserMemoryCategory, AssistantMemoryCategory, PropertyOverrideRule
+from models.shared_types import (
+    MemoryMetadata, NodeLabel, ContextItem, MemoryType, MessageRole,
+    UserMemoryCategory, AssistantMemoryCategory, PropertyOverrideRule,
+    MemoryPolicy, PolicyMode, NodeConstraint, NodeSpec, RelationshipSpec,
+    ConsentLevel, RiskLevel, ACLConfig, OMOFilter
+)
 from datetime import datetime, timezone, UTC
 from memory.memory_item import MemoryItem
 import json
@@ -778,13 +783,18 @@ class SearchRequest(BaseModel):
             "Set to false only if you need faster, simpler keyword-based search."
         )
     )
-    user_id: Optional[str] = Field(
-        default=None,
-        description="Optional internal user ID to filter search results by a specific user. If not provided, results are not filtered by user. If both user_id and external_user_id are provided, user_id takes precedence."
-    )
+    # User identification (external_user_id is primary)
     external_user_id: Optional[str] = Field(
         default=None,
-        description="Optional external user ID to filter search results by a specific external user. If both user_id and external_user_id are provided, user_id takes precedence."
+        description="Your application's user identifier to filter search results. This is the primary way to identify users. "
+                   "Use this for your app's user IDs (e.g., 'user_alice_123', UUID, email)."
+    )
+    # Deprecated field (kept for backwards compatibility)
+    user_id: Optional[str] = Field(
+        default=None,
+        description="DEPRECATED: Use 'external_user_id' instead. Internal Papr Parse user ID. "
+                   "Most developers should not use this field directly.",
+        json_schema_extra={"deprecated": True}
     )
     organization_id: Optional[str] = Field(
         default=None,
@@ -813,6 +823,13 @@ class SearchRequest(BaseModel):
     reranking_config: Optional[RerankingConfig] = Field(
         default=None,
         description="Optional reranking configuration. If provided, enables reranking with specified provider (OpenAI or Cohere) and model. If not provided but rank_results=True, uses default OpenAI reranking."
+    )
+
+    # OMO (Open Memory Object) Filtering - filter search results by safety standards
+    omo_filter: Optional[OMOFilter] = Field(
+        default=None,
+        description="Optional OMO (Open Memory Object) safety filter. Filter search results by consent level and/or risk level. "
+                   "Use this to exclude memories without proper consent or flagged content from search results."
     )
 
     @field_validator('query')
@@ -1193,17 +1210,42 @@ class GraphGeneration(BaseModel):
 
 class SchemaSpecificationMixin(BaseModel):
     """
-    Mixin for consistent graph generation specification across all memory request types.
-    
-    Provides a unified way to specify how the knowledge graph should be generated:
-    - Auto mode: AI-powered extraction with optional guidance
-    - Manual mode: Complete control over graph structure
+    Mixin for consistent memory processing policy across all memory request types.
+
+    Provides a unified way to control:
+    1. **Graph Generation**: How knowledge graph nodes are created
+       - auto: LLM extracts entities (default)
+       - structured: You provide exact nodes
+       - hybrid: LLM with your constraints
+
+    2. **OMO Safety Standards**: Consent, risk, and access control
+       - consent: explicit, implicit, terms, none
+       - risk: none, sensitive, flagged
+       - omo_acl: Read/write permissions
+
+    3. **Schema Integration**: Reference schema-level defaults
+       - schema_id: Inherit memory_policy from schema
+
+    **Precedence**: Request-level > Schema-level > System defaults
     """
-    graph_generation: Optional[GraphGeneration] = Field(
-        default_factory=lambda: GraphGeneration(mode=GraphGenerationMode.AUTO),
-        description="Graph generation configuration. Defaults to auto mode with AI-selected schema."
+
+    # PRIMARY: Unified memory policy (RECOMMENDED)
+    memory_policy: Optional[MemoryPolicy] = Field(
+        default=None,
+        description="Unified policy for graph generation and OMO safety. "
+                   "Use mode='auto' (LLM extraction), 'structured' (exact nodes), "
+                   "or 'hybrid' (LLM with constraints). Includes consent, risk, and ACL settings. "
+                   "If schema_id is set, schema's memory_policy is used as defaults."
     )
-    
+
+    # DEPRECATED: Legacy graph generation (kept for backwards compatibility)
+    graph_generation: Optional[GraphGeneration] = Field(
+        default=None,
+        description="DEPRECATED: Use 'memory_policy' instead. Legacy graph generation configuration. "
+                   "If both memory_policy and graph_generation are provided, memory_policy takes precedence.",
+        json_schema_extra={"deprecated": True}
+    )
+
     model_config = ConfigDict(extra='allow')
 
 
@@ -1217,8 +1259,17 @@ class AddMemoryRequest(SchemaSpecificationMixin):
         default=MemoryType.TEXT,
         description="Memory item type; defaults to 'text' if omitted"
     )
+
+    # User identification (simplified)
+    external_user_id: Optional[str] = Field(
+        default=None,
+        description="Your application's user identifier. This is the primary way to identify users. "
+                   "Use this for your app's user IDs (e.g., 'user_alice_123', UUID, email). "
+                   "Papr will automatically resolve or create internal users as needed."
+    )
+
     metadata: Optional[MemoryMetadata] = Field(
-        None,   
+        None,
         description="Metadata used in Neo4J and Pinecone for a memory item. Include role and category here."
     )
     context: Optional[List[ContextItem]] = Field(
@@ -1237,7 +1288,24 @@ class AddMemoryRequest(SchemaSpecificationMixin):
         default=None,
         description="Optional namespace ID for multi-tenant memory scoping. When provided, memory is associated with this namespace."
     )
+
+    # Memory Policy (NEW - unified node constraints and processing control)
+    memory_policy: Optional[MemoryPolicy] = Field(
+        default=None,
+        description="Policies for how this memory should be processed and stored. "
+                   "Use mode='auto' for LLM extraction (default), 'structured' for exact nodes, "
+                   "'hybrid' for LLM with constraints. See MemoryPolicy for full options."
+    )
+
     # schema_id, simple_schema_mode, graph_override, property_overrides inherited from SchemaSpecificationMixin
+
+    # Deprecated fields (kept for backwards compatibility)
+    user_id: Optional[str] = Field(
+        default=None,
+        description="DEPRECATED: Use 'external_user_id' instead. Internal Papr Parse user ID. "
+                   "Most developers should not use this field directly.",
+        json_schema_extra={"deprecated": True}
+    )
 
     @field_validator("type", mode="before")
     @classmethod
@@ -1251,6 +1319,37 @@ class AddMemoryRequest(SchemaSpecificationMixin):
         return v
     
 
+    @model_validator(mode="after")
+    def handle_user_id_deprecation(self):
+        """Handle user_id deprecation and log warning if used."""
+        if self.user_id is not None:
+            # Log deprecation warning
+            logger.warning(
+                f"DEPRECATION WARNING: 'user_id' field is deprecated in AddMemoryRequest. "
+                f"Use 'external_user_id' instead. Provided user_id: {self.user_id[:20]}..."
+            )
+            # If external_user_id is not set but user_id is, copy it over for backwards compat
+            # Note: This assumes user_id was being used incorrectly as external_user_id
+            # The validation layer will catch actual Parse IDs vs external IDs
+            if self.external_user_id is None:
+                # Don't auto-copy - let the user fix their code
+                pass
+        return self
+
+    def get_effective_external_user_id(self) -> Optional[str]:
+        """Get the effective external user ID with precedence rules.
+
+        Precedence (highest to lowest):
+        1. external_user_id at request level
+        2. external_user_id in metadata
+        3. None (developer is the end user)
+        """
+        if self.external_user_id:
+            return self.external_user_id
+        if self.metadata and self.metadata.external_user_id:
+            return self.metadata.external_user_id
+        return None
+
     def as_handler_dict(self) -> dict:
         """Return a dict suitable for the common_add_memory_handler, handling nested serialization."""
         handler_dict = {
@@ -1262,13 +1361,11 @@ class AddMemoryRequest(SchemaSpecificationMixin):
             "graph_generation": self.graph_generation.model_dump() if self.graph_generation else None
         }
 
-        # Add multi-tenant fields if present
-        if self.organization_id is not None:
-            handler_dict["organization_id"] = self.organization_id
-        if self.namespace_id is not None:
-            handler_dict["namespace_id"] = self.namespace_id
-
-        return handler_dict
+        # Add user identification fields
+        if self.external_user_id is not None:
+            handler_dict["external_user_id"] = self.external_user_id
+        if self.user_id is not None:
+            handler_dict["user_id"] = self.user_id
 
         # Add multi-tenant fields if present
         if self.organization_id is not None:
@@ -1349,8 +1446,14 @@ class AddMemoryRequest(SchemaSpecificationMixin):
         extra='forbid'
     )
 
-class UpdateMemoryRequest(BaseModel):
-    """Request model for updating an existing memory"""
+class UpdateMemoryRequest(SchemaSpecificationMixin):
+    """Request model for updating an existing memory.
+
+    Inherits memory_policy from SchemaSpecificationMixin for controlling:
+    - Graph generation mode (auto, structured, hybrid)
+    - Node constraints for LLM extraction
+    - OMO safety standards (consent, risk, ACL)
+    """
     content: Optional[str] = Field(
         None,
         description="The new content of the memory item"
@@ -1379,6 +1482,7 @@ class UpdateMemoryRequest(BaseModel):
         default=None,
         description="Optional namespace ID for multi-tenant memory scoping. When provided, update is scoped to memories within this namespace."
     )
+    # memory_policy and graph_generation inherited from SchemaSpecificationMixin
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -1421,13 +1525,17 @@ class UpdateMemoryRequest(BaseModel):
 
 class BatchMemoryRequest(SchemaSpecificationMixin):
     """Request model for batch adding memories"""
-    user_id: Optional[str] = Field(
-        default=None,
-        description="Internal user ID for all memories in the batch. If not provided, developer's user ID will be used."
-    )
+    # Primary user identification
     external_user_id: Optional[str] = Field(
         default=None,
-        description="External user ID for all memories in the batch. If provided and user_id is not, will be resolved to internal user ID."
+        description="Your application's user identifier for all memories in the batch. This is the primary way to identify users. "
+                   "Papr will automatically resolve or create internal users as needed."
+    )
+    # Deprecated field (kept for backwards compatibility)
+    user_id: Optional[str] = Field(
+        default=None,
+        description="DEPRECATED: Use 'external_user_id' instead. Internal Papr Parse user ID.",
+        json_schema_extra={"deprecated": True}
     )
     organization_id: Optional[str] = Field(
         default=None,

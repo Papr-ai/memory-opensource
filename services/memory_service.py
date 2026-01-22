@@ -25,6 +25,11 @@ import httpx
 from models.shared_types import MemoryMetadata
 
 from services.logger_singleton import LoggerSingleton
+from services.memory_policy_resolver import (
+    resolve_memory_policy_from_schema,
+    extract_omo_fields_from_policy,
+    should_skip_graph_extraction
+)
 
 # Create a logger instance for this module
 logger = LoggerSingleton.get_logger(__name__)
@@ -571,8 +576,32 @@ async def handle_incoming_memory(
         schema_id = None
         simple_schema_mode = False
         property_overrides = None
-        
-        if memory_request.graph_generation:
+        memory_policy_dict = None
+
+        # NEW: Check for memory_policy first (new unified API)
+        if hasattr(memory_request, 'memory_policy') and memory_request.memory_policy:
+            mp = memory_request.memory_policy
+            # Convert Pydantic model to dict if needed
+            memory_policy_dict = mp.model_dump() if hasattr(mp, 'model_dump') else mp
+
+            # Extract schema_id from memory_policy
+            schema_id = memory_policy_dict.get('schema_id')
+
+            # Extract mode and configure accordingly
+            mode = memory_policy_dict.get('mode', 'auto')
+            if mode == 'structured':
+                # Structured mode: developer provides exact nodes
+                nodes = memory_policy_dict.get('nodes')
+                relationships = memory_policy_dict.get('relationships')
+                if nodes:
+                    graph_override = {'nodes': nodes, 'relationships': relationships or []}
+                    logger.info(f"🎯 STRUCTURED MODE (memory_policy): Using developer-provided graph structure")
+            elif mode in ['auto', 'hybrid']:
+                # Auto/Hybrid mode: LLM extraction with optional constraints
+                logger.info(f"🤖 {mode.upper()} MODE (memory_policy): schema_id={schema_id}")
+
+        # LEGACY: Fall back to graph_generation if memory_policy not provided
+        elif memory_request.graph_generation:
             graph_gen = memory_request.graph_generation
             if graph_gen.mode == "manual" and graph_gen.manual:
                 graph_override = graph_gen.manual
@@ -585,7 +614,53 @@ async def handle_incoming_memory(
                 logger.info(f"🤖 AUTO MODE: schema_id={schema_id}, simple_schema_mode={simple_schema_mode}")
                 if property_overrides:
                     logger.info(f"🔧 PROPERTY OVERRIDES: {len(property_overrides)} rules")
-        
+
+        # Resolve schema-level memory_policy if schema_id is provided
+        if schema_id:
+            try:
+                resolved_policy = await resolve_memory_policy_from_schema(
+                    memory_graph=memory_graph,
+                    schema_id=schema_id,
+                    memory_policy=memory_policy_dict,
+                    user_id=end_user_id,
+                    workspace_id=workspace_id,
+                    organization_id=metadata.get('organization_id'),
+                    namespace_id=metadata.get('namespace_id'),
+                    api_key=api_key
+                )
+                logger.info(f"📋 RESOLVED POLICY: {resolved_policy}")
+
+                # Check if we should skip graph extraction (consent='none')
+                if should_skip_graph_extraction(resolved_policy):
+                    logger.warning(f"⚠️ Skipping graph extraction due to consent='none' policy")
+                    # Continue with memory storage, but skip graph generation
+                    graph_override = {'nodes': [], 'relationships': []}
+
+                # Extract OMO fields and add to metadata
+                omo_fields = extract_omo_fields_from_policy(resolved_policy)
+                metadata['consent'] = omo_fields.get('consent', 'implicit')
+                metadata['risk'] = omo_fields.get('risk', 'none')
+                if omo_fields.get('omo_acl'):
+                    metadata['omo_acl'] = omo_fields['omo_acl']
+
+                # Extract node_constraints for graph processing
+                node_constraints = resolved_policy.get('node_constraints')
+                if node_constraints:
+                    if not property_overrides:
+                        property_overrides = []
+                    # Convert node_constraints to property_overrides format for compatibility
+                    for constraint in node_constraints:
+                        if constraint.get('force'):
+                            property_overrides.append({
+                                'node_type': constraint['node_type'],
+                                'properties': constraint['force']
+                            })
+                    logger.info(f"🔧 NODE CONSTRAINTS from policy: {len(node_constraints)} rules")
+
+            except Exception as e:
+                logger.warning(f"Failed to resolve schema-level policy: {e}")
+                # Continue without schema policy
+
         logger.info(f"🔍 DEBUG: Extracted graph_override: {graph_override is not None}")
         logger.info(f"🔍 DEBUG: Extracted schema_id: {schema_id}")
         logger.info(f"🔍 DEBUG: Extracted simple_schema_mode: {simple_schema_mode}")

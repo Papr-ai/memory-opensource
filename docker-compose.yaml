@@ -10,6 +10,9 @@
 # Optional Parse Dashboard:
 #   docker-compose --profile dashboard up -d parse-dashboard
 #   Access at http://localhost:4040 (admin / password)
+#
+# Temporal Web UI (workflow monitoring):
+#   Access at http://localhost:8080
 # ============================================
 
 services:
@@ -52,6 +55,11 @@ services:
       # Fix protobuf compatibility issue with sentencepiece (BigBird tokenizer)
       # This uses pure-Python protobuf implementation to avoid version conflicts
       PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python
+      # Temporal configuration for durable workflows
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-default}
+      TEMPORAL_TASK_QUEUE: ${TEMPORAL_TASK_QUEUE:-memory-processing}
+      TEMPORAL_ENABLED: ${TEMPORAL_ENABLED:-true}
     depends_on:
       mongodb:
         condition: service_started
@@ -63,6 +71,8 @@ services:
         condition: service_started
       parse-server:
         condition: service_started
+      temporal:
+        condition: service_healthy
     networks:
       - papr-network
     restart: unless-stopped
@@ -194,6 +204,113 @@ services:
       - papr-network
     restart: unless-stopped
 
+  # ============================================
+  # Temporal - Durable Workflow Engine
+  # ============================================
+  # Temporal Server - orchestrates durable workflows for batch processing and document ingestion
+  temporal:
+    image: temporalio/auto-setup:1.25.2
+    container_name: papr-temporal
+    ports:
+      - "7233:7233"   # gRPC Frontend
+    environment:
+      - DB=postgresql
+      - DB_PORT=5432
+      - POSTGRES_USER=temporal
+      - POSTGRES_PWD=temporal
+      - POSTGRES_SEEDS=temporal-postgres
+      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development-sql.yaml
+    depends_on:
+      temporal-postgres:
+        condition: service_healthy
+    networks:
+      - papr-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "tctl", "--address", "temporal:7233", "cluster", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # PostgreSQL for Temporal (separate from MongoDB used by app)
+  temporal-postgres:
+    image: postgres:15-alpine
+    container_name: papr-temporal-postgres
+    environment:
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: temporal
+      POSTGRES_DB: temporal
+    volumes:
+      - temporal_postgres_data:/var/lib/postgresql/data
+    networks:
+      - papr-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U temporal"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Temporal Web UI - Monitor workflows at http://localhost:8080
+  temporal-ui:
+    image: temporalio/ui:2.31.2
+    container_name: papr-temporal-ui
+    ports:
+      - "8080:8080"
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_CORS_ORIGINS=http://localhost:3000
+    depends_on:
+      temporal:
+        condition: service_healthy
+    networks:
+      - papr-network
+    restart: unless-stopped
+
+  # Temporal Worker - Processes batch memory and document workflows
+  temporal-worker:
+    build: .
+    container_name: papr-temporal-worker
+    image: "${IMAGE_NAME:-papr_memory_oss}:${IMAGE_TAG:-latest}"
+    command: python start_all_workers.py
+    env_file:
+      - .env.opensource
+    environment:
+      PAPR_EDITION: opensource
+      # Database connections
+      MONGO_URI: mongodb://${MONGODB_USERNAME:-admin}:${MONGODB_PASSWORD:-password}@mongodb:27017/${MONGODB_DATABASE:-papr_memory}?authSource=admin
+      REDIS_URL: redis://:${REDIS_PASSWORD:-password}@redis:6379/0
+      NEO4J_URL: bolt://neo4j:7687
+      NEO4J_USERNAME: ${NEO4J_USERNAME:-neo4j}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-password}
+      QDRANT_URL: http://qdrant:6333
+      PARSE_SERVER_URL: http://parse-server:1337/parse
+      PARSE_APPLICATION_ID: ${PARSE_SERVER_APPLICATION_ID:-papr-oss-app-id}
+      PARSE_MASTER_KEY: ${PARSE_SERVER_MASTER_KEY:-papr-oss-master-key}
+      # Temporal configuration
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-default}
+      TEMPORAL_TASK_QUEUE: ${TEMPORAL_TASK_QUEUE:-memory-processing}
+      # Fix protobuf compatibility
+      PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python
+    depends_on:
+      temporal:
+        condition: service_healthy
+      mongodb:
+        condition: service_started
+      redis:
+        condition: service_started
+      neo4j:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      parse-server:
+        condition: service_started
+    networks:
+      - papr-network
+    restart: unless-stopped
+
   # Parse Dashboard (Optional - for development)
   # Start with: docker-compose --profile dashboard up -d parse-dashboard
   # Access Parse Dashboard: http://localhost:4040
@@ -258,6 +375,8 @@ volumes:
   qdrant_data:
     driver: local
   parse_data:
+    driver: local
+  temporal_postgres_data:
     driver: local
 
 networks:

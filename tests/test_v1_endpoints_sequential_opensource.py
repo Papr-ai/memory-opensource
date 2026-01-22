@@ -3,8 +3,10 @@
 Sequential V1 Endpoints Test Runner - Open Source Edition
 
 This script runs v1 endpoint tests sequentially for open source edition.
-Only includes routes available in OSS (memory, user, feedback, message, sync, telemetry, schema).
-Excludes cloud-only routes (document, graphql).
+Includes routes available in OSS (memory, user, feedback, message, sync, telemetry, schema, document).
+Excludes cloud-only routes (graphql, billing).
+
+Document processing and Temporal workflows are now included in open source!
 
 Usage:
     python test_v1_endpoints_sequential_opensource.py
@@ -36,6 +38,10 @@ from tests.test_add_memory_fastapi import (
     test_v1_add_memory_with_external_user_id_only,
     test_v1_add_memory_with_external_user_id_and_acl,
     test_v1_add_memory_with_user_id_from_created_user,
+    test_v1_add_memory_with_org_namespace_top_level,
+    test_v1_add_memory_with_deprecated_org_namespace,
+    test_v1_add_memory_with_org_namespace_top_level,
+    test_v1_add_memory_with_deprecated_org_namespace,
     
     # Batch Add Memory Tests
     test_v1_add_memory_batch_1,
@@ -87,6 +93,22 @@ from tests.test_add_memory_fastapi import (
     test_memory_models_multi_tenant_fields,
     test_batch_memory_multi_tenant_scoping,
     test_backward_compatibility,
+)
+from tests.test_memory_policy_end_to_end import (
+    TestLinkToDSLEndToEnd,
+    TestFullMemoryPolicyEndToEnd,
+    TestCustomMetadataPropagation,
+    TestSchemaLevelPolicyInheritance,
+    TestMemoryLevelPolicyOverride,
+    TestManualPolicyGraphOverride,
+    TestPolicyMerging,
+    TestControlledVocabulary,
+    TestEdgeConstraintsEndToEnd,
+    TestGraphQLValidation,
+    TestErrorHandling,
+    TestDeepTrustEdgePolicy,
+    unique_id as memory_policy_unique_id,
+    api_headers as memory_policy_api_headers,
 )
 
 # Import delete all memories tests
@@ -143,6 +165,26 @@ from tests.test_query_log_integration import (
     test_fused_confidence_matches_weight_delta,
     test_backfill_retrieval_counters_small_batch,
 )
+from tests import test_schema_memory_policy as schema_policy_tests
+from tests import test_omo_safety as omo_safety_tests
+from tests.test_messages_endpoint_end_to_end import (
+    test_messages_endpoint_end_to_end,
+)
+
+# Import document processing tests (now included in open source)
+try:
+    from tests.test_document_simple import (
+        test_file_validation,
+        test_provider_manager_initialization,
+        test_document_to_memory_transformer,
+    )
+    from tests.test_document_processing_integration import (
+        test_extract_structured_content_activity,
+        test_llm_memory_generation_activity,
+    )
+    DOCUMENT_TESTS_AVAILABLE = True
+except ImportError:
+    DOCUMENT_TESTS_AVAILABLE = False
 
 # Configure logging
 logging.basicConfig(
@@ -236,6 +278,8 @@ class V1EndpointTesterOSS:
             ("Add Memory - External User ID Only", test_v1_add_memory_with_external_user_id_only),
             ("Add Memory - External User ID + ACL", test_v1_add_memory_with_external_user_id_and_acl),
             ("Add Memory - User ID from Created User", test_v1_add_memory_with_user_id_from_created_user),
+            ("Add Memory - Top-Level Org/Namespace", test_v1_add_memory_with_org_namespace_top_level),
+            ("Add Memory - Deprecated Org/Namespace", test_v1_add_memory_with_deprecated_org_namespace),
         ]
         
         for test_name, test_func in add_memory_tests:
@@ -316,6 +360,76 @@ class V1EndpointTesterOSS:
         ]
         
         for test_name, test_func in search_tests:
+            result = await self.run_test(test_name, test_func, app_instance)
+            self.results.append(result)
+
+    async def run_memory_policy_tests(self, app_instance):
+        """Run memory policy end-to-end tests."""
+        logger.info("🧪 Running Memory Policy End-to-End Tests...")
+
+        memory_policy_tests = [
+            ("Memory Policy - link_to String", test_memory_policy_link_to_string_form_wrapper),
+            ("Memory Policy - link_to List", test_memory_policy_link_to_list_form_wrapper),
+            ("Memory Policy - link_to Dict create=never", test_memory_policy_link_to_dict_form_wrapper),
+            ("Memory Policy - link_to Exact Match", test_memory_policy_link_to_exact_match_wrapper),
+            ("Memory Policy - link_to Semantic Threshold", test_memory_policy_link_to_semantic_threshold_wrapper),
+            ("Memory Policy - Auto Mode", test_memory_policy_auto_mode_wrapper),
+            ("Memory Policy - Manual Mode", test_memory_policy_manual_mode_wrapper),
+            ("Memory Policy - OMO Safety", test_memory_policy_omo_safety_wrapper),
+            ("Memory Policy - Custom Metadata", test_memory_policy_custom_metadata_wrapper),
+            ("Memory Policy - Schema Inheritance", test_memory_policy_schema_inheritance_wrapper),
+            ("Memory Policy - Override Schema", test_memory_policy_override_schema_wrapper),
+            ("Memory Policy - Manual Graph Override", test_memory_policy_manual_graph_override_wrapper),
+            ("Memory Policy - DeepTrust Edge (link_to)", test_memory_policy_deeptrust_link_to_wrapper),
+            ("Memory Policy - DeepTrust Edge (full API)", test_memory_policy_deeptrust_full_api_wrapper),
+            ("Memory Policy - link_to + policy", test_memory_policy_link_to_with_policy_wrapper),
+            ("Memory Policy - link_to merge constraints", test_memory_policy_link_to_merge_constraints_wrapper),
+            ("Memory Policy - create never blocks", test_memory_policy_create_never_blocks_wrapper),
+            ("Memory Policy - mixed create policies", test_memory_policy_mixed_create_wrapper),
+            ("Memory Policy - edge arrow syntax", test_memory_policy_edge_arrow_wrapper),
+            ("Memory Policy - edge create never", test_memory_policy_edge_create_never_wrapper),
+            ("Memory Policy - GraphQL validation", test_memory_policy_graphql_validation_wrapper),
+            ("Memory Policy - invalid link_to syntax", test_memory_policy_invalid_link_to_wrapper),
+            ("Memory Policy - invalid policy mode", test_memory_policy_invalid_mode_wrapper),
+        ]
+
+        for test_name, test_func in memory_policy_tests:
+            result = await self.run_test(test_name, test_func, app_instance)
+            self.results.append(result)
+
+    async def run_schema_policy_unit_tests(self, app_instance):
+        """Run schema policy unit tests (resolver behavior)."""
+        logger.info("🧪 Running Schema Policy Unit Tests...")
+
+        schema_policy_tests_list = [
+            ("Schema Policy - Defaults", test_schema_policy_defaults_wrapper),
+            ("Schema Policy - Schema Applied", test_schema_policy_schema_applied_wrapper),
+            ("Schema Policy - Schema Constraints", test_schema_policy_schema_constraints_wrapper),
+            ("Schema Policy - Memory Overrides", test_schema_policy_memory_overrides_wrapper),
+            ("Schema Policy - Node Constraints Merge", test_schema_policy_node_constraints_merge_wrapper),
+            ("Schema Policy - OMO Extraction", test_schema_policy_omo_extraction_wrapper),
+            ("Schema Policy - Skip Extraction", test_schema_policy_skip_extraction_wrapper),
+            ("Schema Policy - Structured Mode", test_schema_policy_structured_mode_wrapper),
+        ]
+
+        for test_name, test_func in schema_policy_tests_list:
+            result = await self.run_test(test_name, test_func, app_instance)
+            self.results.append(result)
+    
+    async def run_omo_safety_tests(self, app_instance):
+        """Run OMO safety pipeline unit tests."""
+        logger.info("🧪 Running OMO Safety Tests...")
+
+        omo_tests = [
+            ("OMO - Consent Enforcement", test_omo_consent_enforcement_wrapper),
+            ("OMO - Risk Enforcement", test_omo_risk_enforcement_wrapper),
+            ("OMO - ACL Propagation", test_omo_acl_propagation_wrapper),
+            ("OMO - Audit Trail", test_omo_audit_trail_wrapper),
+            ("OMO - Full Pipeline", test_omo_full_pipeline_wrapper),
+            ("OMO - Utility Functions", test_omo_utility_functions_wrapper),
+        ]
+
+        for test_name, test_func in omo_tests:
             result = await self.run_test(test_name, test_func, app_instance)
             self.results.append(result)
     
@@ -454,11 +568,43 @@ class V1EndpointTesterOSS:
             result = await self.run_test(test_name, test_func, app_instance)
             self.results.append(result)
     
+    async def run_message_tests(self, app_instance):
+        """Run message endpoint tests."""
+        logger.info("🧪 Running Message Tests...")
+
+        message_tests = [
+            ("Messages - End-to-End Workflow", test_messages_endpoint_end_to_end_wrapper),
+        ]
+
+        for test_name, test_func in message_tests:
+            result = await self.run_test(test_name, test_func, app_instance)
+            self.results.append(result)
+    
+    async def run_document_processing_tests(self, app_instance):
+        """Run document processing tests (now included in open source)."""
+        if not DOCUMENT_TESTS_AVAILABLE:
+            logger.warning("⚠️ Document tests not available - skipping")
+            return
+            
+        logger.info("🧪 Running Document Processing Tests...")
+
+        document_tests = [
+            ("Document - File Validation", test_file_validation_wrapper),
+            ("Document - Provider Manager Init", test_provider_manager_init_wrapper),
+            ("Document - Memory Transformer", test_document_to_memory_transformer_wrapper),
+            ("Document - Extract Structured Content", test_extract_structured_content_wrapper),
+            ("Document - LLM Memory Generation", test_llm_memory_generation_wrapper),
+        ]
+
+        for test_name, test_func in document_tests:
+            result = await self.run_test(test_name, test_func, app_instance)
+            self.results.append(result)
+    
     async def run_all_tests(self):
         """Run all v1 endpoint tests sequentially (Open Source Edition)."""
         logger.info("🚀 Starting V1 Endpoints Sequential Test Suite (Open Source Edition)")
-        logger.info("📋 Includes: Memory, User, Feedback, Schema, Message routes")
-        logger.info("❌ Excludes: Document (cloud-only), GraphQL (cloud-only), Sync (cloud-only), Telemetry (cloud-only)")
+        logger.info("📋 Includes: Memory, User, Feedback, Schema, Message, Document routes")
+        logger.info("❌ Excludes: GraphQL (cloud-only), Billing (cloud-only)")
         self.start_time = time.time()
         suite_error = None
         
@@ -470,6 +616,9 @@ class V1EndpointTesterOSS:
             await self.run_update_memory_tests(app_instance)
             await self.run_get_memory_tests(app_instance)
             await self.run_search_memory_tests(app_instance)
+            await self.run_memory_policy_tests(app_instance)
+            await self.run_schema_policy_unit_tests(app_instance)
+            await self.run_omo_safety_tests(app_instance)
             await self.run_delete_memory_tests(app_instance)
             
             # Run user tests by endpoint group
@@ -485,6 +634,11 @@ class V1EndpointTesterOSS:
             await self.run_query_log_tests(app_instance)
             # Run multi-tenant tests
             await self.run_multi_tenant_tests(app_instance)
+            
+            # Run document processing tests (now open source)
+            await self.run_document_processing_tests(app_instance)
+            # Run message tests
+            await self.run_message_tests(app_instance)
         except Exception as e:
             suite_error = str(e)
             logger.error(f"❌ Test suite crashed with unhandled exception: {e}", exc_info=True)
@@ -667,6 +821,211 @@ async def test_v1_search_fixed_user_cache_test_wrapper(app_instance):
     dummy_caplog = DummyCaplog()
     await test_v1_search_fixed_user_cache_test(app_instance, dummy_caplog)
 
+# Memory policy end-to-end test wrappers
+def _memory_policy_fixtures():
+    return memory_policy_unique_id(), memory_policy_api_headers()
+
+async def test_memory_policy_link_to_string_form_wrapper(app_instance):
+    unique_id, headers = _memory_policy_fixtures()
+    await TestLinkToDSLEndToEnd().test_link_to_string_form(unique_id, headers)
+
+async def test_memory_policy_link_to_list_form_wrapper(app_instance):
+    unique_id, headers = _memory_policy_fixtures()
+    await TestLinkToDSLEndToEnd().test_link_to_list_form(unique_id, headers)
+
+async def test_memory_policy_link_to_dict_form_wrapper(app_instance):
+    unique_id, headers = _memory_policy_fixtures()
+    await TestLinkToDSLEndToEnd().test_link_to_dict_form_with_create_never(unique_id, headers)
+
+async def test_memory_policy_link_to_exact_match_wrapper(app_instance):
+    unique_id, headers = _memory_policy_fixtures()
+    await TestLinkToDSLEndToEnd().test_link_to_with_exact_match(unique_id, headers)
+
+async def test_memory_policy_link_to_semantic_threshold_wrapper(app_instance):
+    unique_id, headers = _memory_policy_fixtures()
+    await TestLinkToDSLEndToEnd().test_link_to_with_semantic_threshold(unique_id, headers)
+
+async def test_memory_policy_auto_mode_wrapper(app_instance):
+    unique_id, headers = _memory_policy_fixtures()
+    await TestFullMemoryPolicyEndToEnd().test_memory_policy_auto_mode_creates_nodes(unique_id, headers)
+
+async def test_memory_policy_manual_mode_wrapper(app_instance):
+    unique_id, headers = _memory_policy_fixtures()
+    await TestFullMemoryPolicyEndToEnd().test_memory_policy_manual_mode_exact_nodes(unique_id, headers)
+
+async def test_memory_policy_omo_safety_wrapper(app_instance):
+    unique_id, headers = _memory_policy_fixtures()
+    await TestFullMemoryPolicyEndToEnd().test_memory_policy_with_omo_safety(unique_id, headers)
+
+async def test_memory_policy_custom_metadata_wrapper(app_instance):
+    unique_id, headers = _memory_policy_fixtures()
+    await TestCustomMetadataPropagation().test_custom_metadata_applied_to_nodes(unique_id, headers)
+
+async def test_memory_policy_schema_inheritance_wrapper(app_instance):
+    unique_id, headers = _memory_policy_fixtures()
+    await TestSchemaLevelPolicyInheritance().test_schema_policy_inheritance(unique_id, headers)
+
+async def test_memory_policy_override_schema_wrapper(app_instance):
+    unique_id, headers = _memory_policy_fixtures()
+    await TestMemoryLevelPolicyOverride().test_memory_policy_overrides_schema(unique_id, headers)
+
+async def test_memory_policy_manual_graph_override_wrapper(app_instance):
+    unique_id, headers = _memory_policy_fixtures()
+    await TestManualPolicyGraphOverride().test_manual_graph_override_full_api(unique_id, headers)
+
+async def test_memory_policy_deeptrust_link_to_wrapper(app_instance):
+    unique_id, headers = _memory_policy_fixtures()
+    await TestDeepTrustEdgePolicy().test_deeptrust_edge_policy_link_to_dsl(unique_id, headers)
+
+async def test_memory_policy_deeptrust_full_api_wrapper(app_instance):
+    unique_id, headers = _memory_policy_fixtures()
+    await TestDeepTrustEdgePolicy().test_deeptrust_edge_policy_full_api(unique_id, headers)
+
+async def test_memory_policy_link_to_with_policy_wrapper(app_instance):
+    unique_id, headers = _memory_policy_fixtures()
+    await TestPolicyMerging().test_link_to_with_memory_policy(unique_id, headers)
+
+async def test_memory_policy_link_to_merge_constraints_wrapper(app_instance):
+    unique_id, headers = _memory_policy_fixtures()
+    await TestPolicyMerging().test_link_to_constraints_merge_with_memory_policy(unique_id, headers)
+
+async def test_memory_policy_create_never_blocks_wrapper(app_instance):
+    unique_id, headers = _memory_policy_fixtures()
+    await TestControlledVocabulary().test_create_never_blocks_new_nodes(unique_id, headers)
+
+async def test_memory_policy_mixed_create_wrapper(app_instance):
+    unique_id, headers = _memory_policy_fixtures()
+    await TestControlledVocabulary().test_mixed_create_policies(unique_id, headers)
+
+async def test_memory_policy_edge_arrow_wrapper(app_instance):
+    unique_id, headers = _memory_policy_fixtures()
+    await TestEdgeConstraintsEndToEnd().test_edge_arrow_syntax(unique_id, headers)
+
+async def test_memory_policy_edge_create_never_wrapper(app_instance):
+    unique_id, headers = _memory_policy_fixtures()
+    await TestEdgeConstraintsEndToEnd().test_edge_with_create_never(unique_id, headers)
+
+async def test_memory_policy_graphql_validation_wrapper(app_instance):
+    unique_id, headers = _memory_policy_fixtures()
+    await TestGraphQLValidation().test_validate_nodes_via_graphql(unique_id, headers)
+
+async def test_memory_policy_invalid_link_to_wrapper(app_instance):
+    unique_id, headers = _memory_policy_fixtures()
+    await TestErrorHandling().test_invalid_link_to_syntax_returns_error(unique_id, headers)
+
+async def test_memory_policy_invalid_mode_wrapper(app_instance):
+    unique_id, headers = _memory_policy_fixtures()
+    await TestErrorHandling().test_invalid_memory_policy_mode_returns_error(unique_id, headers)
+
+# Schema policy unit test wrappers (call pytest-style classes directly)
+async def test_schema_policy_defaults_wrapper(app_instance):
+    schema_policy_tests.TestDefaultValues().test_merge_with_no_policies_returns_defaults()
+    schema_policy_tests.TestDefaultValues().test_default_consent_is_implicit()
+    schema_policy_tests.TestDefaultValues().test_default_risk_is_none()
+    schema_policy_tests.TestDefaultValues().test_default_mode_is_auto()
+
+async def test_schema_policy_schema_applied_wrapper(app_instance):
+    schema_policy_tests.TestSchemaLevelPolicy().test_schema_policy_applied_when_no_memory_policy()
+
+async def test_schema_policy_schema_constraints_wrapper(app_instance):
+    schema_policy_tests.TestSchemaLevelPolicy().test_schema_node_constraints_preserved()
+
+async def test_schema_policy_memory_overrides_wrapper(app_instance):
+    overrides = schema_policy_tests.TestMemoryLevelOverride()
+    overrides.test_memory_mode_overrides_schema_mode()
+    overrides.test_memory_consent_overrides_schema_consent()
+    overrides.test_memory_risk_overrides_schema_risk()
+    overrides.test_memory_acl_overrides_schema()
+
+async def test_schema_policy_node_constraints_merge_wrapper(app_instance):
+    merge_tests = schema_policy_tests.TestNodeConstraintsMerge()
+    merge_tests.test_memory_constraint_overrides_same_node_type()
+    merge_tests.test_schema_constraints_preserved_for_different_node_types()
+    merge_tests.test_memory_constraint_added_for_new_node_type()
+    merge_tests.test_full_policy_merge_with_constraints()
+
+async def test_schema_policy_omo_extraction_wrapper(app_instance):
+    omo_tests = schema_policy_tests.TestOMOFieldsExtraction()
+    omo_tests.test_extract_omo_fields()
+    omo_tests.test_extract_omo_fields_with_defaults()
+
+async def test_schema_policy_skip_extraction_wrapper(app_instance):
+    skip_tests = schema_policy_tests.TestSkipGraphExtraction()
+    skip_tests.test_skip_when_consent_none()
+    skip_tests.test_dont_skip_when_consent_explicit()
+    skip_tests.test_dont_skip_when_consent_implicit()
+    skip_tests.test_dont_skip_when_consent_terms()
+    skip_tests.test_dont_skip_when_no_consent_specified()
+
+async def test_schema_policy_structured_mode_wrapper(app_instance):
+    schema_policy_tests.TestStructuredMode().test_structured_mode_with_nodes()
+
+# OMO safety unit test wrappers (call pytest-style classes directly)
+async def test_omo_consent_enforcement_wrapper(app_instance):
+    consent_tests = omo_safety_tests.TestConsentEnforcement()
+    await consent_tests.test_consent_none_returns_empty()
+    await consent_tests.test_consent_explicit_annotates_nodes()
+    await consent_tests.test_consent_implicit_annotates_nodes()
+    await consent_tests.test_consent_terms_annotates_nodes()
+
+async def test_omo_risk_enforcement_wrapper(app_instance):
+    risk_tests = omo_safety_tests.TestRiskEnforcement()
+    await risk_tests.test_risk_flagged_restricts_acl()
+    await risk_tests.test_risk_sensitive_marks_nodes()
+    await risk_tests.test_risk_none_marks_as_safe()
+
+async def test_omo_acl_propagation_wrapper(app_instance):
+    acl_tests = omo_safety_tests.TestACLPropagation()
+    await acl_tests.test_explicit_acl_used()
+    await acl_tests.test_default_acl_created()
+    await acl_tests.test_skips_nodes_with_existing_acl()
+
+async def test_omo_audit_trail_wrapper(app_instance):
+    audit_tests = omo_safety_tests.TestAuditTrail()
+    await audit_tests.test_audit_trail_created()
+    await audit_tests.test_audit_trail_manual_extraction()
+
+async def test_omo_full_pipeline_wrapper(app_instance):
+    pipeline_tests = omo_safety_tests.TestOMOPipeline()
+    await pipeline_tests.test_full_pipeline_consent_none()
+    await pipeline_tests.test_full_pipeline_explicit_consent()
+    await pipeline_tests.test_full_pipeline_flagged_risk()
+    await pipeline_tests.test_full_pipeline_with_explicit_acl()
+
+async def test_omo_utility_functions_wrapper(app_instance):
+    util_tests = omo_safety_tests.TestUtilityFunctions()
+    util_tests.test_validate_consent_level_valid()
+    util_tests.test_validate_consent_level_invalid()
+    util_tests.test_validate_risk_level_valid()
+    util_tests.test_validate_risk_level_invalid()
+    util_tests.test_extraction_method_from_policy_mode()
+
+# Document processing test wrappers (now open source)
+async def test_file_validation_wrapper(app_instance):
+    """Wrapper for file validation test."""
+    if DOCUMENT_TESTS_AVAILABLE:
+        await test_file_validation()
+
+async def test_provider_manager_init_wrapper(app_instance):
+    """Wrapper for provider manager initialization test."""
+    if DOCUMENT_TESTS_AVAILABLE:
+        await test_provider_manager_initialization()
+
+async def test_document_to_memory_transformer_wrapper(app_instance):
+    """Wrapper for document to memory transformer test."""
+    if DOCUMENT_TESTS_AVAILABLE:
+        await test_document_to_memory_transformer()
+
+async def test_extract_structured_content_wrapper(app_instance):
+    """Wrapper for extract structured content activity test."""
+    if DOCUMENT_TESTS_AVAILABLE:
+        await test_extract_structured_content_activity()
+
+async def test_llm_memory_generation_wrapper(app_instance):
+    """Wrapper for LLM memory generation activity test."""
+    if DOCUMENT_TESTS_AVAILABLE:
+        await test_llm_memory_generation_activity()
+
 # Multi-tenant test wrappers
 async def test_multi_tenant_auth_models_wrapper(app_instance):
     await test_multi_tenant_auth_models()
@@ -679,6 +1038,11 @@ async def test_batch_memory_multi_tenant_scoping_wrapper(app_instance):
 
 async def test_backward_compatibility_wrapper(app_instance):
     await test_backward_compatibility()
+
+# Message test wrappers
+async def test_messages_endpoint_end_to_end_wrapper(app_instance):
+    """Wrapper for test_messages_endpoint_end_to_end to work with sequential test runner."""
+    await test_messages_endpoint_end_to_end()
 
 async def main():
     """Main entry point."""

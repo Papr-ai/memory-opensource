@@ -9,7 +9,7 @@ from os import environ as env
 from toon import encode as toon_encode
 from models.memory_models import SearchResponse, SearchRequest, MemoryMetadata, SearchResult, RelationshipItem, NeoNode, ResponseFormat
 from memory.memory_graph import MemoryGraph
-from services.auth_utils import get_user_from_token, get_user_from_token_optimized
+from services.auth_utils import get_user_from_token, get_user_from_token_optimized, validate_user_identification
 from services.user_utils import User
 from routers.v1 import v1_router  # Import the shared v1_router
 from services.logger_singleton import LoggerSingleton
@@ -17,8 +17,9 @@ from api_handlers.chat_gpt_completion import ChatGPTCompletion
 from datetime import datetime, timedelta, UTC, timezone
 from fastapi import Request, Security
 from models.parse_server import (
-    ParseStoredMemory, AddMemoryResponse, ErrorDetail, DeletionStatus, BatchMemoryResponse, BatchMemoryError, DeleteMemoryResponse, UpdateMemoryResponse, UpdateMemoryItem, SystemUpdateStatus, DocumentUploadResponse, DocumentUploadStatus, AddMemoryItem, Memory, ParsePointer, QueryLog
+    ParseStoredMemory, AddMemoryResponse, AddMemoryOMOResponse, ErrorDetail, DeletionStatus, BatchMemoryResponse, BatchMemoryError, DeleteMemoryResponse, UpdateMemoryResponse, UpdateMemoryItem, SystemUpdateStatus, DocumentUploadResponse, DocumentUploadStatus, AddMemoryItem, Memory, ParsePointer, QueryLog
 )
+from models.omo import memory_to_omo, should_return_omo_format
 from models.memory_models import GetMemoryResponse, SearchResponse, SearchRequest, SearchResult, AddMemoryRequest, BatchMemoryRequest, UpdateMemoryRequest, MemoryMetadata
 from pydantic import ValidationError
 from services.utils import log_amplitude_event, serialize_datetime, get_memory_graph
@@ -255,8 +256,10 @@ async def add_memory_v1(
     bearer_token: Optional[HTTPAuthorizationCredentials] = Depends(bearer_auth),
     session_token: Optional[str] = Security(session_token_header),
     skip_background_processing: bool = Query(False, description="If True, skips adding background tasks for processing"),
+    enable_holographic: bool = Query(False, description="If True, applies holographic neural transforms and stores in holographic collection"),
+    format: Optional[str] = Query(None, description="Response format. Use 'omo' for Open Memory Object standard format (portable across platforms)."),
     memory_graph: MemoryGraph = Depends(get_memory_graph)
-) -> AddMemoryResponse:
+) -> Union[AddMemoryResponse, "AddMemoryOMOResponse"]:
     logger.info(f"=== add_memory_v1 called ===")
     logger.info(f"GRAPH_GENERATION_DEBUG: {memory_request.graph_generation}")
     logger.info(f"GRAPH_GENERATION_TYPE: {type(memory_request.graph_generation)}")
@@ -341,9 +344,26 @@ async def add_memory_v1(
                 error="Authentication system error",
                 code=500
             )
-        
+
         auth_end_time = time.time()
         logger.info(f"Enhanced authentication timing: {(auth_end_time - auth_start_time) * 1000:.2f}ms")
+
+        # Validate user_id to prevent common mistakes (external ID in user_id field)
+        async with httpx.AsyncClient() as httpx_client:
+            validation_error = await validate_user_identification(
+                memory_request, memory_graph, httpx_client
+            )
+            if validation_error:
+                response.status_code = 400
+                return AddMemoryResponse.failure(
+                    error=validation_error.reason,
+                    code=400,
+                    details={
+                        "field": validation_error.field,
+                        "provided_value": validation_error.provided_value,
+                        "suggestion": validation_error.suggestion
+                    }
+                )
 
         # Extract values from the optimized auth response
         user_id = auth_response.developer_id
@@ -486,6 +506,30 @@ async def add_memory_v1(
                 logger.error(f"Error tracking add_memory: {e}")
         
         background_tasks.add_task(log_add_memory_telemetry)
+
+        # If OMO format requested, convert the response to OMO standard format
+        if should_return_omo_format(format) and result.status == "success" and result.data:
+            try:
+                # Get the first memory item (add_memory returns a single item)
+                memory_item = result.data[0]
+
+                # Convert to OMO format using the original request data
+                omo_object = memory_to_omo(
+                    memory_id=memory_item.memoryId,
+                    content=memory_request.content,
+                    memory_type=memory_request.type.value if memory_request.type else "text",
+                    metadata=memory_request.metadata,
+                    memory_policy=memory_request.memory_policy
+                )
+
+                # Return OMO format response
+                return AddMemoryOMOResponse.success(
+                    omo_object=omo_object.model_dump(mode='json'),
+                    code=result.code
+                )
+            except Exception as e:
+                logger.error(f"Error converting to OMO format: {e}", exc_info=True)
+                # Fall through to normal response if OMO conversion fails
 
         return result
         
@@ -1806,10 +1850,28 @@ async def get_memory_v1(
     api_key: Optional[str] = Security(api_key_header),
     bearer_token: Optional[HTTPAuthorizationCredentials] = Depends(bearer_auth),
     session_token: Optional[str] = Security(session_token_header),
-    memory_graph: MemoryGraph = Depends(get_memory_graph)
+    memory_graph: MemoryGraph = Depends(get_memory_graph),
+    # OMO Safety Filtering Parameters
+    require_consent: bool = Query(
+        False,
+        description="If true, return 404 if the memory has consent='none'. Ensures only consented memories are returned."
+    ),
+    exclude_flagged: bool = Query(
+        False,
+        description="If true, return 404 if the memory has risk='flagged'. Filters out flagged content."
+    ),
+    max_risk: Optional[str] = Query(
+        None,
+        description="Maximum risk level allowed. Values: 'none', 'sensitive', 'flagged'. If memory exceeds this, return 404."
+    )
 ) -> SearchResponse:
     """
     Retrieve a memory item by ID.
+
+    Supports OMO safety filtering via query parameters:
+    - require_consent: Only return memories with consent != 'none'
+    - exclude_flagged: Exclude memories with risk='flagged'
+    - max_risk: Set maximum allowed risk level ('none', 'sensitive', 'flagged')
     """
     try:
         # Get client type
@@ -1933,6 +1995,51 @@ async def get_memory_v1(
         memory_item = ParseStoredMemory.from_dict(parse_data)
         # Convert to public Memory model
         memory = Memory.from_internal(memory_item)
+
+        # OMO Safety Filtering - check consent and risk levels
+        if require_consent or exclude_flagged or max_risk:
+            # Extract OMO fields from metadata
+            metadata = parse_data.get('metadata', {}) or {}
+            memory_consent = metadata.get('consent', 'implicit')
+            memory_risk = metadata.get('risk', 'none')
+
+            # Check require_consent filter
+            if require_consent and memory_consent == 'none':
+                logger.info(f"OMO filter: Memory {memory_id} blocked - consent='none' but require_consent=True")
+                result = SearchResponse.failure(
+                    error="Memory not accessible - missing consent",
+                    code=404,
+                    message="This memory does not have recorded consent and require_consent filter is enabled."
+                )
+                response.status_code = result.code
+                return result
+
+            # Check exclude_flagged filter
+            if exclude_flagged and memory_risk == 'flagged':
+                logger.info(f"OMO filter: Memory {memory_id} blocked - risk='flagged' and exclude_flagged=True")
+                result = SearchResponse.failure(
+                    error="Memory not accessible - flagged content",
+                    code=404,
+                    message="This memory contains flagged content and exclude_flagged filter is enabled."
+                )
+                response.status_code = result.code
+                return result
+
+            # Check max_risk filter
+            if max_risk:
+                risk_order = {'none': 0, 'sensitive': 1, 'flagged': 2}
+                max_risk_level = risk_order.get(max_risk, 2)
+                memory_risk_level = risk_order.get(memory_risk, 0)
+                if memory_risk_level > max_risk_level:
+                    logger.info(f"OMO filter: Memory {memory_id} blocked - risk='{memory_risk}' exceeds max_risk='{max_risk}'")
+                    result = SearchResponse.failure(
+                        error="Memory not accessible - exceeds risk threshold",
+                        code=404,
+                        message=f"This memory has risk level '{memory_risk}' which exceeds the max_risk='{max_risk}' filter."
+                    )
+                    response.status_code = result.code
+                    return result
+
         # Build SearchResult
         search_result = SearchResult(memories=[memory], nodes=[])
         # Return as SearchResponse

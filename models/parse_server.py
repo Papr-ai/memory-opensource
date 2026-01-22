@@ -457,6 +457,36 @@ class AddMemoryResponse(BaseModel):
     def failure(cls, error: str, code: int = 400, details: Any = None):
         return cls(code=code, status="error", data=None, error=error, details=details)
 
+
+class AddMemoryOMOResponse(BaseModel):
+    """
+    OMO (Open Memory Object) format response for add_memory API.
+
+    Used when ?format=omo is specified. Returns the memory in portable OMO format
+    as defined by https://github.com/papr-ai/open-memory-object
+    """
+    code: int = Field(default=200, description="HTTP status code")
+    status: str = Field(default="success", description="'success' or 'error'")
+    omo: Optional[Any] = Field(default=None, description="OpenMemoryObject in OMO v1 format")
+    error: Optional[str] = Field(default=None, description="Error message if failed")
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        validate_assignment=True,
+        extra='allow'
+    )
+
+    @classmethod
+    def success(cls, omo_object: Any, code: int = 200):
+        """Create success response with OMO object."""
+        return cls(code=code, status="success", omo=omo_object, error=None)
+
+    @classmethod
+    def failure(cls, error: str, code: int = 400):
+        """Create failure response."""
+        return cls(code=code, status="error", omo=None, error=error)
+
+
 class ErrorDetail(BaseModel):
     code: int
     detail: str

@@ -37,6 +37,231 @@ PARSE_HEADERS = {
 
 # All cache instances are now imported from cache_utils.py for consistency
 
+# ============================================================================
+# User ID Validation Functions
+# ============================================================================
+# These functions help prevent common errors where developers use external IDs
+# (like UUIDs, emails, or custom prefixes) in the user_id field instead of
+# external_user_id.
+
+import re
+from dataclasses import dataclass
+
+# Common patterns for external user identifiers
+UUID_PATTERN = re.compile(
+    r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+)
+EMAIL_PATTERN = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
+EXTERNAL_PREFIXES = ('user_', 'ext_', 'external_', 'usr_', 'u_', 'customer_', 'cust_', 'cus_', 'client_', 'acct_', 'sub_', 'org_')
+
+
+def looks_like_external_id(user_id: str) -> bool:
+    """
+    Heuristic to detect if a user_id looks like an external identifier.
+
+    External IDs typically:
+    - Are UUIDs
+    - Are email addresses
+    - Have common prefixes like 'user_', 'ext_', etc.
+    - Contain hyphens or underscores with alphanumeric segments
+    - Are longer than typical Parse ObjectIds (10 alphanumeric chars)
+
+    Parse Server internal IDs are typically:
+    - 10 alphanumeric characters (e.g., 'mkcNHhG5KP')
+    - No special characters like hyphens, underscores, or @ symbols
+
+    Args:
+        user_id: The user ID string to check
+
+    Returns:
+        True if the ID looks like an external identifier, False otherwise
+    """
+    if not user_id or not isinstance(user_id, str):
+        return False
+
+    # Check for UUID format (very common for external IDs)
+    if UUID_PATTERN.match(user_id):
+        logger.debug(f"user_id '{user_id[:20]}...' matches UUID pattern")
+        return True
+
+    # Check for email format
+    if EMAIL_PATTERN.match(user_id):
+        logger.debug(f"user_id '{user_id[:20]}...' matches email pattern")
+        return True
+
+    # Check for common external prefixes (case-insensitive)
+    user_id_lower = user_id.lower()
+    for prefix in EXTERNAL_PREFIXES:
+        if user_id_lower.startswith(prefix):
+            logger.debug(f"user_id '{user_id[:20]}...' has external prefix '{prefix}'")
+            return True
+
+    # Check for hyphenated IDs (common in external systems, not in Parse)
+    # Parse IDs don't contain hyphens
+    if '-' in user_id and len(user_id) > 10:
+        logger.debug(f"user_id '{user_id[:20]}...' contains hyphens (likely external)")
+        return True
+
+    # Check for IDs that are too long to be Parse ObjectIds
+    # Parse ObjectIds are exactly 10 alphanumeric characters
+    # Allow some tolerance for other ID formats
+    if len(user_id) > 20 and not user_id.isalnum():
+        logger.debug(f"user_id '{user_id[:20]}...' is too long and not alphanumeric")
+        return True
+
+    # Parse ObjectIds are exactly 10 alphanumeric characters
+    # If it matches this pattern, it's likely a valid Parse ID
+    if len(user_id) == 10 and user_id.isalnum():
+        return False
+
+    return False
+
+
+@dataclass
+class UserIdValidationError:
+    """Structured error for user ID validation failures."""
+    code: int
+    error: str
+    field: str
+    provided_value: str
+    reason: str
+    suggestion: str
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for API response."""
+        return {
+            "code": self.code,
+            "error": self.error,
+            "details": {
+                "field": self.field,
+                "provided_value": self.provided_value,
+                "reason": self.reason,
+                "suggestion": self.suggestion
+            }
+        }
+
+
+async def validate_user_identification(
+    request: Any,
+    memory_graph: Optional["MemoryGraph"] = None,
+    httpx_client: Optional[httpx.AsyncClient] = None
+) -> Optional[UserIdValidationError]:
+    """
+    Validate user IDs in a request to prevent common errors.
+
+    This function checks if:
+    1. A user_id looks like an external identifier (should use external_user_id instead)
+    2. A user_id, if provided, corresponds to a valid Parse user
+
+    Args:
+        request: The API request (AddMemoryRequest, SearchRequest, etc.)
+        memory_graph: Optional MemoryGraph for user validation
+        httpx_client: Optional httpx client for API calls
+
+    Returns:
+        UserIdValidationError if validation fails, None if validation passes
+    """
+    # Extract user_id from request and metadata
+    request_user_id = getattr(request, 'user_id', None)
+    metadata = getattr(request, 'metadata', None)
+    metadata_user_id = getattr(metadata, 'user_id', None) if metadata else None
+
+    # Use the first non-None user_id
+    user_id = request_user_id or metadata_user_id
+
+    if not user_id:
+        return None  # No user_id provided, validation passes
+
+    # Check if user_id looks like an external identifier
+    if looks_like_external_id(user_id):
+        logger.warning(
+            f"user_id '{user_id[:30]}...' looks like an external identifier. "
+            "Developers should use 'external_user_id' instead."
+        )
+        return UserIdValidationError(
+            code=400,
+            error="Invalid user_id format",
+            field="user_id",
+            provided_value=user_id[:50] + ("..." if len(user_id) > 50 else ""),
+            reason="This looks like an external user identifier (UUID, email, or custom format). "
+                   "Did you mean to use 'external_user_id' instead?",
+            suggestion="Use 'external_user_id' for your application's user identifiers. "
+                      "'user_id' is reserved for Papr internal user IDs (10 alphanumeric characters)."
+        )
+
+    # If memory_graph is provided, validate the Parse user exists
+    # Note: This is optional validation - we don't want to slow down every request
+    if memory_graph and len(user_id) == 10 and user_id.isalnum():
+        try:
+            # Check if Parse user exists
+            parse_user = await _fetch_parse_user_for_validation(user_id, httpx_client)
+            if not parse_user:
+                logger.warning(f"user_id '{user_id}' does not correspond to a valid Parse user")
+                return UserIdValidationError(
+                    code=400,
+                    error="Invalid user_id",
+                    field="user_id",
+                    provided_value=user_id,
+                    reason="No Papr user found with this ID. "
+                           "If this is your application's user identifier, use 'external_user_id' instead.",
+                    suggestion="Use 'external_user_id' for your application's user identifiers. "
+                              "Papr will automatically resolve or create internal users as needed."
+                )
+        except Exception as e:
+            # Don't fail the request if validation lookup fails
+            logger.debug(f"Could not validate Parse user (non-fatal): {e}")
+
+    return None  # Validation passed
+
+
+async def _fetch_parse_user_for_validation(
+    user_id: str,
+    httpx_client: Optional[httpx.AsyncClient] = None
+) -> Optional[Dict[str, Any]]:
+    """
+    Fetch a Parse user by ID for validation purposes.
+
+    Args:
+        user_id: The Parse user objectId
+        httpx_client: Optional httpx client
+
+    Returns:
+        User dict if found, None otherwise
+    """
+    try:
+        url = f"{PARSE_SERVER_URL}/parse/classes/_User/{user_id}"
+        params = {"keys": "objectId"}
+
+        if httpx_client:
+            response = await httpx_client.get(url, headers=PARSE_HEADERS, params=params)
+        else:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(url, headers=PARSE_HEADERS, params=params)
+
+        if response.status_code == 200:
+            return response.json()
+        return None
+    except Exception as e:
+        logger.debug(f"Failed to fetch Parse user for validation: {e}")
+        return None
+
+
+def log_deprecation_warning(old_field: str, new_field: str, context: str = ""):
+    """
+    Log a deprecation warning for API field changes.
+
+    Args:
+        old_field: The deprecated field name
+        new_field: The recommended field name
+        context: Additional context about where this was used
+    """
+    warning_msg = (
+        f"DEPRECATION WARNING: '{old_field}' is deprecated, use '{new_field}' instead. "
+        f"{context}"
+    )
+    logger.warning(warning_msg)
+
+
 def get_oauth_client(oauth: OAuth, client_type: str) -> Any:
     """Get OAuth client based on client type.
 

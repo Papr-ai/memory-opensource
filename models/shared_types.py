@@ -1,11 +1,14 @@
 # Shared types for memory, parse_server, and structured_outputs
 from pydantic import BaseModel, Field, ConfigDict, field_validator
-from typing import Optional, List, Dict, Any, Union, Literal
+from typing import Optional, List, Dict, Any, Union, Literal, TYPE_CHECKING
 from enum import Enum
 import logging
 from datetime import datetime, timezone, UTC
 logger = logging.getLogger(__name__)
 import json
+
+if TYPE_CHECKING:
+    from models.omo import OpenMemoryObject
  
 
 # SchemaSpecificationMixin will be imported locally in UploadDocumentRequest to avoid circular imports
@@ -328,6 +331,26 @@ class MemoryMetadata(BaseModel):
     organization_id: Optional[str] = None
     namespace_id: Optional[str] = None
 
+    # OMO (Open Memory Object) Safety Standards
+    # These fields implement the OMO standard for consent, risk, and access control
+    consent: Optional[str] = Field(
+        default="implicit",
+        description="How the data owner allowed this memory to be stored/used. "
+                   "Values: 'explicit' (user agreed), 'implicit' (inferred, default), "
+                   "'terms' (covered by ToS), 'none' (no consent recorded)."
+    )
+    risk: Optional[str] = Field(
+        default="none",
+        description="Post-ingest safety assessment. "
+                   "Values: 'none' (safe, default), 'sensitive' (contains PII/financial/health), "
+                   "'flagged' (requires review)."
+    )
+    omo_acl: Optional[Dict[str, List[str]]] = Field(
+        default=None,
+        description="Simplified ACL from OMO standard. Format: {'read': [...], 'write': [...]}. "
+                   "If not provided, defaults to developer + external_user access."
+    )
+
     # QueryLog related fields
     sessionId: Optional[str] = None  # Session ID for tracking query context
     post: Optional[str] = None  # Post objectId pointer
@@ -446,7 +469,64 @@ class MemoryMetadata(BaseModel):
                 base[field] = []
         # Merge base and flattened custom
         return {**base, **flat_custom}
-    
+
+    def to_omo(
+        self,
+        memory_id: str,
+        content: str,
+        memory_type: str = "text",
+        memory_policy: Optional[Any] = None
+    ) -> "OpenMemoryObject":
+        """
+        Convert this MemoryMetadata to OMO (Open Memory Object) standard format.
+
+        This enables memory portability across OMO-compliant platforms.
+        Papr-specific fields are stored in ext.papr:* namespace.
+
+        Args:
+            memory_id: Unique memory identifier
+            content: Memory content
+            memory_type: Type (text, image, audio, video, file, code)
+            memory_policy: Optional MemoryPolicy instance
+
+        Returns:
+            OpenMemoryObject in OMO v1 format
+
+        Example:
+            >>> metadata = MemoryMetadata(external_user_id="user_123", consent="explicit")
+            >>> omo = metadata.to_omo("mem_abc", "Meeting notes...", "text")
+            >>> print(omo.model_dump_json())
+        """
+        from models.omo import memory_to_omo
+        return memory_to_omo(
+            memory_id=memory_id,
+            content=content,
+            memory_type=memory_type,
+            metadata=self,
+            memory_policy=memory_policy
+        )
+
+    @classmethod
+    def from_omo(cls, omo: "OpenMemoryObject") -> "MemoryMetadata":
+        """
+        Create MemoryMetadata from an OMO (Open Memory Object) standard format.
+
+        This enables importing memories from other OMO-compliant platforms.
+
+        Args:
+            omo: OpenMemoryObject instance
+
+        Returns:
+            MemoryMetadata instance with fields populated from OMO
+
+        Example:
+            >>> omo = OpenMemoryObject(id="mem_123", content="...", consent="explicit", ...)
+            >>> metadata = MemoryMetadata.from_omo(omo)
+        """
+        from models.omo import from_omo
+        papr_data = from_omo(omo)
+        metadata_dict = papr_data.get("metadata", {})
+        return cls(**metadata_dict)
 
     model_config = ConfigDict(
         from_attributes=True,
@@ -617,3 +697,505 @@ class FeedbackSource(str, Enum):
     SESSION_END = "session_end"
     MEMORY_CITATION = "memory_citation"
     ANSWER_PANEL = "answer_panel"
+
+
+# ============================================================================
+# Memory Policy Models (Memory-Oriented Policies)
+# ============================================================================
+# These models provide a unified way to control how memories are processed,
+# what graph nodes are created, and how they're constrained.
+
+class PolicyMode(str, Enum):
+    """
+    Memory processing mode.
+
+    - AUTO: LLM extracts entities freely (default)
+    - STRUCTURED: Developer provides exact nodes (graph override)
+    - HYBRID: LLM extracts with constraints
+    """
+    AUTO = "auto"
+    STRUCTURED = "structured"
+    HYBRID = "hybrid"
+
+
+class SearchMode(str, Enum):
+    """Search mode for finding existing nodes."""
+    SEMANTIC = "semantic"  # Vector similarity search
+    EXACT = "exact"        # Exact property match
+    FUZZY = "fuzzy"        # Partial/fuzzy match
+
+
+class SearchConfig(BaseModel):
+    """Configuration for finding existing nodes."""
+    mode: SearchMode = Field(
+        default=SearchMode.SEMANTIC,
+        description="Search mode: 'semantic' (vector similarity), 'exact' (property match), 'fuzzy' (partial match)"
+    )
+    threshold: float = Field(
+        default=0.85,
+        ge=0.0,
+        le=1.0,
+        description="Similarity threshold for semantic search (0.0-1.0)"
+    )
+    properties: Optional[List[str]] = Field(
+        default=None,
+        description="For exact/fuzzy mode: which properties to match on"
+    )
+
+    model_config = ConfigDict(
+        extra='forbid',
+        json_schema_extra={
+            "examples": [
+                {"mode": "semantic", "threshold": 0.85},
+                {"mode": "exact", "properties": ["name", "email"]},
+                {"mode": "fuzzy", "properties": ["name"], "threshold": 0.7}
+            ]
+        }
+    )
+
+
+class NodeConstraint(BaseModel):
+    """
+    Policy for how nodes of a specific type should be handled.
+
+    Node constraints allow developers to control:
+    - Which node types can be created vs. linked
+    - How to find existing nodes for linking
+    - What values to force or merge on nodes
+    - When to apply the constraint (conditional)
+    """
+    # === WHAT ===
+    node_type: str = Field(
+        ...,
+        min_length=1,
+        description="Node type this constraint applies to (e.g., 'Task', 'Project', 'Person')"
+    )
+
+    # === WHEN (conditional application) ===
+    when: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Condition for when this constraint applies. All conditions must match (AND logic). "
+                   "Example: {'priority': 'high'} only applies to high-priority nodes.",
+        alias="match"  # Backwards compatibility
+    )
+
+    # === CREATION POLICY ===
+    create: Literal["auto", "never"] = Field(
+        default="auto",
+        description="'auto': Create if not found via search. 'never': Only link to existing nodes (controlled vocabulary)."
+    )
+
+    # === NODE SELECTION ===
+    node_id: Optional[str] = Field(
+        default=None,
+        description="Direct: Skip search, use this exact node ID. Useful for linking to known nodes."
+    )
+    search: Optional[SearchConfig] = Field(
+        default=None,
+        description="How to find existing nodes for linking/updating."
+    )
+
+    # === VALUE POLICIES ===
+    force: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Force these property values on ALL matching nodes (new or existing). "
+                   "Always wins over AI extraction.",
+        alias="set"  # Backwards compatibility
+    )
+    merge: Optional[List[str]] = Field(
+        default=None,
+        description="Update these properties from LLM extraction on EXISTING nodes only. "
+                   "Has no effect on newly created nodes.",
+        alias="update_on_match"  # Backwards compatibility (also accept 'update')
+    )
+
+    model_config = ConfigDict(
+        extra='forbid',
+        populate_by_name=True,  # Accept both field name and alias
+        json_schema_extra={
+            "examples": [
+                {
+                    "node_type": "Task",
+                    "create": "never",
+                    "search": {"mode": "semantic", "threshold": 0.85},
+                    "merge": ["status", "assignee"]
+                },
+                {
+                    "node_type": "Project",
+                    "force": {"workspace_id": "ws_123", "team": "engineering"}
+                },
+                {
+                    "node_type": "Person",
+                    "create": "never",
+                    "when": {"role": "team_member"}
+                }
+            ]
+        }
+    )
+
+
+class NodeSpec(BaseModel):
+    """
+    Specification for a node in structured mode.
+
+    Used when mode='structured' to define exact nodes to create.
+    """
+    id: str = Field(
+        ...,
+        min_length=1,
+        description="Unique identifier for this node"
+    )
+    type: str = Field(
+        ...,
+        min_length=1,
+        description="Node type/label (e.g., 'Transaction', 'Product', 'Person')"
+    )
+    properties: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Properties for this node"
+    )
+
+    model_config = ConfigDict(
+        extra='forbid',
+        json_schema_extra={
+            "examples": [
+                {
+                    "id": "txn_12345",
+                    "type": "Transaction",
+                    "properties": {"amount": 5.50, "product": "Latte", "timestamp": "2026-01-21T10:30:00Z"}
+                }
+            ]
+        }
+    )
+
+
+class RelationshipSpec(BaseModel):
+    """
+    Specification for a relationship in structured mode.
+
+    Used when mode='structured' to define exact relationships between nodes.
+    """
+    source: str = Field(
+        ...,
+        min_length=1,
+        description="ID of the source node"
+    )
+    target: str = Field(
+        ...,
+        min_length=1,
+        description="ID of the target node"
+    )
+    type: str = Field(
+        ...,
+        min_length=1,
+        description="Relationship type (e.g., 'PURCHASED', 'WORKS_AT', 'ASSIGNED_TO')"
+    )
+    properties: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Optional properties for this relationship"
+    )
+
+    model_config = ConfigDict(
+        extra='forbid',
+        json_schema_extra={
+            "examples": [
+                {
+                    "source": "txn_12345",
+                    "target": "product_latte",
+                    "type": "PURCHASED"
+                }
+            ]
+        }
+    )
+
+
+class MemoryPolicy(BaseModel):
+    """
+    Unified memory processing policy.
+
+    This is the SINGLE source of truth for how a memory should be processed,
+    combining graph generation control AND OMO (Open Memory Object) safety standards.
+
+    **Graph Generation Modes:**
+    - auto: LLM extracts entities freely (default)
+    - structured: Developer provides exact nodes (no LLM extraction)
+    - hybrid: LLM extracts with constraints
+
+    **OMO Safety Standards:**
+    - consent: How data owner allowed storage (explicit, implicit, terms, none)
+    - risk: Safety assessment (none, sensitive, flagged)
+    - omo_acl: Access control list for read/write permissions
+
+    **Schema Integration:**
+    - schema_id: Reference a schema that may have its own default memory_policy
+    - Schema-level policies are merged with request-level (request takes precedence)
+    """
+
+    # =========================================================================
+    # GRAPH GENERATION
+    # =========================================================================
+
+    mode: PolicyMode = Field(
+        default=PolicyMode.AUTO,
+        description="How to generate graph from this memory. "
+                   "'auto': LLM extracts entities freely. "
+                   "'structured': You provide exact nodes (no LLM). "
+                   "'hybrid': LLM extracts with your constraints applied."
+    )
+
+    # For STRUCTURED mode: Direct graph specification
+    nodes: Optional[List[NodeSpec]] = Field(
+        default=None,
+        description="For structured mode: Exact nodes to create (no LLM extraction). "
+                   "Required when mode='structured'. Each node needs id, type, and properties."
+    )
+    relationships: Optional[List[RelationshipSpec]] = Field(
+        default=None,
+        description="For structured mode: Exact relationships between nodes. "
+                   "References node IDs defined in 'nodes' array."
+    )
+
+    # For AUTO/HYBRID mode: Node constraints (policies)
+    node_constraints: Optional[List[NodeConstraint]] = Field(
+        default=None,
+        description="Rules for how LLM-extracted nodes should be created/updated. "
+                   "Used in 'auto' and 'hybrid' modes. Controls creation policy, "
+                   "property forcing, and merge behavior."
+    )
+
+    # Schema reference
+    schema_id: Optional[str] = Field(
+        default=None,
+        description="Reference a UserGraphSchema by ID. The schema's memory_policy "
+                   "(if defined) will be used as defaults, with this request's "
+                   "settings taking precedence."
+    )
+
+    # Schema mode control (from deprecated GraphGeneration.auto.simple_schema_mode)
+    simple_schema_mode: bool = Field(
+        default=False,
+        description="Limit AI extraction to system types + one user schema for consistency. "
+                   "Use with schema_id to ensure predictable graph structure."
+    )
+
+    # =========================================================================
+    # OMO SAFETY STANDARDS
+    # =========================================================================
+
+    consent: Optional[str] = Field(
+        default="implicit",
+        description="How the data owner allowed this memory to be stored/used. "
+                   "'explicit': User explicitly agreed. "
+                   "'implicit': Inferred from context (default). "
+                   "'terms': Covered by Terms of Service. "
+                   "'none': No consent - graph extraction will be SKIPPED."
+    )
+
+    risk: Optional[str] = Field(
+        default="none",
+        description="Safety assessment for this memory. "
+                   "'none': Safe content (default). "
+                   "'sensitive': Contains PII or sensitive info. "
+                   "'flagged': Requires review - ACL will be restricted to owner only."
+    )
+
+    omo_acl: Optional[Dict[str, List[str]]] = Field(
+        default=None,
+        description="Access control list for graph nodes created from this memory. "
+                   "Format: {'read': ['user_id_1', ...], 'write': ['user_id_1', ...]}. "
+                   "If not provided, defaults based on external_user_id and developer."
+    )
+
+    # =========================================================================
+    # VALIDATION
+    # =========================================================================
+
+    @field_validator('consent')
+    @classmethod
+    def validate_consent(cls, v):
+        """Validate consent level."""
+        valid_levels = {"explicit", "implicit", "terms", "none"}
+        if v and v not in valid_levels:
+            raise ValueError(f"consent must be one of {valid_levels}, got '{v}'")
+        return v
+
+    @field_validator('risk')
+    @classmethod
+    def validate_risk(cls, v):
+        """Validate risk level."""
+        valid_levels = {"none", "sensitive", "flagged"}
+        if v and v not in valid_levels:
+            raise ValueError(f"risk must be one of {valid_levels}, got '{v}'")
+        return v
+
+    @model_validator(mode='after')
+    def validate_mode_requirements(self):
+        """Validate that mode-specific fields are properly set."""
+        if self.mode == PolicyMode.STRUCTURED:
+            if not self.nodes:
+                raise ValueError(
+                    "mode='structured' requires 'nodes' to be provided. "
+                    "Use mode='auto' for LLM extraction or provide exact nodes."
+                )
+        return self
+
+    model_config = ConfigDict(
+        extra='forbid',
+        json_schema_extra={
+            "examples": [
+                {
+                    "name": "Auto Mode (Default)",
+                    "summary": "LLM extracts entities freely",
+                    "value": {
+                        "mode": "auto"
+                    }
+                },
+                {
+                    "name": "Structured Mode with Exact Nodes",
+                    "summary": "Developer provides exact graph structure",
+                    "value": {
+                        "mode": "structured",
+                        "nodes": [
+                            {"id": "txn_001", "type": "Transaction", "properties": {"amount": 5.50}}
+                        ],
+                        "relationships": [
+                            {"source": "txn_001", "target": "prod_001", "type": "PURCHASED"}
+                        ]
+                    }
+                },
+                {
+                    "name": "Hybrid Mode with Constraints",
+                    "summary": "LLM extracts with your rules applied",
+                    "value": {
+                        "mode": "hybrid",
+                        "node_constraints": [
+                            {"node_type": "Task", "create": "never", "merge": ["status"]},
+                            {"node_type": "Person", "create": "never"}
+                        ]
+                    }
+                },
+                {
+                    "name": "With OMO Safety Settings",
+                    "summary": "Explicit consent with restricted access",
+                    "value": {
+                        "mode": "auto",
+                        "consent": "explicit",
+                        "risk": "sensitive",
+                        "omo_acl": {"read": ["user_alice"], "write": ["user_alice"]}
+                    }
+                },
+                {
+                    "name": "Using Schema Defaults",
+                    "summary": "Inherit policy from schema",
+                    "value": {
+                        "schema_id": "schema_project_mgmt_v1"
+                    }
+                }
+            ]
+        }
+    )
+
+
+# ============================================================================
+# OMO (Open Memory Object) Safety Standards
+# ============================================================================
+# These models implement the Open Memory Object standard for consent,
+# risk assessment, and access control.
+
+class ConsentLevel(str, Enum):
+    """
+    How the data owner allowed this memory to be stored/used.
+
+    Aligned with Open Memory Object (OMO) standard.
+    """
+    EXPLICIT = "explicit"   # User explicitly agreed to store
+    IMPLICIT = "implicit"   # Inferred from usage context (default)
+    TERMS = "terms"         # Covered by Terms of Service
+    NONE = "none"          # No consent recorded
+
+
+class RiskLevel(str, Enum):
+    """
+    Post-ingest safety assessment of memory content.
+
+    Aligned with Open Memory Object (OMO) standard.
+    """
+    NONE = "none"           # Safe content (default)
+    SENSITIVE = "sensitive" # Contains PII, financial, health info
+    FLAGGED = "flagged"     # Requires human review before retrieval
+
+
+class ACLConfig(BaseModel):
+    """
+    Simplified Access Control List configuration.
+
+    Aligned with Open Memory Object (OMO) standard.
+    """
+    read: List[str] = Field(
+        default_factory=list,
+        description="User IDs that can read this memory"
+    )
+    write: List[str] = Field(
+        default_factory=list,
+        description="User IDs that can write/modify this memory"
+    )
+
+    model_config = ConfigDict(
+        extra='forbid',
+        json_schema_extra={
+            "examples": [
+                {"read": ["user_alice", "admin_bob"], "write": ["user_alice"]}
+            ]
+        }
+    )
+
+
+class OMOFilter(BaseModel):
+    """
+    Filter for Open Memory Object (OMO) safety standards in search/retrieval.
+
+    Use this to filter search results by consent level and/or risk level.
+    """
+    min_consent: Optional[ConsentLevel] = Field(
+        default=None,
+        description="Minimum consent level required. Excludes memories with lower consent levels. "
+                   "Order: explicit > implicit > terms > none. "
+                   "Example: min_consent='implicit' excludes 'none' consent memories."
+    )
+    exclude_consent: Optional[List[ConsentLevel]] = Field(
+        default=None,
+        description="Explicitly exclude memories with these consent levels. "
+                   "Example: exclude_consent=['none'] filters out all memories without consent."
+    )
+    max_risk: Optional[RiskLevel] = Field(
+        default=None,
+        description="Maximum risk level allowed. Excludes memories with higher risk. "
+                   "Order: none < sensitive < flagged. "
+                   "Example: max_risk='none' excludes 'sensitive' and 'flagged' memories."
+    )
+    exclude_risk: Optional[List[RiskLevel]] = Field(
+        default=None,
+        description="Explicitly exclude memories with these risk levels. "
+                   "Example: exclude_risk=['flagged'] filters out all flagged content."
+    )
+    require_consent: bool = Field(
+        default=False,
+        description="If true, only return memories with explicit consent (consent != 'none'). "
+                   "Shorthand for exclude_consent=['none']."
+    )
+    exclude_flagged: bool = Field(
+        default=False,
+        description="If true, exclude all flagged content (risk == 'flagged'). "
+                   "Shorthand for exclude_risk=['flagged']."
+    )
+
+    model_config = ConfigDict(
+        extra='forbid',
+        json_schema_extra={
+            "examples": [
+                {"require_consent": True, "exclude_flagged": True},
+                {"min_consent": "implicit", "max_risk": "sensitive"},
+                {"exclude_consent": ["none"], "exclude_risk": ["flagged"]}
+            ]
+        }
+    )
