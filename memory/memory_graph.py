@@ -1225,6 +1225,8 @@ class MemoryGraph:
         except Exception as e:
             logger.warning(f"Error creating property collection indexes: {e}")
 
+    
+
     async def _index_node_properties_with_sync_results(self, neo4j_results: List[Dict], memory_item: Dict, 
                                                      workspace_id: Optional[str], user_schema: Optional[Any],
                                                      common_metadata: Optional[Dict[str, Any]] = None):
@@ -3578,7 +3580,7 @@ class MemoryGraph:
             if self.qdrant_client and self.qdrant_collection:
                 for embedding in qwen_embeddings:
                     search_tasks.append(
-                        self.qdrant_client.search(
+                        self._qdrant_search_async(
                             collection_name=self.qdrant_collection,
                             query_vector=embedding,
                             query_filter=acl_filter,
@@ -3605,10 +3607,15 @@ class MemoryGraph:
                             memory_item_id = str(match.id)
                             memory_item_ids.add(memory_item_id)
                             logger.info(f'Found memory item id {memory_item_id} from Pinecone for conversation content')
-                    elif hasattr(result, 'points'):  # Qdrant result
+                    elif hasattr(result, 'points'):  # Qdrant result (query_points format)
                         points = result.points
                         for point in points:
                             memory_item_id = str(point.id)
+                            memory_item_ids.add(memory_item_id)
+                            logger.info(f'Found memory item id {memory_item_id} from Qdrant for conversation content')
+                    elif isinstance(result, list):  # Qdrant _qdrant_search_async / search returns list of points
+                        for point in result:
+                            memory_item_id = str(getattr(point, 'id', point))
                             memory_item_ids.add(memory_item_id)
                             logger.info(f'Found memory item id {memory_item_id} from Qdrant for conversation content')
                     else:
@@ -3635,7 +3642,7 @@ class MemoryGraph:
             if self.qdrant_client and self.qdrant_collection:
                 for embedding in qwen_embeddings:
                     search_tasks.append(
-                        self.qdrant_client.search(
+                        self._qdrant_search_async(
                             collection_name=self.qdrant_collection,
                             query_vector=embedding,
                             query_filter=acl_filter,
@@ -3660,6 +3667,11 @@ class MemoryGraph:
                         points = result.points
                         for point in points:
                             memory_item_id = str(point.id)
+                            memory_item_ids.add(memory_item_id)
+                            logger.info(f'Found memory item id {memory_item_id} from Qdrant for conversation content')
+                    elif isinstance(result, list):  # _qdrant_search_async / search returns list of points
+                        for point in result:
+                            memory_item_id = str(getattr(point, 'id', point))
                             memory_item_ids.add(memory_item_id)
                             logger.info(f'Found memory item id {memory_item_id} from Qdrant for conversation content')
                     else:
@@ -7350,6 +7362,62 @@ class MemoryGraph:
             logger.warning(f"Error converting Qdrant filter to Pinecone: {e}")
             return {}
 
+    async def _qdrant_search_async(
+        self,
+        collection_name: str,
+        query_vector,
+        query_filter=None,
+        limit: int = 10,
+        with_payload: bool = True,
+        with_vectors: bool = False,
+        score_threshold: Optional[float] = None,
+        search_params=None,
+    ):
+        """
+        Async Qdrant search with fallback for API compatibility.
+        Uses search() if available, otherwise query_points() (some qdrant-client versions).
+        Returns a list of results (ScoredPoint-like: .id, .score, .payload).
+        """
+        if not self.qdrant_client:
+            return []
+        search_fn = getattr(self.qdrant_client, "search", None)
+        if search_fn is not None:
+            kwargs = dict(
+                collection_name=collection_name,
+                query_vector=query_vector,
+                query_filter=query_filter,
+                limit=limit,
+                with_payload=with_payload,
+                with_vectors=with_vectors,
+            )
+            if score_threshold is not None:
+                kwargs["score_threshold"] = score_threshold
+            if search_params is not None:
+                kwargs["search_params"] = search_params
+            return await search_fn(**kwargs)
+        query_fn = getattr(self.qdrant_client, "query_points", None)
+        if query_fn is not None:
+            kwargs = dict(
+                collection_name=collection_name,
+                query=query_vector,
+                query_filter=query_filter,
+                limit=limit,
+                with_payload=with_payload,
+                with_vectors=with_vectors,
+            )
+            if score_threshold is not None:
+                kwargs["score_threshold"] = score_threshold
+            if search_params is not None:
+                kwargs["search_params"] = search_params
+            res = await query_fn(**kwargs)
+            return getattr(res, "points", res) if res is not None else []
+        logger.error(
+            "Qdrant client has no 'search' or 'query_points'. "
+            "Available: %s",
+            [m for m in dir(self.qdrant_client) if not m.startswith("_") and ("search" in m.lower() or "query" in m.lower())],
+        )
+        return []
+
     async def get_qdrant_related_memories_async(self, query_embedding, acl_filter: qmodels.Filter, top_k=20):
         """
         Async method to get related memories from Qdrant index with resilient error handling
@@ -7364,6 +7432,11 @@ class MemoryGraph:
         """
         if not query_embedding:
             logger.warning("No query embedding provided to get_qdrant_related_memories_async.")
+            return {"matches": []}
+        
+        # Check if Qdrant client is available
+        if not self.qdrant_client:
+            logger.warning("Qdrant client not initialized, cannot perform search.")
             return {"matches": []}
         
         # Retry configuration for connection issues
@@ -7388,24 +7461,18 @@ class MemoryGraph:
                     if acl_filter:
                         logger.info(f"Qdrant ACL filter: {acl_filter}")
                 
-                # Use optimized search parameters for speed
+                # Use _qdrant_search_async (handles search vs query_points API compatibility)
                 from qdrant_client import models as qmodels
-                
-                # Add timeout wrapper around the Qdrant operation
                 results = await asyncio.wait_for(
-                    self.qdrant_client.search(
+                    self._qdrant_search_async(
                         collection_name=self.qdrant_collection,
                         query_vector=query_embedding,
                         query_filter=acl_filter,
                         limit=top_k,
                         with_payload=True,
                         with_vectors=False,
-                        # Optimize for speed while maintaining reasonable accuracy
-                        score_threshold=0.15,  # Lower threshold for academic queries
-                        search_params=qmodels.SearchParams(
-                            hnsw_ef=128,  # Increased for better recall on academic queries
-                            exact=False   # Use approximate search for speed
-                        )
+                        score_threshold=0.15,
+                        search_params=qmodels.SearchParams(hnsw_ef=128, exact=False)
                     ),
                     timeout=timeout_seconds
                 )
@@ -10223,7 +10290,7 @@ class MemoryGraph:
                 # Handle embedding as list (HuggingFace API) or numpy array (local models)
                 uid_embedding_list = uid_embedding.tolist() if hasattr(uid_embedding, 'tolist') else uid_embedding
                 
-                search_results = await self.qdrant_client.search(
+                search_results = await self._qdrant_search_async(
                     collection_name=self.qdrant_property_collection,
                     query_vector=uid_embedding_list,
                     query_filter=models.Filter(
@@ -10798,7 +10865,7 @@ class MemoryGraph:
             # Handle embedding as list (HuggingFace API) or numpy array (local models)
             content_embedding_list = content_embedding.tolist() if hasattr(content_embedding, 'tolist') else content_embedding
             
-            search_results = await self.qdrant_client.search(
+            search_results = await self._qdrant_search_async(
                 collection_name=self.qdrant_property_collection,
                 query_vector=content_embedding_list,
                 query_filter=search_filter,
@@ -10830,7 +10897,7 @@ class MemoryGraph:
                 logger.info(f"🔍 SEMANTIC SEARCH: No results with {content_similarity_threshold} threshold, trying 0.5 threshold for debugging...")
                 logger.info(f"🔍 DEBUG SEARCH: Using same filter with lower threshold: {search_filter}")
                 
-                debug_results = await self.qdrant_client.search(
+                debug_results = await self._qdrant_search_async(
                     collection_name=self.qdrant_property_collection,
                     query_vector=content_embedding_list,
                     query_filter=search_filter,
@@ -10867,7 +10934,7 @@ class MemoryGraph:
                 logger.info(f"🔍 ANY PROPERTIES SEARCH: Looking for property_keys={possible_property_keys}")
                 logger.info(f"🔍 ANY PROPERTIES FILTER: {any_node_properties_filter}")
                 
-                any_props_results = await self.qdrant_client.search(
+                any_props_results = await self._qdrant_search_async(
                     collection_name=self.qdrant_property_collection,
                     query_vector=content_embedding_list,
                     query_filter=any_node_properties_filter,
@@ -13432,7 +13499,7 @@ class MemoryGraph:
             search_result = None  # Initialize to avoid variable scoping issues
             try:
                 search_result = await asyncio.wait_for(
-                    self.qdrant_client.search(
+                    self._qdrant_search_async(
                         collection_name=self.qdrant_collection,
                         query_vector=embedding,
                         query_filter=qdrant_filter,
