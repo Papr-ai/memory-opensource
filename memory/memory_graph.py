@@ -11080,7 +11080,7 @@ class MemoryGraph:
         # OMO Safety Standards: Extract consent, risk, and ACL from metadata
         omo_consent = metadata.get("consent", "implicit")  # Default to implicit consent
         omo_risk = metadata.get("risk", "none")  # Default to no risk
-        omo_acl = metadata.get("omo_acl")  # Optional explicit ACL
+        acl = metadata.get("acl")  # Optional explicit ACL
         external_user_id = metadata.get("external_user_id")
         memory_id = memory_item.get("id") or memory_item.get("memoryId")
 
@@ -11142,13 +11142,13 @@ class MemoryGraph:
                 common_metadata["external_user_write_access"] = [external_user_id]
 
         # OMO ACL Propagation: Use explicit ACL if provided
-        if omo_acl:
-            logger.debug(f"Using explicit omo_acl for memory {memory_id}: {omo_acl}")
-            if isinstance(omo_acl, dict):
-                if omo_acl.get("read"):
-                    common_metadata["external_user_read_access"] = omo_acl["read"]
-                if omo_acl.get("write"):
-                    common_metadata["external_user_write_access"] = omo_acl["write"]
+        if acl:
+            logger.debug(f"Using explicit acl for memory {memory_id}: {acl}")
+            if isinstance(acl, dict):
+                if acl.get("read"):
+                    common_metadata["external_user_read_access"] = acl["read"]
+                if acl.get("write"):
+                    common_metadata["external_user_write_access"] = acl["write"]
 
         logger.info(f"OMO Safety: Processing graph for memory {memory_id} with consent={omo_consent}, risk={omo_risk}")
 

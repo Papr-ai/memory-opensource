@@ -641,8 +641,8 @@ async def handle_incoming_memory(
                 omo_fields = extract_omo_fields_from_policy(resolved_policy)
                 metadata['consent'] = omo_fields.get('consent', 'implicit')
                 metadata['risk'] = omo_fields.get('risk', 'none')
-                if omo_fields.get('omo_acl'):
-                    metadata['omo_acl'] = omo_fields['omo_acl']
+                if omo_fields.get('acl'):
+                    metadata['acl'] = omo_fields['acl']
 
                 # Extract node_constraints for graph processing
                 node_constraints = resolved_policy.get('node_constraints')

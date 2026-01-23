@@ -163,14 +163,14 @@ class TestMemoryLevelOverride:
         result = merge_memory_policies(schema_policy, memory_policy)
         assert result["risk"] == "flagged"
 
-    def test_memory_omo_acl_overrides_schema(self):
+    def test_memory_acl_overrides_schema(self):
         """Memory-level OMO ACL should override schema-level."""
-        schema_policy = {"omo_acl": {"read": ["user_a"], "write": ["user_a"]}}
-        memory_policy = {"omo_acl": {"read": ["user_b", "user_c"], "write": ["user_b"]}}
+        schema_policy = {"acl": {"read": ["user_a"], "write": ["user_a"]}}
+        memory_policy = {"acl": {"read": ["user_b", "user_c"], "write": ["user_b"]}}
 
         result = merge_memory_policies(schema_policy, memory_policy)
-        assert result["omo_acl"]["read"] == ["user_b", "user_c"]
-        assert result["omo_acl"]["write"] == ["user_b"]
+        assert result["acl"]["read"] == ["user_b", "user_c"]
+        assert result["acl"]["write"] == ["user_b"]
 
 
 # ============================================================================
@@ -280,11 +280,11 @@ class TestOMOFieldsExtraction:
     """Tests for extracting OMO fields from resolved policy."""
 
     def test_extract_omo_fields(self):
-        """Should extract consent, risk, and omo_acl from policy."""
+        """Should extract consent, risk, and acl from policy."""
         policy = {
             "consent": "explicit",
             "risk": "sensitive",
-            "omo_acl": {"read": ["user_a"], "write": ["user_a"]},
+            "acl": {"read": ["user_a"], "write": ["user_a"]},
             "mode": "auto"  # Should not be included
         }
 
@@ -292,7 +292,7 @@ class TestOMOFieldsExtraction:
 
         assert result["consent"] == "explicit"
         assert result["risk"] == "sensitive"
-        assert result["omo_acl"]["read"] == ["user_a"]
+        assert result["acl"]["read"] == ["user_a"]
 
     def test_extract_omo_fields_with_defaults(self):
         """Should use defaults for missing OMO fields."""
@@ -302,7 +302,7 @@ class TestOMOFieldsExtraction:
 
         assert result["consent"] == DEFAULT_CONSENT
         assert result["risk"] == DEFAULT_RISK
-        assert result["omo_acl"] is None
+        assert result["acl"] is None
 
 
 # ============================================================================

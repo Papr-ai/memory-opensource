@@ -74,7 +74,7 @@ class SchemaSpecification(BaseModel):
     This model now supports the full memory_policy API including:
     - mode: Processing mode (auto, structured, hybrid)
     - node_constraints: Rules for LLM-extracted nodes
-    - OMO fields: consent, risk, omo_acl for safety standards
+    - OMO fields: consent, risk, acl for safety standards
     """
     # Core schema fields
     schema_id: Optional[str] = Field(default=None, description="Schema ID to enforce")
@@ -103,7 +103,7 @@ class SchemaSpecification(BaseModel):
         description="Post-ingest safety assessment. "
                    "Values: 'none', 'sensitive', 'flagged'"
     )
-    omo_acl: Optional[Dict[str, Any]] = Field(
+    acl: Optional[Dict[str, Any]] = Field(
         default=None,
         description="Access control list. Format: {'read': [...], 'write': [...]}"
     )

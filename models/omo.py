@@ -157,9 +157,9 @@ def to_omo(
         ext["papr:metadata"] = metadata
 
     # Convert ACL format
-    omo_acl = None
+    acl = None
     if acl:
-        omo_acl = OMOACL(
+        acl = OMOACL(
             read=acl.get("read", []),
             write=acl.get("write", [])
         )
@@ -194,7 +194,7 @@ def to_omo(
         risk=omo_risk,
         topics=topics or [],
         sourceUrl=source_url,
-        acl=omo_acl,
+        acl=acl,
         ext=ext
     )
 
@@ -227,7 +227,7 @@ def from_omo(omo: OpenMemoryObject) -> Dict[str, Any]:
 
     # Extract ACL
     if omo.acl:
-        metadata["omo_acl"] = {
+        metadata["acl"] = {
             "read": omo.acl.read,
             "write": omo.acl.write
         }
@@ -315,9 +315,9 @@ def memory_to_omo(
                 created_at = None
 
         # OMO ACL from metadata
-        omo_acl = getattr(metadata, 'omo_acl', None)
-        if omo_acl:
-            acl = omo_acl
+        acl = getattr(metadata, 'acl', None)
+        if acl:
+            acl = acl
 
         # Papr-specific metadata (goes into ext.papr:metadata)
         papr_metadata = {

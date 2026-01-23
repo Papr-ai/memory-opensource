@@ -45,7 +45,7 @@ def merge_memory_policies(
         "node_constraints": [],
         "nodes": None,
         "relationships": None,
-        "omo_acl": None
+        "acl": None
     }
 
     # Apply schema-level policy
@@ -79,8 +79,8 @@ def _apply_policy_layer(base: Dict[str, Any], layer: Dict[str, Any]) -> None:
         base["consent"] = layer["consent"]
     if layer.get("risk"):
         base["risk"] = layer["risk"]
-    if layer.get("omo_acl"):
-        base["omo_acl"] = layer["omo_acl"]
+    if layer.get("acl"):
+        base["acl"] = layer["acl"]
 
     # Structured mode fields: direct override
     if layer.get("nodes") is not None:
@@ -206,12 +206,12 @@ def extract_omo_fields_from_policy(policy: Dict[str, Any]) -> Dict[str, Any]:
         policy: Resolved memory policy
 
     Returns:
-        Dictionary with consent, risk, and omo_acl fields
+        Dictionary with consent, risk, and acl fields
     """
     return {
         "consent": policy.get("consent", DEFAULT_CONSENT),
         "risk": policy.get("risk", DEFAULT_RISK),
-        "omo_acl": policy.get("omo_acl")
+        "acl": policy.get("acl")
     }
 
 

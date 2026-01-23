@@ -20,10 +20,11 @@ from services.cache_utils import api_key_cache, session_token_cache, auth_optimi
 from services.cache_utils import enhanced_api_key_cache
 from services.logger_singleton import LoggerSingleton
 
-# Import MemoryGraph for type hints
+# Import MemoryGraph and ACLConfig for type hints
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from memory.memory_graph import MemoryGraph
+    from models.shared_types import ACLConfig
 
 logger = LoggerSingleton.get_logger(__name__)
 
@@ -243,6 +244,240 @@ async def _fetch_parse_user_for_validation(
         return None
     except Exception as e:
         logger.debug(f"Failed to fetch Parse user for validation: {e}")
+        return None
+
+
+async def validate_acl_entities(
+    acl_config: Optional["ACLConfig"],
+    developer_id: str,
+    httpx_client: Optional[httpx.AsyncClient] = None
+) -> Optional[Dict[str, Any]]:
+    """
+    Validate internal ACL entities against the database.
+
+    This function validates internal entities (user, organization, namespace, workspace, role)
+    against the Papr database. External entities (external_user) are NOT validated.
+
+    Args:
+        acl_config: The ACLConfig with entity IDs to validate
+        developer_id: The developer user ID (for permission checking)
+        httpx_client: Optional httpx client for API calls
+
+    Returns:
+        Dict with 'valid': False and 'errors' list if validation fails,
+        Dict with 'valid': True if validation passes,
+        None if no ACL provided
+    """
+    if not acl_config:
+        return None
+
+    # Get internal entities that need validation
+    internal_entities = acl_config.get_internal_entities()
+
+    if not internal_entities:
+        return {"valid": True, "validated_entities": {}}
+
+    errors = []
+    validated = {}
+
+    # Validate organizations
+    if "organization" in internal_entities:
+        for org_id in internal_entities["organization"]:
+            try:
+                org = await _validate_organization(org_id, developer_id, httpx_client)
+                if org:
+                    validated.setdefault("organization", []).append(org_id)
+                else:
+                    errors.append({
+                        "entity": f"organization:{org_id}",
+                        "error": f"Organization '{org_id}' not found or you don't have access"
+                    })
+            except Exception as e:
+                logger.debug(f"Error validating organization {org_id}: {e}")
+                errors.append({
+                    "entity": f"organization:{org_id}",
+                    "error": f"Failed to validate organization: {str(e)}"
+                })
+
+    # Validate namespaces
+    if "namespace" in internal_entities:
+        for ns_id in internal_entities["namespace"]:
+            try:
+                ns = await _validate_namespace(ns_id, developer_id, httpx_client)
+                if ns:
+                    validated.setdefault("namespace", []).append(ns_id)
+                else:
+                    errors.append({
+                        "entity": f"namespace:{ns_id}",
+                        "error": f"Namespace '{ns_id}' not found or you don't have access"
+                    })
+            except Exception as e:
+                logger.debug(f"Error validating namespace {ns_id}: {e}")
+                errors.append({
+                    "entity": f"namespace:{ns_id}",
+                    "error": f"Failed to validate namespace: {str(e)}"
+                })
+
+    # Validate workspaces
+    if "workspace" in internal_entities:
+        for ws_id in internal_entities["workspace"]:
+            try:
+                ws = await _validate_workspace(ws_id, developer_id, httpx_client)
+                if ws:
+                    validated.setdefault("workspace", []).append(ws_id)
+                else:
+                    errors.append({
+                        "entity": f"workspace:{ws_id}",
+                        "error": f"Workspace '{ws_id}' not found or you don't have access"
+                    })
+            except Exception as e:
+                logger.debug(f"Error validating workspace {ws_id}: {e}")
+                errors.append({
+                    "entity": f"workspace:{ws_id}",
+                    "error": f"Failed to validate workspace: {str(e)}"
+                })
+
+    # Validate users (internal Parse users)
+    if "user" in internal_entities:
+        for user_id in internal_entities["user"]:
+            try:
+                user = await _fetch_parse_user_for_validation(user_id, httpx_client)
+                if user:
+                    validated.setdefault("user", []).append(user_id)
+                else:
+                    errors.append({
+                        "entity": f"user:{user_id}",
+                        "error": f"User '{user_id}' not found. Use 'external_user:' prefix for your app's users."
+                    })
+            except Exception as e:
+                logger.debug(f"Error validating user {user_id}: {e}")
+                errors.append({
+                    "entity": f"user:{user_id}",
+                    "error": f"Failed to validate user: {str(e)}"
+                })
+
+    # Validate roles
+    if "role" in internal_entities:
+        for role_id in internal_entities["role"]:
+            try:
+                role = await _validate_role(role_id, httpx_client)
+                if role:
+                    validated.setdefault("role", []).append(role_id)
+                else:
+                    errors.append({
+                        "entity": f"role:{role_id}",
+                        "error": f"Role '{role_id}' not found"
+                    })
+            except Exception as e:
+                logger.debug(f"Error validating role {role_id}: {e}")
+                errors.append({
+                    "entity": f"role:{role_id}",
+                    "error": f"Failed to validate role: {str(e)}"
+                })
+
+    if errors:
+        return {
+            "valid": False,
+            "errors": errors,
+            "validated_entities": validated,
+            "suggestion": "Use 'external_user:' prefix for your app's user IDs which don't need validation."
+        }
+
+    return {"valid": True, "validated_entities": validated}
+
+
+async def _validate_organization(
+    org_id: str,
+    developer_id: str,
+    httpx_client: Optional[httpx.AsyncClient] = None
+) -> Optional[Dict[str, Any]]:
+    """Validate organization exists and developer has access."""
+    try:
+        url = f"{PARSE_SERVER_URL}/parse/classes/Organization/{org_id}"
+        params = {"keys": "objectId,name"}
+
+        if httpx_client:
+            response = await httpx_client.get(url, headers=PARSE_HEADERS, params=params)
+        else:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(url, headers=PARSE_HEADERS, params=params)
+
+        if response.status_code == 200:
+            return response.json()
+        return None
+    except Exception as e:
+        logger.debug(f"Failed to validate organization: {e}")
+        return None
+
+
+async def _validate_namespace(
+    ns_id: str,
+    developer_id: str,
+    httpx_client: Optional[httpx.AsyncClient] = None
+) -> Optional[Dict[str, Any]]:
+    """Validate namespace exists and developer has access."""
+    try:
+        url = f"{PARSE_SERVER_URL}/parse/classes/Namespace/{ns_id}"
+        params = {"keys": "objectId,name"}
+
+        if httpx_client:
+            response = await httpx_client.get(url, headers=PARSE_HEADERS, params=params)
+        else:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(url, headers=PARSE_HEADERS, params=params)
+
+        if response.status_code == 200:
+            return response.json()
+        return None
+    except Exception as e:
+        logger.debug(f"Failed to validate namespace: {e}")
+        return None
+
+
+async def _validate_workspace(
+    ws_id: str,
+    developer_id: str,
+    httpx_client: Optional[httpx.AsyncClient] = None
+) -> Optional[Dict[str, Any]]:
+    """Validate workspace exists and developer has access."""
+    try:
+        url = f"{PARSE_SERVER_URL}/parse/classes/WorkSpace/{ws_id}"
+        params = {"keys": "objectId,name"}
+
+        if httpx_client:
+            response = await httpx_client.get(url, headers=PARSE_HEADERS, params=params)
+        else:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(url, headers=PARSE_HEADERS, params=params)
+
+        if response.status_code == 200:
+            return response.json()
+        return None
+    except Exception as e:
+        logger.debug(f"Failed to validate workspace: {e}")
+        return None
+
+
+async def _validate_role(
+    role_id: str,
+    httpx_client: Optional[httpx.AsyncClient] = None
+) -> Optional[Dict[str, Any]]:
+    """Validate role exists."""
+    try:
+        url = f"{PARSE_SERVER_URL}/parse/classes/_Role/{role_id}"
+        params = {"keys": "objectId,name"}
+
+        if httpx_client:
+            response = await httpx_client.get(url, headers=PARSE_HEADERS, params=params)
+        else:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(url, headers=PARSE_HEADERS, params=params)
+
+        if response.status_code == 200:
+            return response.json()
+        return None
+    except Exception as e:
+        logger.debug(f"Failed to validate role: {e}")
         return None
 
 

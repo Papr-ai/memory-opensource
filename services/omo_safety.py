@@ -133,7 +133,7 @@ async def enforce_risk_standard(
 
 async def propagate_acl(
     memory_id: str,
-    omo_acl: Optional[Dict[str, List[str]]],
+    acl: Optional[Dict[str, List[str]]],
     external_user_id: Optional[str],
     developer_user_id: Optional[str],
     nodes: List[Dict[str, Any]]
@@ -141,12 +141,12 @@ async def propagate_acl(
     """
     Propagate ACL from memory to extracted nodes.
 
-    If omo_acl is provided, use it directly.
+    If acl is provided, use it directly.
     Otherwise, create default ACL based on external_user_id and developer_user_id.
 
     Args:
         memory_id: The memory ID
-        omo_acl: Explicit ACL configuration {'read': [...], 'write': [...]}
+        acl: Explicit ACL configuration {'read': [...], 'write': [...]}
         external_user_id: The external user ID
         developer_user_id: The developer's user ID
         nodes: List of nodes to process
@@ -163,9 +163,9 @@ async def propagate_acl(
         return nodes
 
     # Determine ACL to apply
-    if omo_acl:
-        acl = omo_acl
-        logger.debug(f"Using explicit omo_acl for memory {memory_id}: {acl}")
+    if acl:
+        acl = acl
+        logger.debug(f"Using explicit acl for memory {memory_id}: {acl}")
     else:
         # Default ACL: developer + external_user can read/write
         read_access = []
@@ -243,7 +243,7 @@ async def process_memory_with_omo(
     extracted_nodes: List[Dict[str, Any]],
     consent: str = "implicit",
     risk: str = "none",
-    omo_acl: Optional[Dict[str, List[str]]] = None,
+    acl: Optional[Dict[str, List[str]]] = None,
     external_user_id: Optional[str] = None,
     developer_user_id: Optional[str] = None,
     extraction_method: str = "llm"
@@ -260,7 +260,7 @@ async def process_memory_with_omo(
         extracted_nodes: Nodes extracted from the memory
         consent: Consent level ('explicit', 'implicit', 'terms', 'none')
         risk: Risk level ('none', 'sensitive', 'flagged')
-        omo_acl: Optional explicit ACL configuration
+        acl: Optional explicit ACL configuration
         external_user_id: The external user ID
         developer_user_id: The developer's user ID
         extraction_method: 'llm' (auto/hybrid) or 'manual' (structured)
@@ -287,7 +287,7 @@ async def process_memory_with_omo(
 
     # 3. ACL propagation (memory ACL → node ACL)
     nodes = await propagate_acl(
-        memory_id, omo_acl, external_user_id, developer_user_id, nodes
+        memory_id, acl, external_user_id, developer_user_id, nodes
     )
 
     # 4. Audit trail (compliance tracking)

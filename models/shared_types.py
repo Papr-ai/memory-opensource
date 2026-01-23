@@ -321,19 +321,60 @@ class MemoryMetadata(BaseModel):
                    "This field will be removed in v2."
     )
 
-    # ACL fields for fine-grained access control
-    external_user_read_access: Optional[List[str]] = Field(default_factory=list)
-    external_user_write_access: Optional[List[str]] = Field(default_factory=list)
-    user_read_access: Optional[List[str]] = Field(default_factory=list)
-    user_write_access: Optional[List[str]] = Field(default_factory=list)
-    workspace_read_access: Optional[List[str]] = Field(default_factory=list)
-    workspace_write_access: Optional[List[str]] = Field(default_factory=list)
-    role_read_access: Optional[List[str]] = Field(default_factory=list)
-    role_write_access: Optional[List[str]] = Field(default_factory=list)
-    namespace_read_access: Optional[List[str]] = Field(default_factory=list)
-    namespace_write_access: Optional[List[str]] = Field(default_factory=list)
-    organization_read_access: Optional[List[str]] = Field(default_factory=list)
-    organization_write_access: Optional[List[str]] = Field(default_factory=list)
+    # =========================================================================
+    # INTERNAL: Granular ACL fields for vector store filtering
+    # =========================================================================
+    # These fields are auto-populated from memory_policy.acl and should NOT
+    # be set directly by developers. They enable efficient filtering in Qdrant/Pinecone.
+    # Developer-facing ACL should be set via memory_policy.acl at request level.
+    external_user_read_access: Optional[List[str]] = Field(
+        default_factory=list,
+        description="INTERNAL: Auto-populated for vector store filtering. Use memory_policy.acl instead."
+    )
+    external_user_write_access: Optional[List[str]] = Field(
+        default_factory=list,
+        description="INTERNAL: Auto-populated for vector store filtering. Use memory_policy.acl instead."
+    )
+    user_read_access: Optional[List[str]] = Field(
+        default_factory=list,
+        description="INTERNAL: Auto-populated for vector store filtering. Use memory_policy.acl instead."
+    )
+    user_write_access: Optional[List[str]] = Field(
+        default_factory=list,
+        description="INTERNAL: Auto-populated for vector store filtering. Use memory_policy.acl instead."
+    )
+    workspace_read_access: Optional[List[str]] = Field(
+        default_factory=list,
+        description="INTERNAL: Auto-populated for vector store filtering. Use memory_policy.acl instead."
+    )
+    workspace_write_access: Optional[List[str]] = Field(
+        default_factory=list,
+        description="INTERNAL: Auto-populated for vector store filtering. Use memory_policy.acl instead."
+    )
+    role_read_access: Optional[List[str]] = Field(
+        default_factory=list,
+        description="INTERNAL: Auto-populated for vector store filtering. Use memory_policy.acl instead."
+    )
+    role_write_access: Optional[List[str]] = Field(
+        default_factory=list,
+        description="INTERNAL: Auto-populated for vector store filtering. Use memory_policy.acl instead."
+    )
+    namespace_read_access: Optional[List[str]] = Field(
+        default_factory=list,
+        description="INTERNAL: Auto-populated for vector store filtering. Use memory_policy.acl instead."
+    )
+    namespace_write_access: Optional[List[str]] = Field(
+        default_factory=list,
+        description="INTERNAL: Auto-populated for vector store filtering. Use memory_policy.acl instead."
+    )
+    organization_read_access: Optional[List[str]] = Field(
+        default_factory=list,
+        description="INTERNAL: Auto-populated for vector store filtering. Use memory_policy.acl instead."
+    )
+    organization_write_access: Optional[List[str]] = Field(
+        default_factory=list,
+        description="INTERNAL: Auto-populated for vector store filtering. Use memory_policy.acl instead."
+    )
 
     pageId: Optional[str] = None
     sourceType: Optional[str] = None
@@ -354,24 +395,29 @@ class MemoryMetadata(BaseModel):
                    "This field will be removed in v2."
     )
 
-    # OMO (Open Memory Object) Safety Standards
-    # These fields implement the OMO standard for consent, risk, and access control
+    # =========================================================================
+    # DEPRECATED: OMO fields - Use memory_policy at request level instead
+    # =========================================================================
+    # These fields are kept for backwards compatibility but will be removed in v2.
+    # Set OMO safety standards via memory_policy.consent, memory_policy.risk,
+    # and memory_policy.acl at request level.
     consent: Optional[str] = Field(
         default="implicit",
-        description="How the data owner allowed this memory to be stored/used. "
-                   "Values: 'explicit' (user agreed), 'implicit' (inferred, default), "
-                   "'terms' (covered by ToS), 'none' (no consent recorded)."
+        deprecated=True,
+        description="DEPRECATED: Use 'memory_policy.consent' at request level instead. "
+                   "Values: 'explicit', 'implicit' (default), 'terms', 'none'."
     )
     risk: Optional[str] = Field(
         default="none",
-        description="Post-ingest safety assessment. "
-                   "Values: 'none' (safe, default), 'sensitive' (contains PII/financial/health), "
-                   "'flagged' (requires review)."
+        deprecated=True,
+        description="DEPRECATED: Use 'memory_policy.risk' at request level instead. "
+                   "Values: 'none' (default), 'sensitive', 'flagged'."
     )
-    omo_acl: Optional[Dict[str, List[str]]] = Field(
+    acl: Optional[Dict[str, List[str]]] = Field(
         default=None,
-        description="Simplified ACL from OMO standard. Format: {'read': [...], 'write': [...]}. "
-                   "If not provided, defaults to developer + external_user access."
+        deprecated=True,
+        description="DEPRECATED: Use 'memory_policy.acl' at request level instead. "
+                   "Format: {'read': [...], 'write': [...]}."
     )
 
     # QueryLog related fields
@@ -954,7 +1000,7 @@ class MemoryPolicy(BaseModel):
     **OMO Safety Standards:**
     - consent: How data owner allowed storage (explicit, implicit, terms, none)
     - risk: Safety assessment (none, sensitive, flagged)
-    - omo_acl: Access control list for read/write permissions
+    - acl: Access control list for read/write permissions
 
     **Schema Integration:**
     - schema_id: Reference a schema that may have its own default memory_policy
@@ -1030,11 +1076,13 @@ class MemoryPolicy(BaseModel):
                    "'flagged': Requires review - ACL will be restricted to owner only."
     )
 
-    omo_acl: Optional[Dict[str, List[str]]] = Field(
+    acl: Optional[Dict[str, List[str]]] = Field(
         default=None,
-        description="Access control list for graph nodes created from this memory. "
+        description="Access control list (ACL) for this memory and its graph nodes. "
+                   "Conforms to Open Memory Object (OMO) standard. "
                    "Format: {'read': ['user_id_1', ...], 'write': ['user_id_1', ...]}. "
-                   "If not provided, defaults based on external_user_id and developer."
+                   "If not provided, defaults based on external_user_id and developer. "
+                   "See: https://github.com/anthropics/open-memory-object"
     )
 
     # =========================================================================
@@ -1128,7 +1176,7 @@ class MemoryPolicy(BaseModel):
                         "mode": "auto",
                         "consent": "explicit",
                         "risk": "sensitive",
-                        "omo_acl": {"read": ["user_alice"], "write": ["user_alice"]}
+                        "acl": {"read": ["user_alice"], "write": ["user_alice"]}
                     }
                 },
                 {
@@ -1177,21 +1225,178 @@ class ACLConfig(BaseModel):
     Simplified Access Control List configuration.
 
     Aligned with Open Memory Object (OMO) standard.
+    See: https://github.com/anthropics/open-memory-object
+
+    **Supported Entity Prefixes:**
+
+    | Prefix | Description | Validation |
+    |--------|-------------|------------|
+    | `user:` | Internal Papr user ID | Validated against Parse users |
+    | `external_user:` | Your app's user ID | Not validated (your responsibility) |
+    | `organization:` | Organization ID | Validated against your organizations |
+    | `namespace:` | Namespace ID | Validated against your namespaces |
+    | `workspace:` | Workspace ID | Validated against your workspaces |
+    | `role:` | Parse role ID | Validated against your roles |
+
+    **Examples:**
+    ```python
+    acl = ACLConfig(
+        read=["external_user:alice_123", "organization:org_acme"],
+        write=["external_user:alice_123"]
+    )
+    ```
+
+    **Validation Rules:**
+    - Internal entities (user, organization, namespace, workspace, role) are validated
+    - External entities (external_user) are NOT validated - your app is responsible
+    - Invalid internal entities will return an error
+    - Unprefixed values default to `external_user:` for backwards compatibility
     """
+
+    # Supported entity prefixes for ACL
+    INTERNAL_PREFIXES = {"user:", "organization:", "namespace:", "workspace:", "role:"}
+    EXTERNAL_PREFIXES = {"external_user:"}
+    ALL_PREFIXES = INTERNAL_PREFIXES | EXTERNAL_PREFIXES
+
     read: List[str] = Field(
         default_factory=list,
-        description="User IDs that can read this memory"
+        description="Entity IDs that can read this memory. "
+                   "Format: 'prefix:id' (e.g., 'external_user:alice', 'organization:org_123'). "
+                   "Supported prefixes: user, external_user, organization, namespace, workspace, role. "
+                   "Unprefixed values treated as external_user for backwards compatibility."
     )
     write: List[str] = Field(
         default_factory=list,
-        description="User IDs that can write/modify this memory"
+        description="Entity IDs that can write/modify this memory. "
+                   "Format: 'prefix:id' (e.g., 'external_user:alice'). "
+                   "Supported prefixes: user, external_user, organization, namespace, workspace, role."
     )
+
+    @field_validator('read', 'write', mode='before')
+    @classmethod
+    def normalize_entity_ids(cls, v):
+        """
+        Normalize entity IDs to include prefix.
+        Unprefixed values default to external_user: for backwards compatibility.
+        """
+        if not v:
+            return v
+        normalized = []
+        for entity_id in v:
+            if not isinstance(entity_id, str):
+                continue
+            # Check if already has a valid prefix
+            has_prefix = any(entity_id.startswith(p) for p in cls.ALL_PREFIXES)
+            if has_prefix:
+                normalized.append(entity_id)
+            else:
+                # Default to external_user: for backwards compatibility
+                normalized.append(f"external_user:{entity_id}")
+        return normalized
+
+    @model_validator(mode='after')
+    def validate_entity_format(self):
+        """
+        Validate entity ID format.
+        Internal entities will be validated at request time against the database.
+        """
+        all_entities = (self.read or []) + (self.write or [])
+        for entity_id in all_entities:
+            if ':' not in entity_id:
+                raise ValueError(
+                    f"Invalid ACL entity format: '{entity_id}'. "
+                    f"Expected 'prefix:id' format. Supported prefixes: "
+                    f"{', '.join(sorted(self.ALL_PREFIXES))}"
+                )
+            prefix = entity_id.split(':')[0] + ':'
+            if prefix not in self.ALL_PREFIXES:
+                raise ValueError(
+                    f"Unknown ACL entity prefix: '{prefix}' in '{entity_id}'. "
+                    f"Supported prefixes: {', '.join(sorted(self.ALL_PREFIXES))}"
+                )
+        return self
+
+    def get_internal_entities(self) -> Dict[str, List[str]]:
+        """
+        Extract internal entities that need validation.
+        Returns dict grouped by prefix: {'user': [...], 'organization': [...], ...}
+        """
+        result = {prefix.rstrip(':'): [] for prefix in self.INTERNAL_PREFIXES}
+        for entity_id in (self.read or []) + (self.write or []):
+            for prefix in self.INTERNAL_PREFIXES:
+                if entity_id.startswith(prefix):
+                    entity_type = prefix.rstrip(':')
+                    entity_value = entity_id[len(prefix):]
+                    result[entity_type].append(entity_value)
+        return {k: v for k, v in result.items() if v}  # Remove empty
+
+    def get_external_entities(self) -> List[str]:
+        """
+        Extract external entities (not validated by Papr).
+        """
+        result = []
+        for entity_id in (self.read or []) + (self.write or []):
+            if entity_id.startswith("external_user:"):
+                result.append(entity_id[len("external_user:"):])
+        return result
+
+    def to_granular_acl(self) -> Dict[str, List[str]]:
+        """
+        Convert simplified ACL to granular ACL fields for vector store filtering.
+        Returns dict with keys like 'user_read_access', 'organization_read_access', etc.
+        """
+        granular = {
+            'user_read_access': [],
+            'user_write_access': [],
+            'external_user_read_access': [],
+            'external_user_write_access': [],
+            'organization_read_access': [],
+            'organization_write_access': [],
+            'namespace_read_access': [],
+            'namespace_write_access': [],
+            'workspace_read_access': [],
+            'workspace_write_access': [],
+            'role_read_access': [],
+            'role_write_access': [],
+        }
+
+        prefix_map = {
+            'user:': 'user',
+            'external_user:': 'external_user',
+            'organization:': 'organization',
+            'namespace:': 'namespace',
+            'workspace:': 'workspace',
+            'role:': 'role',
+        }
+
+        for entity_id in (self.read or []):
+            for prefix, key in prefix_map.items():
+                if entity_id.startswith(prefix):
+                    granular[f'{key}_read_access'].append(entity_id[len(prefix):])
+                    break
+
+        for entity_id in (self.write or []):
+            for prefix, key in prefix_map.items():
+                if entity_id.startswith(prefix):
+                    granular[f'{key}_write_access'].append(entity_id[len(prefix):])
+                    break
+
+        return granular
 
     model_config = ConfigDict(
         extra='forbid',
         json_schema_extra={
             "examples": [
-                {"read": ["user_alice", "admin_bob"], "write": ["user_alice"]}
+                {
+                    "description": "Share with specific user and entire organization",
+                    "read": ["external_user:alice_123", "organization:org_acme"],
+                    "write": ["external_user:alice_123"]
+                },
+                {
+                    "description": "Namespace-scoped access",
+                    "read": ["namespace:ns_production", "external_user:admin_bob"],
+                    "write": ["external_user:admin_bob"]
+                }
             ]
         }
     )

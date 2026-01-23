@@ -165,12 +165,12 @@ class TestACLPropagation:
 
     @pytest.mark.asyncio
     async def test_explicit_acl_used(self):
-        """Explicit omo_acl should be used when provided."""
+        """Explicit acl should be used when provided."""
         nodes = create_test_nodes()
         explicit_acl = {"read": ["user_a", "user_b"], "write": ["user_a"]}
         result = await propagate_acl(
             memory_id="mem_123",
-            omo_acl=explicit_acl,
+            acl=explicit_acl,
             external_user_id="user_c",
             developer_user_id="dev_123",
             nodes=nodes
@@ -180,11 +180,11 @@ class TestACLPropagation:
 
     @pytest.mark.asyncio
     async def test_default_acl_created(self):
-        """Default ACL should be created when omo_acl is None."""
+        """Default ACL should be created when acl is None."""
         nodes = create_test_nodes()
         result = await propagate_acl(
             memory_id="mem_123",
-            omo_acl=None,
+            acl=None,
             external_user_id="user_alice",
             developer_user_id="dev_123",
             nodes=nodes
@@ -203,7 +203,7 @@ class TestACLPropagation:
         ]
         result = await propagate_acl(
             memory_id="mem_123",
-            omo_acl={"read": ["override"], "write": ["override"]},
+            acl={"read": ["override"], "write": ["override"]},
             external_user_id="user_alice",
             developer_user_id="dev_123",
             nodes=nodes
@@ -319,7 +319,7 @@ class TestOMOPipeline:
             extracted_nodes=nodes,
             consent="implicit",
             risk="none",
-            omo_acl=explicit_acl
+            acl=explicit_acl
         )
         assert result[0]["acl"] == explicit_acl
 

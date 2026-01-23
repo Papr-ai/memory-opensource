@@ -1221,7 +1221,7 @@ class SchemaSpecificationMixin(BaseModel):
     2. **OMO Safety Standards**: Consent, risk, and access control
        - consent: explicit, implicit, terms, none
        - risk: none, sensitive, flagged
-       - omo_acl: Read/write permissions
+       - acl: Read/write permissions
 
     3. **Schema Integration**: Reference schema-level defaults
        - schema_id: Inherit memory_policy from schema
