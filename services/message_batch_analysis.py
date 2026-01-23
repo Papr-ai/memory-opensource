@@ -649,7 +649,11 @@ async def process_batch_analysis_results(
     project_id: Optional[str] = None,
     goal_id: Optional[str] = None,
     session_id: Optional[str] = None,
-    parent_background_tasks: Optional[BackgroundTasks] = None
+    parent_background_tasks: Optional[BackgroundTasks] = None,
+    memory_policy: Optional[Any] = None,  # From MessageRequest
+    graph_generation: Optional[Any] = None,  # From MessageRequest (deprecated)
+    context: Optional[List[Dict[str, Any]]] = None,  # From MessageRequest
+    relationships_json: Optional[List[Dict[str, Any]]] = None  # From MessageRequest
 ) -> Dict[str, Any]:
     """
     Process batch analysis results and create memories for worthy messages.
@@ -715,7 +719,11 @@ async def process_batch_analysis_results(
                 memory_request = AddMemoryRequest(
                     content=result.memory_content,
                     type="text",
-                    metadata=memory_metadata
+                    metadata=memory_metadata,
+                    memory_policy=memory_policy,  # Pass through from MessageRequest
+                    graph_generation=graph_generation,  # Pass through from MessageRequest
+                    context=context or [],  # Pass through from MessageRequest
+                    relationships_json=relationships_json or []  # Pass through from MessageRequest
                 )
                 
                 # Create memory using the exact same pattern as document processing

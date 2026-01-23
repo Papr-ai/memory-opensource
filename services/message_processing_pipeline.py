@@ -522,7 +522,11 @@ async def smart_message_processing_workflow(
                     namespace_id,
                     api_key_id=api_key_id,
                     session_id=message_request.sessionId,  # ✅ Pass session_id
-                    parent_background_tasks=parent_background_tasks  # ✅ Pass it down
+                    parent_background_tasks=parent_background_tasks,  # ✅ Pass it down
+                    memory_policy=message_request.memory_policy,  # ✅ Pass from message
+                    graph_generation=message_request.graph_generation,  # ✅ Pass from message
+                    context=message_request.context,  # ✅ Pass from message
+                    relationships_json=message_request.relationships_json  # ✅ Pass from message
                 )
                 
                 workflow_result["batch_processed"] = True

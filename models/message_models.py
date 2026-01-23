@@ -2,10 +2,13 @@
 Message models for chat message storage and processing
 """
 from pydantic import BaseModel, Field, ConfigDict, field_validator
-from typing import Optional, List, Dict, Any, Literal, Union
+from typing import Optional, List, Dict, Any, Literal, Union, TYPE_CHECKING
 from datetime import datetime, timezone
 from enum import Enum
 from models.shared_types import MemoryMetadata, MessageRole, UserMemoryCategory, AssistantMemoryCategory
+
+if TYPE_CHECKING:
+    from models.memory_models import MemoryPolicy, GraphGeneration
 
 
 class MessageRequest(BaseModel):
@@ -24,13 +27,35 @@ class MessageRequest(BaseModel):
     )
     metadata: Optional[MemoryMetadata] = Field(
         None,
-        description="Optional metadata for the message"
+        description="Optional metadata for the message (topics, location, etc.)"
+    )
+    context: Optional[List[Dict[str, Any]]] = Field(
+        default_factory=list,
+        description="Optional context for the message (conversation history or relevant context)"
+    )
+    relationships_json: Optional[List[Dict[str, Any]]] = Field(
+        default_factory=list,
+        description="Optional array of relationships for Graph DB (Neo4j)"
     )
     
     # Processing control
     process_messages: bool = Field(
         default=True, 
         description="Whether to process messages into memories (true) or just store them (false). Default is true."
+    )
+    
+    # Graph generation control (same as AddMemoryRequest)
+    memory_policy: Optional["MemoryPolicy"] = Field(
+        default=None,
+        description="Unified policy for graph generation and OMO safety. "
+                   "Use mode='auto' (LLM extraction), 'manual' (exact nodes), "
+                   "or 'hybrid' (LLM with constraints). Includes consent, risk, and ACL settings."
+    )
+    
+    graph_generation: Optional["GraphGeneration"] = Field(
+        default=None,
+        description="DEPRECATED: Use 'memory_policy' instead. Legacy graph generation configuration.",
+        json_schema_extra={"deprecated": True}
     )
     
     # Multi-tenant fields
@@ -109,6 +134,35 @@ class ConversationSummaryResponse(BaseModel):
     long_term: Optional[str] = Field(None, description="Full session summary")
     topics: List[str] = Field(default_factory=list, description="Key topics discussed")
     last_updated: Optional[datetime] = Field(None, description="When summaries were last updated")
+
+
+class SessionSummaryResponse(BaseModel):
+    """Response model for session summarization endpoint"""
+    session_id: str = Field(..., description="Session ID of the conversation")
+    summaries: ConversationSummaryResponse = Field(..., description="Hierarchical conversation summaries")
+    ai_agent_note: str = Field(
+        ..., 
+        description="Instructions for AI agents on how to search for more details about this conversation"
+    )
+    from_cache: bool = Field(..., description="Whether summaries were retrieved from cache (true) or just generated (false)")
+    message_count: Optional[int] = Field(None, description="Number of messages summarized (only present if just generated)")
+    
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "session_id": "session_123",
+                "summaries": {
+                    "short_term": "User requested help planning Q4 product roadmap. Assistant offered to help identify key objectives.",
+                    "medium_term": "Ongoing product planning discussion for Q4, covering objectives, timelines, and resource allocation.",
+                    "long_term": "Product planning and strategy conversation focused on Q4 roadmap development and execution.",
+                    "topics": ["product planning", "Q4 roadmap", "objectives", "strategy"],
+                    "last_updated": "2024-01-15T10:31:00Z"
+                },
+                "ai_agent_note": "To find more details about this conversation, search memories with metadata filter: sessionId='session_123'",
+                "from_cache": True
+            }
+        }
+    )
 
 
 class MessageHistoryResponse(BaseModel):

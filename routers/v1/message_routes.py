@@ -7,8 +7,8 @@ from typing import Optional
 import httpx
 import time
 
-from models.message_models import MessageRequest, MessageResponse, MessageHistoryResponse
-from services.message_service import store_message_in_parse, get_session_messages
+from models.message_models import MessageRequest, MessageResponse, MessageHistoryResponse, ConversationSummaryResponse, SessionSummaryResponse
+from services.message_service import store_message_in_parse, get_session_messages, get_unprocessed_messages_for_session, get_or_create_chat_session
 from services.message_processing_pipeline import add_message_processing_task
 from services.auth_utils import get_user_from_token_optimized
 from services.multi_tenant_utils import extract_multi_tenant_context
@@ -197,6 +197,12 @@ async def store_message(
     - Messages are returned in chronological order (oldest first)
     - `total_count` indicates total messages in the session
     
+    **Summaries** (if available):
+    - Returns hierarchical conversation summaries (short/medium/long-term)
+    - Includes `context_for_llm` field with pre-compressed context
+    - Summaries are automatically generated every 15 messages
+    - Use `/sessions/{session_id}/summarize` endpoint to generate on-demand
+    
     **Access Control**:
     - Only returns messages for the authenticated user
     - Workspace scoping is applied if available
@@ -371,7 +377,199 @@ async def get_session_status(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/sessions/{sessionId}/process",
+@router.post("/sessions/{session_id}/summarize",
+    response_model=SessionSummaryResponse,
+    responses={
+        200: {"model": SessionSummaryResponse, "description": "Session summary generated or retrieved"},
+        401: {"description": "Unauthorized"},
+        404: {"description": "Session not found"},
+        500: {"description": "Internal server error"}
+    },
+    description="""
+    Generate or retrieve conversation summaries for a session.
+    
+    **Authentication Required**: Bearer token, API key, or session token
+    
+    **Behavior**:
+    - If summaries already exist, returns them immediately
+    - If no summaries exist, triggers summarization now
+    - Returns hierarchical summaries (short/medium/long-term) and topics
+    - Includes AI agent instructions for searching memory by sessionId
+    
+    **Use Cases**:
+    - Get summaries for sessions that haven't hit the 15-message threshold yet
+    - Provide compressed context to AI agents
+    - Quick overview of long conversations
+    
+    **AI Agent Note**:
+    - Response includes instructions for searching memories by sessionId
+    - Use the metadata filter: `sessionId='<session_id>'` to find related memories
+    """
+)
+async def summarize_session(
+    request: Request,
+    session_id: str,
+    background_tasks: BackgroundTasks,
+    bearer_token: Optional[HTTPAuthorizationCredentials] = Depends(bearer_auth),
+    api_key: Optional[str] = Depends(api_key_header),
+    session_token: Optional[str] = Depends(session_token_header),
+    memory_graph: MemoryGraph = Depends(get_memory_graph)
+):
+    """Generate or retrieve conversation summaries for a session"""
+    
+    try:
+        # Authenticate user
+        async with httpx.AsyncClient() as httpx_client:
+            client_type = "papr_plugin"
+            auth_header = request.headers.get("Authorization", "")
+            
+            if api_key and bearer_token:
+                auth_response = await get_user_from_token_optimized(f"Bearer {bearer_token.credentials}", client_type, memory_graph, api_key=api_key, httpx_client=httpx_client)
+            elif api_key and session_token:
+                auth_response = await get_user_from_token_optimized(f"Session {session_token}", client_type, memory_graph, api_key=api_key, httpx_client=httpx_client)
+            elif api_key:
+                auth_response = await get_user_from_token_optimized(f"APIKey {api_key}", client_type, memory_graph, httpx_client=httpx_client)
+            elif bearer_token:
+                auth_response = await get_user_from_token_optimized(f"Bearer {bearer_token.credentials}", client_type, memory_graph, httpx_client=httpx_client)
+            elif session_token:
+                auth_response = await get_user_from_token_optimized(f"Session {session_token}", client_type, memory_graph, httpx_client=httpx_client)
+            else:
+                auth_response = await get_user_from_token_optimized(auth_header, client_type, memory_graph, httpx_client=httpx_client)
+        
+        if not auth_response:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        
+        # Extract multi-tenant context
+        multi_tenant_context = extract_multi_tenant_context(auth_response)
+        
+        # First, check if summaries already exist by getting the chat session
+        chat = await get_or_create_chat_session(
+            session_id=session_id,
+            user_id=auth_response.end_user_id,
+            workspace_id=auth_response.workspace_id,
+            organization_id=multi_tenant_context.get("organization_id"),
+            namespace_id=multi_tenant_context.get("namespace_id")
+        )
+        
+        if not chat:
+            raise HTTPException(status_code=404, detail="Session not found")
+        
+        # Check if summaries already exist in Parse Server
+        existing_summaries = chat.get("summaries")
+        
+        if existing_summaries and existing_summaries.get("short_term"):
+            # Summaries exist, return them with AI agent instructions
+            logger.info(f"Returning existing summaries for session {session_id}")
+            
+            return SessionSummaryResponse(
+                session_id=session_id,
+                summaries=ConversationSummaryResponse(
+                    short_term=existing_summaries.get("short_term", ""),
+                    medium_term=existing_summaries.get("medium_term", ""),
+                    long_term=existing_summaries.get("long_term", ""),
+                    topics=existing_summaries.get("topics", []),
+                    last_updated=existing_summaries.get("last_updated")
+                ),
+                ai_agent_note=f"To find more details about this conversation, search memories with metadata filter: sessionId='{session_id}'",
+                from_cache=True
+            )
+        
+        # No summaries exist, trigger summarization now
+        logger.info(f"No existing summaries found, triggering summarization for session {session_id}")
+        
+        # Get all messages from the session
+        from services.message_service import get_session_messages as get_all_messages
+        message_history = await get_all_messages(
+            session_id=session_id,
+            user_id=auth_response.end_user_id,
+            workspace_id=auth_response.workspace_id,
+            organization_id=multi_tenant_context.get("organization_id"),
+            namespace_id=multi_tenant_context.get("namespace_id"),
+            limit=1000  # Get all messages for summarization
+        )
+        
+        if message_history.total_count == 0:
+            raise HTTPException(status_code=404, detail="No messages found in session")
+        
+        # Convert messages to format expected by analyze_message_batch_for_memory
+        messages_for_analysis = []
+        for msg in message_history.messages:
+            messages_for_analysis.append({
+                "objectId": msg.objectId,
+                "message": msg.content,
+                "messageRole": msg.role,
+                "role": msg.role,
+                "createdAt": msg.createdAt.isoformat() if msg.createdAt else None
+            })
+        
+        # Analyze messages and generate summaries
+        from services.message_batch_analysis import analyze_message_batch_for_memory
+        analysis_results, summaries = await analyze_message_batch_for_memory(
+            messages=messages_for_analysis,
+            session_context=f"Session {session_id}",
+            session_id=session_id,
+            user_id=auth_response.end_user_id,
+            organization_id=multi_tenant_context.get("organization_id"),
+            namespace_id=multi_tenant_context.get("namespace_id")
+        )
+        
+        # Store summaries in Parse Server
+        from services.message_service import update_chat_summaries
+        await update_chat_summaries(
+            session_id=session_id,
+            user_id=auth_response.end_user_id,
+            summaries={
+                "short_term": summaries.short_term,
+                "medium_term": summaries.medium_term,
+                "long_term": summaries.long_term,
+                "topics": summaries.topics
+            },
+            workspace_id=auth_response.workspace_id
+        )
+        
+        # Also create/update MessageSession node in Neo4j (in background)
+        if summaries:
+            from services.message_batch_analysis import process_batch_analysis_results
+            background_tasks.add_task(
+                process_batch_analysis_results,
+                analysis_results,
+                summaries,
+                auth_response.end_user_id,
+                auth_response.session_token or "",
+                auth_response.workspace_id,
+                multi_tenant_context.get("organization_id"),
+                multi_tenant_context.get("namespace_id"),
+                None,  # api_key_id
+                None,  # project_id
+                None,  # goal_id
+                session_id,
+                None   # parent_background_tasks
+            )
+        
+        logger.info(f"Generated new summaries for session {session_id}")
+        
+        return SessionSummaryResponse(
+            session_id=session_id,
+            summaries=ConversationSummaryResponse(
+                short_term=summaries.short_term,
+                medium_term=summaries.medium_term,
+                long_term=summaries.long_term,
+                topics=summaries.topics,
+                last_updated=None  # Just generated
+            ),
+            ai_agent_note=f"To find more details about this conversation, search memories with metadata filter: sessionId='{session_id}'",
+            from_cache=False,
+            message_count=len(messages_for_analysis)
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating session summary: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post("/sessions/{session_id}/process",
     responses={
         200: {"description": "Session messages queued for processing"},
         400: {"description": "Bad request"},
@@ -397,7 +595,7 @@ async def get_session_status(
     """
 )
 async def process_session_messages(
-    sessionId: str,
+    session_id: str,
     request: Request,
     response: Response,
     background_tasks: BackgroundTasks,
@@ -429,14 +627,14 @@ async def process_session_messages(
         
         # Get unprocessed messages for this session
         unprocessed_messages = await get_unprocessed_messages_for_session(
-            sessionId,
+            session_id,
             auth_response.end_user_id
         )
         
         if not unprocessed_messages:
             return {
                 "message": "No unprocessed messages found for this session",
-                "session_id": sessionId,
+                "session_id": session_id,
                 "messages_queued": 0
             }
         
@@ -448,7 +646,7 @@ async def process_session_messages(
                 # Analyze messages in batch
                 analysis_results = await analyze_message_batch_for_memory(
                     unprocessed_messages,
-                    session_context=f"Retroactive processing for session {sessionId}"
+                    session_context=f"Retroactive processing for session {session_id}"
                 )
                 
                 # Process the analysis results
@@ -462,7 +660,7 @@ async def process_session_messages(
                     api_key_id=api_key_id
                 )
                 
-                logger.info(f"Retroactive processing completed for session {sessionId}: {batch_stats}")
+                logger.info(f"Retroactive processing completed for session {session_id}: {batch_stats}")
                 
             except Exception as e:
                 logger.error(f"Error in retroactive session processing: {e}")
@@ -472,7 +670,7 @@ async def process_session_messages(
         
         return {
             "message": f"Queued {len(unprocessed_messages)} messages for processing",
-            "session_id": sessionId,
+            "session_id": session_id,
             "messages_queued": len(unprocessed_messages)
         }
         
