@@ -1,5 +1,5 @@
 # Shared types for memory, parse_server, and structured_outputs
-from pydantic import BaseModel, Field, ConfigDict, field_validator
+from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
 from typing import Optional, List, Dict, Any, Union, Literal, TYPE_CHECKING
 from enum import Enum
 import logging
