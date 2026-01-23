@@ -1076,11 +1076,13 @@ class MemoryPolicy(BaseModel):
                    "'flagged': Requires review - ACL will be restricted to owner only."
     )
 
-    acl: Optional[Dict[str, List[str]]] = Field(
+    acl: Optional["ACLConfig"] = Field(
         default=None,
         description="Access control list (ACL) for this memory and its graph nodes. "
                    "Conforms to Open Memory Object (OMO) standard. "
-                   "Format: {'read': ['user_id_1', ...], 'write': ['user_id_1', ...]}. "
+                   "Use entity prefixes: 'external_user:', 'organization:', 'namespace:', "
+                   "'workspace:', 'role:', 'user:'. "
+                   "Example: acl=ACLConfig(read=['external_user:alice', 'organization:acme'], write=['external_user:alice']). "
                    "If not provided, defaults based on external_user_id and developer. "
                    "See: https://github.com/anthropics/open-memory-object"
     )
