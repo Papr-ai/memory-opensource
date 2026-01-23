@@ -49,7 +49,7 @@ class MemoryNodeProperties(BaseModel):
     topics: Optional[List[str]] = Field(default_factory=list)
     emotion_tags: Optional[List[str]] = Field(default_factory=list)
     emoji_tags: Optional[List[str]] = Field(default_factory=list)
-    hierarchical_structures: Optional[str] = Field(default="")
+    hierarchical_structures: Optional[Union[str, List]] = Field(default="")
     conversationId: Optional[str] = None
     sourceType: Optional[str] = None
     sourceUrl: Optional[str] = None
@@ -279,7 +279,7 @@ class NeoMemoryNode(MemoryProperties, NeoBaseProperties):
     """Memory node with all Neo4j properties"""
     title: Optional[str] = None
     emoji_tags: Optional[List[str]] = Field(default_factory=list)
-    hierarchical_structures: Optional[str] = Field(default="")
+    hierarchical_structures: Optional[Union[str, List]] = Field(default="")
 
     pass
 
@@ -287,7 +287,7 @@ class PaprMemoryNodeProperties(MemoryProperties, BaseNodeProperties):
     """Memory node properties"""
     title: Optional[str] = None
     emoji_tags: Optional[List[str]] = Field(default_factory=list)
-    hierarchical_structures: Optional[str] = Field(default="")
+    hierarchical_structures: Optional[Union[str, List]] = Field(default="")
     steps: List[str] = Field(default_factory=list)  # Default to empty list
     current_step: str = Field(default="")  # Default to empty string
 

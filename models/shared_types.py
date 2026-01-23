@@ -281,7 +281,7 @@ class PropertyOverrideRule(BaseModel):
 
 class MemoryMetadata(BaseModel):
     """Metadata for memory request"""
-    hierarchical_structures: Optional[str] = Field(
+    hierarchical_structures: Optional[Union[str, List]] = Field(
         None, 
         description="Hierarchical structures to enable navigation from broad topics to specific ones"
     )

@@ -373,21 +373,28 @@ async def process_previous_session_messages(
                 for msg in unprocessed_messages:
                     await update_message_processing_status(msg["objectId"], "processing")
                 
-                # Analyze batch
-                analysis_results = await analyze_message_batch_for_memory(
+                # Analyze batch (with summaries)
+                analysis_results, summaries = await analyze_message_batch_for_memory(
                     unprocessed_messages,
-                    session_context=f"Previous Session {prev_session_id}"
+                    session_context=f"Previous Session {prev_session_id}",
+                    session_id=prev_session_id,
+                    user_id=user_id,
+                    organization_id=organization_id,
+                    namespace_id=namespace_id
                 )
                 
-                # Process results and create memories
+                # Process results and create memories (for previous session processing)
                 batch_result = await process_batch_analysis_results(
                     analysis_results,
+                    summaries,  # ✅ Pass summaries
                     user_id,
                     session_token,
                     workspace_id=workspace_id,
                     organization_id=organization_id,
                     namespace_id=namespace_id,
-                    api_key_id=api_key_id
+                    api_key_id=api_key_id,
+                    session_id=prev_session_id,  # ✅ Pass session_id
+                    parent_background_tasks=None  # No parent context for previous session cleanup
                 )
                 
                 # Update workflow result
@@ -422,7 +429,8 @@ async def smart_message_processing_workflow(
     workspace_id: Optional[str] = None,
     organization_id: Optional[str] = None,
     namespace_id: Optional[str] = None,
-    api_key_id: Optional[str] = None
+    api_key_id: Optional[str] = None,
+    parent_background_tasks: Optional[BackgroundTasks] = None
 ) -> Dict[str, Any]:
     """
     Smart message processing workflow that analyzes messages in batches
@@ -493,21 +501,28 @@ async def smart_message_processing_workflow(
             )
             
             if unprocessed_messages:
-                # Perform batch analysis for current session
-                analysis_results = await analyze_message_batch_for_memory(
+                # Perform batch analysis for current session (with summaries)
+                analysis_results, summaries = await analyze_message_batch_for_memory(
                     unprocessed_messages,
-                    session_context=f"Session {message_request.sessionId}"
+                    session_context=f"Session {message_request.sessionId}",
+                    session_id=message_request.sessionId,
+                    user_id=user_id,
+                    organization_id=organization_id,
+                    namespace_id=namespace_id
                 )
                 
                 # Process the analysis results
                 batch_stats = await process_batch_analysis_results(
                     analysis_results,
+                    summaries,  # ✅ Pass summaries
                     user_id,
                     session_token,
                     workspace_id,
                     organization_id,
                     namespace_id,
-                    api_key_id=api_key_id
+                    api_key_id=api_key_id,
+                    session_id=message_request.sessionId,  # ✅ Pass session_id
+                    parent_background_tasks=parent_background_tasks  # ✅ Pass it down
                 )
                 
                 workflow_result["batch_processed"] = True
@@ -553,6 +568,9 @@ def add_message_processing_task(
     
     Uses the smart analysis workflow that processes messages in batches
     instead of analyzing every single message.
+    
+    IMPORTANT: Passes parent BackgroundTasks through so graph generation
+    tasks get added to the same instance and auto-execute.
     """
     async def _async_wrapper():
         try:
@@ -565,7 +583,8 @@ def add_message_processing_task(
                 workspace_id,
                 organization_id,
                 namespace_id,
-                api_key_id=api_key_id
+                api_key_id=api_key_id,
+                parent_background_tasks=background_tasks  # ✅ Thread it through!
             )
             logger.info(f"✅ Completed background processing for message {message_response.objectId}")
         except Exception as e:

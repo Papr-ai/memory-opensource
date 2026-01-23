@@ -102,11 +102,28 @@ class MessageResponse(BaseModel):
     )
 
 
+class ConversationSummaryResponse(BaseModel):
+    """Hierarchical conversation summaries for context window compression"""
+    short_term: Optional[str] = Field(None, description="Summary of last 15 messages")
+    medium_term: Optional[str] = Field(None, description="Summary of last ~100 messages")
+    long_term: Optional[str] = Field(None, description="Full session summary")
+    topics: List[str] = Field(default_factory=list, description="Key topics discussed")
+    last_updated: Optional[datetime] = Field(None, description="When summaries were last updated")
+
+
 class MessageHistoryResponse(BaseModel):
     """Response model for retrieving message history"""
     sessionId: str = Field(..., description="Session ID of the conversation")
     messages: List[MessageResponse] = Field(..., description="List of messages in chronological order")
     total_count: int = Field(..., description="Total number of messages in the session")
+    summaries: Optional[ConversationSummaryResponse] = Field(
+        None,
+        description="Hierarchical conversation summaries for context compression"
+    )
+    context_for_llm: Optional[str] = Field(
+        None,
+        description="Pre-formatted compressed context ready for LLM consumption (summaries + recent messages)"
+    )
     
     model_config = ConfigDict(
         json_schema_extra={
@@ -130,7 +147,14 @@ class MessageHistoryResponse(BaseModel):
                         "processing_status": "completed"
                     }
                 ],
-                "total_count": 2
+                "total_count": 2,
+                "summaries": {
+                    "short_term": "User requested help planning Q4 product roadmap",
+                    "medium_term": "Ongoing product planning discussion for Q4",
+                    "long_term": "Product planning and strategy conversation",
+                    "topics": ["product", "roadmap", "planning", "Q4"]
+                },
+                "context_for_llm": "FULL SESSION: Product planning and strategy conversation\nRECENT (last ~100): Ongoing product planning discussion for Q4\nCURRENT (last 15): User requested help planning Q4 product roadmap"
             }
         }
     )
@@ -147,7 +171,24 @@ class MessageAnalysisResult(BaseModel):
     confidence_score: float = Field(..., description="Confidence in the analysis (0.0-1.0)")
     reasoning: Optional[str] = Field(None, description="AI reasoning for the decision")
     topics: Optional[List[str]] = Field(None, description="Relevant topics/keywords extracted from the message")
-    hierarchical_structures: Optional[str] = Field(None, description="Hierarchical categorization")
+    hierarchical_structures: Optional[Union[str, List]] = Field(None, description="Hierarchical categorization")
+    
+    # User preference learning
+    has_user_preference_learning: bool = Field(default=False, description="Whether user preference learning was detected")
+    user_learning_content: Optional[str] = Field(None, description="User preference learning content")
+    user_learning_type: Optional[str] = Field(None, description="Type of user preference learning")
+    user_learning_confidence: float = Field(default=0.0, description="Confidence in user preference learning (0.0-1.0)")
+    user_learning_evidence: Optional[str] = Field(None, description="Evidence for user preference learning")
+    
+    # Agent performance learning
+    has_performance_learning: bool = Field(default=False, description="Whether agent performance learning was detected")
+    performance_learning_content: Optional[str] = Field(None, description="Agent performance learning content")
+    performance_learning_type: Optional[str] = Field(None, description="Type of agent performance learning")
+    performance_learning_confidence: float = Field(default=0.0, description="Confidence in agent performance learning (0.0-1.0)")
+    inefficient_approach: Optional[str] = Field(None, description="The inefficient approach that was identified")
+    efficient_approach: Optional[str] = Field(None, description="The efficient approach discovered")
+    performance_context: Optional[str] = Field(None, description="Context for the performance learning")
+    performance_scope: Optional[str] = Field(None, description="Scope of performance learning (project, goal, user, global)")
     
     model_config = ConfigDict(
         json_schema_extra={
