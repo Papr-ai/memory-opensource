@@ -1,6 +1,6 @@
 # Shared types for memory, parse_server, and structured_outputs
 from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
-from typing import Optional, List, Dict, Any, Union, Literal, TYPE_CHECKING
+from typing import Optional, List, Dict, Any, Union, Literal, TYPE_CHECKING, ClassVar
 from enum import Enum
 import logging
 from datetime import datetime, timezone, UTC
@@ -1253,10 +1253,10 @@ class ACLConfig(BaseModel):
     - Unprefixed values default to `external_user:` for backwards compatibility
     """
 
-    # Supported entity prefixes for ACL
-    INTERNAL_PREFIXES = {"user:", "organization:", "namespace:", "workspace:", "role:"}
-    EXTERNAL_PREFIXES = {"external_user:"}
-    ALL_PREFIXES = INTERNAL_PREFIXES | EXTERNAL_PREFIXES
+    # Supported entity prefixes for ACL (ClassVar = class-level constants, not model fields)
+    INTERNAL_PREFIXES: ClassVar[set[str]] = {"user:", "organization:", "namespace:", "workspace:", "role:"}
+    EXTERNAL_PREFIXES: ClassVar[set[str]] = {"external_user:"}
+    ALL_PREFIXES: ClassVar[set[str]] = INTERNAL_PREFIXES | EXTERNAL_PREFIXES
 
     read: List[str] = Field(
         default_factory=list,
