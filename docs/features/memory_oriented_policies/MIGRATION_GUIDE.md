@@ -125,8 +125,8 @@ await client.search(
 ### The Solution
 
 Use `memory_policy` which unifies:
-- Graph generation mode (auto, structured, hybrid)
-- Node constraints
+- Graph generation mode (auto, manual)
+- Node constraints (automatically applied in auto mode when present)
 - Structured data specification
 - **OMO safety standards** (consent, risk, ACL)
 - **Schema-level defaults** via `schema_id`
@@ -198,11 +198,11 @@ await client.add_memory(
 )
 # Then separately manage constraints...
 
-# AFTER - unified
+# AFTER - unified (constraints auto-applied in auto mode)
 await client.add_memory(
     content="...",
     memory_policy=MemoryPolicy(
-        mode="hybrid",
+        mode="auto",  # Constraints are automatically applied when present
         node_constraints=[
             NodeConstraint(
                 node_type="Task",
@@ -219,8 +219,10 @@ await client.add_memory(
 | Old `graph_generation` | New `memory_policy` |
 |------------------------|---------------------|
 | `enabled=True, manual=False` | `mode="auto"` (default) |
-| `enabled=False, manual=True, nodes=[...]` | `mode="structured", nodes=[...]` |
-| `enabled=True` + separate constraints | `mode="hybrid", node_constraints=[...]` |
+| `enabled=False, manual=True, nodes=[...]` | `mode="manual", nodes=[...]` |
+| `enabled=True` + separate constraints | `mode="auto", node_constraints=[...]` |
+
+**Note**: `mode="structured"` is a deprecated alias for `mode="manual"`. `mode="hybrid"` is a deprecated alias for `mode="auto"` (constraints are now auto-applied).
 
 ### Full Feature Comparison
 
@@ -228,14 +230,15 @@ No functionality is lost. `MemoryPolicy` is a superset of `GraphGeneration`:
 
 | GraphGeneration Feature | MemoryPolicy Equivalent | Notes |
 |------------------------|------------------------|-------|
-| `mode: auto` | `mode: "auto"` | Same |
-| `mode: manual` | `mode: "structured"` | Renamed for clarity |
+| `mode: auto` | `mode: "auto"` | Same (constraints auto-applied when present) |
+| `mode: manual` | `mode: "manual"` | Same |
 | `auto.schema_id` | `schema_id` (top-level) | Moved up for easier access |
-| `auto.simple_schema_mode` | `simple_schema_mode` | Same functionality |
 | `auto.property_overrides` | `node_constraints[].force` + `when` | NodeConstraint is superset |
 | `manual.nodes[].label` | `nodes[].type` | Renamed for consistency |
 | `manual.nodes[].id/properties` | `nodes[].id/properties` | Same |
 | `manual.relationships` | `relationships` | Same (field names normalized) |
+
+**Removed**: `simple_schema_mode` has been removed as it was unused in the codebase.
 
 ### PropertyOverrideRule → NodeConstraint
 
@@ -253,7 +256,7 @@ property_overrides=[
 
 # AFTER: NodeConstraint (same + more features)
 memory_policy=MemoryPolicy(
-    mode="hybrid",
+    mode="auto",  # Constraints are automatically applied when present
     node_constraints=[
         NodeConstraint(
             node_type="Task",           # nodeLabel → node_type
@@ -284,7 +287,7 @@ schema = await client.create_schema(
     name="project_management",
     description="Schema for project management memories",
     memory_policy={
-        "mode": "hybrid",
+        "mode": "auto",  # Constraints are automatically applied
         "consent": "terms",
         "node_constraints": [
             {"node_type": "Task", "create": "never"},
@@ -538,11 +541,13 @@ Use this checklist to track your migration:
 ### Q: Do I lose any functionality by switching to `memory_policy`?
 
 **A**: No. `MemoryPolicy` is a superset of `GraphGeneration`. All features are preserved:
-- `mode: manual` → `mode: structured`
+- `mode: manual` → `mode: manual` (same)
+- `mode: auto` → `mode: auto` (constraints now auto-applied when present)
 - `auto.schema_id` → `schema_id` (top-level)
-- `auto.simple_schema_mode` → `simple_schema_mode`
 - `auto.property_overrides` → `node_constraints` (with more features)
 - Plus: OMO safety (`consent`, `risk`, `omo_acl`), schema-level defaults
+
+**Removed**: `simple_schema_mode` has been removed as it was unused.
 
 ### Q: What about schema-level memory policies?
 

@@ -43,8 +43,8 @@ Design a simpler, more intuitive developer experience for Papr Memory APIs that:
 
 | Concept | Purpose | When to Use |
 |---------|---------|-------------|
-| **Graph Override** (`mode="structured"`) | Developer provides exact nodes/relationships | Structured data (Postgres transactions, Linear tasks, CRM records) |
-| **Node Constraints** | Policies for LLM-extracted entities | Unstructured data with rules (meetings, emails, documents) |
+| **Graph Override** (`mode="manual"`) | Developer provides exact nodes/relationships | Structured data (Postgres transactions, Linear tasks, CRM records) |
+| **Node Constraints** | Policies for LLM-extracted entities (auto-applied in `auto` mode) | Unstructured data with rules (meetings, emails, documents) |
 | **OMO (Open Memory Object)** | Safety/consent/ACL standards | ALL memories - wraps both structured and unstructured |
 
 ### Architectural Hierarchy
@@ -65,14 +65,14 @@ Design a simpler, more intuitive developer experience for Papr Memory APIs that:
 │                                                             │
 │  ┌─────────────────────────────────────────────────────┐   │
 │  │              MemoryPolicy (processing)               │   │
-│  │  mode: "auto" | "structured" | "hybrid"              │   │
+│  │  mode: "auto" | "manual"                             │   │
 │  │                                                      │   │
-│  │  IF mode="structured":                               │   │
+│  │  IF mode="manual":                                   │   │
 │  │    → nodes: [NodeSpec, ...]      # Exact nodes      │   │
 │  │    → relationships: [RelSpec, ...] # Exact edges    │   │
 │  │                                                      │   │
-│  │  IF mode="auto" or "hybrid":                         │   │
-│  │    → node_constraints: [NodeConstraint, ...]         │   │
+│  │  IF mode="auto":                                     │   │
+│  │    → node_constraints: [NodeConstraint, ...] # Auto-applied when present │   │
 │  │                                                      │   │
 │  │  schema_id: str  # Merge schema-level constraints    │   │
 │  └─────────────────────────────────────────────────────┘   │
@@ -83,19 +83,16 @@ Design a simpler, more intuitive developer experience for Papr Memory APIs that:
 
 **Mode: `auto` (default)**
 ```
-Memory content → LLM extracts entities → Create nodes → Apply OMO safety
+Memory content → LLM extracts entities → Apply node_constraints (if present) → Create nodes → Apply OMO safety
 ```
 
-**Mode: `structured` (graph override)**
+**Mode: `manual` (graph override)**
 ```
 Memory content → Use provided nodes/relationships directly → Apply OMO safety
 (No LLM extraction - developer controls exactly what nodes are created)
 ```
 
-**Mode: `hybrid` (LLM + constraints)**
-```
-Memory content → LLM extracts entities → Apply node_constraints → Create/link nodes → Apply OMO safety
-```
+**Note**: `structured` is a deprecated alias for `manual`. `hybrid` is a deprecated alias for `auto` (constraints are now auto-applied).
 
 ### Key Design Decision: OMO Wraps Everything
 
@@ -253,25 +250,25 @@ class MemoryPolicy(BaseModel):
     mode: PolicyMode = Field(
         PolicyMode.AUTO,
         description="How to generate graph from this memory. "
-                   "'auto': LLM extracts entities. "
-                   "'structured': You provide exact nodes. "
-                   "'hybrid': LLM extracts with constraints."
+                   "'auto': LLM extracts entities (constraints applied if provided). "
+                   "'manual': You provide exact nodes (no LLM extraction)."
     )
 
-    # For STRUCTURED mode: Direct graph specification
+    # For MANUAL mode: Direct graph specification
     nodes: Optional[List[NodeSpec]] = Field(
         None,
-        description="For structured data: Exact nodes to create (no LLM extraction)."
+        description="For manual mode: Exact nodes to create (no LLM extraction)."
     )
     relationships: Optional[List[RelationshipSpec]] = Field(
         None,
-        description="For structured data: Exact relationships between nodes."
+        description="For manual mode: Exact relationships between nodes."
     )
 
-    # For AUTO/HYBRID mode: Node constraints (policies)
+    # For AUTO mode: Node constraints (policies) - auto-applied when present
     node_constraints: Optional[List[NodeConstraint]] = Field(
         None,
-        description="Rules for how LLM-extracted nodes should be created/updated."
+        description="Rules for how LLM-extracted nodes should be created/updated. "
+                   "Automatically applied in auto mode when present."
     )
 
     # Schema reference
@@ -282,9 +279,9 @@ class MemoryPolicy(BaseModel):
 
 
 class PolicyMode(str, Enum):
-    AUTO = "auto"           # LLM extracts entities freely
-    STRUCTURED = "structured"  # Developer provides exact nodes (graph_override)
-    HYBRID = "hybrid"       # LLM extracts with constraints
+    AUTO = "auto"     # LLM extracts entities (constraints auto-applied if present)
+    MANUAL = "manual" # Developer provides exact nodes (no LLM extraction)
+    # Deprecated aliases handled via validation: 'structured' → 'manual', 'hybrid' → 'auto'
 
 
 class NodeConstraint(BaseModel):
@@ -362,14 +359,14 @@ response = await client.add_memory(
 # Graph is auto-generated, no constraints
 ```
 
-#### Example 2: Structured Data (Joe.coffee Transaction)
+#### Example 2: Manual Mode - Structured Data (Joe.coffee Transaction)
 ```python
 # Structured data from Postgres - developer knows exactly what nodes to create
 response = await client.add_memory(
     content="Transaction: Alice bought Latte for $5.50",
     external_user_id="user_alice_123",
     memory_policy=MemoryPolicy(
-        mode="structured",
+        mode="manual",
         nodes=[
             NodeSpec(
                 id="txn_12345",
@@ -393,14 +390,15 @@ response = await client.add_memory(
 )
 ```
 
-#### Example 3: Hybrid - Meeting Notes with Task Constraints
+#### Example 3: Auto with Constraints - Meeting Notes with Task Rules
 ```python
 # Unstructured meeting notes, but we want specific Task handling
+# Constraints are automatically applied in auto mode when present
 response = await client.add_memory(
     content="Meeting: Discussed Project Alpha. John will complete the API review by Friday.",
     external_user_id="user_alice_123",
     memory_policy=MemoryPolicy(
-        mode="hybrid",
+        mode="auto",  # Constraints auto-applied when present
         schema_id="project_management_schema",
         node_constraints=[
             NodeConstraint(
@@ -431,7 +429,7 @@ response = await client.add_memory(
     content="High priority task: Fix authentication bug. Low priority: Update README.",
     external_user_id="user_alice_123",
     memory_policy=MemoryPolicy(
-        mode="hybrid",
+        mode="auto",  # Constraints auto-applied
         node_constraints=[
             NodeConstraint(
                 node_type="Task",
@@ -455,7 +453,7 @@ response = await client.add_memory(
     content="Update on Project Alpha: milestone 2 completed.",
     external_user_id="user_alice_123",
     memory_policy=MemoryPolicy(
-        mode="hybrid",
+        mode="auto",  # Constraints auto-applied
         node_constraints=[
             NodeConstraint(
                 node_type="Project",
@@ -570,7 +568,9 @@ async def upload_document(
 | `user_id` in request | `external_user_id` | Accept both, log deprecation warning |
 | `end_user_id` (documents) | `external_user_id` | Alias support, accept both |
 | `graph_generation` | `memory_policy` | Auto-convert internally |
-| `graph_generation.manual` | `memory_policy.mode="structured"` | Auto-convert |
+| `graph_generation.manual` | `memory_policy.mode="manual"` | Auto-convert |
+| `mode="structured"` | `mode="manual"` | Deprecated alias, auto-convert |
+| `mode="hybrid"` | `mode="auto"` | Deprecated alias (constraints now auto-applied) |
 | `ext.papr:node_constraints` | `memory_policy.node_constraints` | Support both |
 | `set` (NodeConstraint) | `force` | Alias support via Pydantic |
 | `update` / `update_on_match` | `merge` | Alias support via Pydantic |
@@ -805,8 +805,8 @@ def test_external_user_id_flows_to_acl_correctly()
 def test_backwards_compat_user_id_still_works()
 
 # tests/test_memory_policy.py
-def test_structured_mode_creates_exact_nodes()
-def test_hybrid_mode_applies_constraints()
+def test_manual_mode_creates_exact_nodes()
+def test_auto_mode_applies_constraints_when_present()
 def test_node_constraint_force_overrides_ai()        # force > merge > AI
 def test_node_constraint_merge_only_on_existing()    # merge only for existing nodes
 def test_node_constraint_when_filters_correctly()    # conditional application
@@ -834,8 +834,8 @@ pytest tests/integration/test_document_flow.py -v
 ### Manual Verification
 1. Create memory with external_user_id → verify ACL correct
 2. Try invalid user_id → verify clear error message
-3. Add structured memory (Joe.coffee style) → verify exact nodes
-4. Add hybrid memory with constraints → verify AI respects them
+3. Add manual mode memory (Joe.coffee style) → verify exact nodes
+4. Add auto mode memory with constraints → verify AI respects them
 5. Add flagged content → verify restricted ACL
 
 ---
@@ -932,8 +932,8 @@ pytest tests/integration/test_document_flow.py -v
 
 ### Phase 3: Unified MemoryPolicy Model
 
-- [ ] **Task 3.1**: Create `PolicyMode` enum in `models/memory_models.py`
-  - AUTO, STRUCTURED, HYBRID modes
+- [x] **Task 3.1**: Create `PolicyMode` enum in `models/shared_types.py`
+  - AUTO, MANUAL modes (deprecated aliases: structured→manual, hybrid→auto)
 
 - [ ] **Task 3.2**: Create `NodeSpec` model in `models/shared_types.py`
   - id, type, properties for structured data

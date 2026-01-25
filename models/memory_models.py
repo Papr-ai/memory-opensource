@@ -808,10 +808,6 @@ class SearchRequest(BaseModel):
         default=None,
         description="Optional user-defined schema ID to use for this search. If provided, this schema (plus system schema) will be used for query generation. If not provided, system will automatically select relevant schema based on query content."
     )
-    simple_schema_mode: bool = Field(
-        default=False,
-        description="If true, uses simple schema mode: system schema + ONE most relevant user schema. This ensures better consistency between add/search operations and reduces query complexity. Recommended for production use."
-    )
     metadata: Optional[MemoryMetadata] = Field(
         default=None,
         description="Optional metadata filter. Any field in MemoryMetadata (including custom fields) can be used for filtering."
@@ -1153,10 +1149,6 @@ class AutoGraphGeneration(BaseModel):
         None,
         description="Force AI to use this specific schema instead of auto-selecting"
     )
-    simple_schema_mode: bool = Field(
-        default=False,
-        description="Limit AI to system + one user schema for consistency"
-    )
     property_overrides: Optional[List[PropertyOverrideRule]] = Field(
         None,
         description="Override specific property values in AI-generated nodes with match conditions"
@@ -1214,9 +1206,8 @@ class SchemaSpecificationMixin(BaseModel):
 
     Provides a unified way to control:
     1. **Graph Generation**: How knowledge graph nodes are created
-       - auto: LLM extracts entities (default)
+       - auto: LLM extracts entities (default). If node_constraints provided, they are applied.
        - manual: You provide exact nodes (no LLM extraction)
-       - hybrid: LLM with your constraints
 
     2. **OMO Safety Standards**: Consent, risk, and access control
        - consent: explicit, implicit, terms, none
@@ -1228,17 +1219,17 @@ class SchemaSpecificationMixin(BaseModel):
 
     **Precedence**: Request-level > Schema-level > System defaults
 
-    Note: 'structured' is accepted as deprecated alias for 'manual'.
+    Note: 'structured' is deprecated alias for 'manual'. 'hybrid' is deprecated alias for 'auto'.
     """
 
     # PRIMARY: Unified memory policy (RECOMMENDED)
     memory_policy: Optional[MemoryPolicy] = Field(
         default=None,
         description="Unified policy for graph generation and OMO safety. "
-                   "Use mode='auto' (LLM extraction), 'manual' (exact nodes), "
-                   "or 'hybrid' (LLM with constraints). Includes consent, risk, and ACL settings. "
+                   "Use mode='auto' (LLM extraction, constraints applied if provided) or 'manual' (exact nodes). "
+                   "Includes consent, risk, and ACL settings. "
                    "If schema_id is set, schema's memory_policy is used as defaults. "
-                   "Note: 'structured' is accepted as deprecated alias for 'manual'."
+                   "Note: 'structured' → 'manual', 'hybrid' → 'auto' (deprecated aliases)."
     )
 
     # DEPRECATED: Legacy graph generation (kept for backwards compatibility)
@@ -1263,26 +1254,7 @@ class AddMemoryRequest(SchemaSpecificationMixin):
         description="Memory item type; defaults to 'text' if omitted"
     )
 
-    # User identification (simplified)
-    external_user_id: Optional[str] = Field(
-        default=None,
-        description="Your application's user identifier. This is the primary way to identify users. "
-                   "Use this for your app's user IDs (e.g., 'user_alice_123', UUID, email). "
-                   "Papr will automatically resolve or create internal users as needed."
-    )
-
-    metadata: Optional[MemoryMetadata] = Field(
-        None,
-        description="Metadata used in Neo4J and Pinecone for a memory item. Include role and category here."
-    )
-    context: Optional[List[ContextItem]] = Field(
-        default_factory=list,
-        description="Context can be conversation history or any relevant context for a memory item"
-    )
-    relationships_json: Optional[List[RelationshipItem]] = Field(
-        default_factory=list,
-        description="Array of relationships that we can use in Graph DB (neo4J)"
-    )
+    # Organization and namespace IDs for multi-tenant scoping
     organization_id: Optional[str] = Field(
         default=None,
         description="Optional organization ID for multi-tenant memory scoping. When provided, memory is associated with this organization."
@@ -1292,9 +1264,13 @@ class AddMemoryRequest(SchemaSpecificationMixin):
         description="Optional namespace ID for multi-tenant memory scoping. When provided, memory is associated with this namespace."
     )
 
-    # memory_policy and graph_generation inherited from SchemaSpecificationMixin
-    # DO NOT redefine here - use the inherited field
-
+    # User identification (simplified)
+    external_user_id: Optional[str] = Field(
+        default=None,
+        description="Your application's user identifier. This is the primary way to identify users. "
+                   "Use this for your app's user IDs (e.g., 'user_alice_123', UUID, email). "
+                   "Papr will automatically resolve or create internal users as needed."
+    )
     # Deprecated fields (kept for backwards compatibility)
     user_id: Optional[str] = Field(
         default=None,
@@ -1302,6 +1278,37 @@ class AddMemoryRequest(SchemaSpecificationMixin):
                    "Most developers should not use this field directly.",
         json_schema_extra={"deprecated": True}
     )
+
+    metadata: Optional[MemoryMetadata] = Field(
+        None,
+        description="Metadata used in graph and vector store for a memory item. Include role and category here."
+    )
+    context: Optional[List[ContextItem]] = Field(
+        default_factory=list,
+        description="Conversation history context for this memory. "
+                   "Use for providing message history when adding a memory. "
+                   "Format: [{role: 'user'|'assistant', content: '...'}]"
+    )
+
+    # =========================================================================
+    # DEPRECATED: relationships_json - Use memory_policy instead
+    # =========================================================================
+    relationships_json: Optional[List[RelationshipItem]] = Field(
+        default_factory=list,
+        deprecated=True,
+        description="DEPRECATED: Use 'memory_policy' instead. "
+                   "Migration options: "
+                   "1. Specific memory: relationships=[{source: '$this', target: 'mem_123', type: 'FOLLOWS'}] "
+                   "2. Previous memory: link_to_previous_memory=True "
+                   "3. Related memories: link_to_related_memories=3",
+        json_schema_extra={"deprecated": True}
+    )
+
+
+    # memory_policy and graph_generation inherited from SchemaSpecificationMixin
+    # DO NOT redefine here - use the inherited field
+
+
 
     @field_validator("type", mode="before")
     @classmethod
@@ -1446,8 +1453,8 @@ class UpdateMemoryRequest(SchemaSpecificationMixin):
     """Request model for updating an existing memory.
 
     Inherits memory_policy from SchemaSpecificationMixin for controlling:
-    - Graph generation mode (auto, structured, hybrid)
-    - Node constraints for LLM extraction
+    - Graph generation mode (auto, manual)
+    - Node constraints for LLM extraction (applied in auto mode when present)
     - OMO safety standards (consent, risk, ACL)
     """
     content: Optional[str] = Field(
@@ -1541,7 +1548,7 @@ class BatchMemoryRequest(SchemaSpecificationMixin):
         default=None,
         description="Optional namespace ID for multi-tenant batch memory scoping. When provided, all memories in the batch are associated with this namespace."
     )
-    # schema_id, simple_schema_mode, graph_override inherited from SchemaSpecificationMixin
+    # schema_id, graph_override inherited from SchemaSpecificationMixin
     memories: List[AddMemoryRequest] = Field(
         ...,  # Makes it required
         description="List of memory items to add in batch",

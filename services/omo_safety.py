@@ -263,7 +263,7 @@ async def process_memory_with_omo(
         acl: Optional explicit ACL configuration
         external_user_id: The external user ID
         developer_user_id: The developer's user ID
-        extraction_method: 'llm' (auto/hybrid) or 'manual' (structured)
+        extraction_method: 'llm' (auto mode) or 'manual' (manual mode)
 
     Returns:
         Processed nodes with OMO annotations, or empty list if consent='none'
@@ -324,9 +324,9 @@ def get_extraction_method_from_policy_mode(mode: str) -> str:
     Convert PolicyMode to extraction method for audit trail.
 
     Args:
-        mode: PolicyMode value ('auto', 'structured', 'hybrid')
+        mode: PolicyMode value ('auto', 'manual'). Deprecated: 'structured' → 'manual', 'hybrid' → 'auto'
 
     Returns:
-        'manual' for structured mode, 'llm' otherwise
+        'manual' for manual/structured mode, 'llm' for auto/hybrid mode
     """
-    return "manual" if mode == "structured" else "llm"
+    return "manual" if mode in ("manual", "structured") else "llm"

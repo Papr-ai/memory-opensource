@@ -192,9 +192,8 @@ async def batch_handle_incoming_memories(
         first_request = memory_requests[0]
         graph_override = None
         schema_id = None
-        simple_schema_mode = False
         property_overrides = None
-        
+
         if first_request.graph_generation:
             graph_gen = first_request.graph_generation
             if graph_gen.mode == "manual" and graph_gen.manual:
@@ -203,9 +202,8 @@ async def batch_handle_incoming_memories(
             elif graph_gen.mode == "auto" and graph_gen.auto:
                 auto_config = graph_gen.auto
                 schema_id = auto_config.schema_id
-                simple_schema_mode = auto_config.simple_schema_mode
                 property_overrides = auto_config.property_overrides
-                logger.info(f"🤖 BATCH AUTO MODE: schema_id={schema_id}, simple_schema_mode={simple_schema_mode}")
+                logger.info(f"🤖 BATCH AUTO MODE: schema_id={schema_id}")
         
         # Call batch processing method
         try:
@@ -226,7 +224,6 @@ async def batch_handle_incoming_memories(
                 developer_user_id=developer_user_id,
                 graph_override=graph_override,
                 schema_id=schema_id,
-                simple_schema_mode=simple_schema_mode,
                 property_overrides=property_overrides
             )
         except Exception as e:
@@ -574,7 +571,6 @@ async def handle_incoming_memory(
         # Extract graph generation configuration from new structure
         graph_override = None
         schema_id = None
-        simple_schema_mode = False
         property_overrides = None
         memory_policy_dict = None
 
@@ -597,9 +593,9 @@ async def handle_incoming_memory(
                 if nodes:
                     graph_override = {'nodes': nodes, 'relationships': relationships or []}
                     logger.info(f"🎯 MANUAL MODE (memory_policy): Using developer-provided graph structure")
-            elif mode in ['auto', 'hybrid']:
-                # Auto/Hybrid mode: LLM extraction with optional constraints
-                logger.info(f"🤖 {mode.upper()} MODE (memory_policy): schema_id={schema_id}")
+            elif mode == 'auto':
+                # Auto mode: LLM extraction, constraints applied if provided
+                logger.info(f"🤖 AUTO MODE (memory_policy): schema_id={schema_id}")
 
         # LEGACY: Fall back to graph_generation if memory_policy not provided
         elif memory_request.graph_generation:
@@ -610,9 +606,8 @@ async def handle_incoming_memory(
             elif graph_gen.mode == "auto" and graph_gen.auto:
                 auto_config = graph_gen.auto
                 schema_id = auto_config.schema_id
-                simple_schema_mode = auto_config.simple_schema_mode
                 property_overrides = auto_config.property_overrides
-                logger.info(f"🤖 AUTO MODE: schema_id={schema_id}, simple_schema_mode={simple_schema_mode}")
+                logger.info(f"🤖 AUTO MODE: schema_id={schema_id}")
                 if property_overrides:
                     logger.info(f"🔧 PROPERTY OVERRIDES: {len(property_overrides)} rules")
 
@@ -664,7 +659,6 @@ async def handle_incoming_memory(
 
         logger.info(f"🔍 DEBUG: Extracted graph_override: {graph_override is not None}")
         logger.info(f"🔍 DEBUG: Extracted schema_id: {schema_id}")
-        logger.info(f"🔍 DEBUG: Extracted simple_schema_mode: {simple_schema_mode}")
         logger.info(f"🔍 DEBUG: Extracted property_overrides: {property_overrides}")
         try:
             memory_items = await memory_graph.add_memory_item_async(
@@ -684,7 +678,6 @@ async def handle_incoming_memory(
                 developer_user_id=developer_user_id,  # Pass developer ID for schema selection
                 graph_override=graph_override,  # Pass extracted graph_override for bypassing LLM
                 schema_id=schema_id,  # Pass extracted schema_id for enforcement
-                simple_schema_mode=simple_schema_mode, # Pass extracted simple_schema_mode
                 property_overrides=property_overrides # Pass extracted property_overrides
             )
         except Exception as e:

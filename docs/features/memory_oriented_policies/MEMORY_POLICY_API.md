@@ -88,19 +88,31 @@ class MemoryPolicy(BaseModel):
     """
 
     # ========== GRAPH GENERATION ==========
-    mode: PolicyMode = "auto"                    # auto, structured, hybrid
-    nodes: Optional[List[NodeSpec]] = None       # For structured mode
-    relationships: Optional[List[RelationshipSpec]] = None  # For structured mode
-    node_constraints: Optional[List[NodeConstraint]] = None # For auto/hybrid mode
+    mode: PolicyMode = "auto"                    # auto, manual
+    nodes: Optional[List[NodeSpec]] = None       # For manual mode
+    relationships: Optional[List[RelationshipSpec]] = None  # Supports $this and $previous
+    node_constraints: Optional[List[NodeConstraint]] = None # For auto mode (applied when present)
     schema_id: Optional[str] = None              # Reference schema constraints
 
     # ========== OMO SAFETY STANDARDS ==========
     # Aligned with Open Memory Object v1 schema:
     # https://github.com/papr-ai/open-memory-object/blob/main/schema/omo-v1.schema.json
-    consent: str = "implicit"                    # explicit, implicit, terms, none
-    risk: str = "none"                           # none, sensitive, flagged
+    consent: ConsentLevel = "implicit"           # explicit, implicit, terms, none
+    risk: RiskLevel = "none"                     # none, sensitive, flagged
     omo_acl: Optional[Dict[str, List[str]]] = None  # {read: [...], write: [...]}
+
+# Memory Linking via relationships
+# Use special placeholders:
+#   $this - the Memory node being created
+#   $previous - the user's most recent memory
+#
+# Example:
+#   relationships=[
+#       RelationshipSpec(source="$this", target="$previous", type="FOLLOWS")
+#   ]
 ```
+
+**Note**: `structured` is a deprecated alias for `manual`. `hybrid` is a deprecated alias for `auto`.
 
 ### SchemaSpecificationMixin
 
@@ -131,9 +143,10 @@ class AddMemoryRequest(SchemaSpecificationMixin):
 
 ### Mode: `auto` (Default)
 
-LLM extracts entities freely from memory content.
+LLM extracts entities from memory content. If `node_constraints` are provided, they are automatically applied.
 
 ```python
+# Simple auto - LLM extracts freely
 response = await client.add_memory(
     content="Met with John from Acme Corp to discuss Q4 roadmap",
     external_user_id="user_alice_123"
@@ -143,7 +156,34 @@ response = await client.add_memory(
 
 **Best for**: Unstructured data like notes, conversations, documents.
 
-### Mode: `structured`
+### Mode: `auto` with Constraints
+
+When you provide `node_constraints`, the LLM still extracts entities but your rules are applied.
+
+```python
+response = await client.add_memory(
+    content="Meeting: Discussed Project Alpha. John will complete the API review by Friday.",
+    external_user_id="user_alice_123",
+    memory_policy=MemoryPolicy(
+        mode="auto",  # Constraints are automatically applied when present
+        node_constraints=[
+            NodeConstraint(
+                node_type="Task",
+                create="never",  # Only link to existing tasks
+                search=SearchConfig(mode="semantic", threshold=0.85)
+            ),
+            NodeConstraint(
+                node_type="Person",
+                create="never"  # Controlled vocabulary - existing team members only
+            )
+        ]
+    )
+)
+```
+
+**Best for**: Unstructured data with business rules (meetings, emails).
+
+### Mode: `manual`
 
 Developer provides exact nodes and relationships. No LLM extraction.
 
@@ -152,7 +192,7 @@ response = await client.add_memory(
     content="Transaction: Alice bought Latte for $5.50",
     external_user_id="user_alice_123",
     memory_policy=MemoryPolicy(
-        mode="structured",
+        mode="manual",
         nodes=[
             NodeSpec(
                 id="txn_12345",
@@ -178,121 +218,149 @@ response = await client.add_memory(
 
 **Best for**: Structured data from databases, APIs, CRM systems.
 
-### Mode: `hybrid`
+### Deprecated Mode Aliases
 
-LLM extracts entities, but developer applies constraints.
-
-```python
-response = await client.add_memory(
-    content="Meeting: Discussed Project Alpha. John will complete the API review by Friday.",
-    external_user_id="user_alice_123",
-    memory_policy=MemoryPolicy(
-        mode="hybrid",
-        node_constraints=[
-            NodeConstraint(
-                node_type="Task",
-                create="never",  # Only link to existing tasks
-                search=SearchConfig(mode="semantic", threshold=0.85)
-            ),
-            NodeConstraint(
-                node_type="Person",
-                create="never"  # Controlled vocabulary - existing team members only
-            )
-        ]
-    )
-)
-```
-
-**Best for**: Unstructured data with business rules (meetings, emails).
+| Deprecated | Maps To | Notes |
+|------------|---------|-------|
+| `structured` | `manual` | Same behavior |
+| `hybrid` | `auto` | Constraints are now auto-applied in `auto` mode |
 
 ---
 
 ## Node Constraints
 
-Node constraints define policies for how specific node types are handled.
+Node constraints define policies for how specific node types are handled. They can be defined at **two levels**:
+
+1. **Schema level**: Inside `UserNodeType.constraint` - defines defaults for all nodes of that type
+2. **Memory level**: In `memory_policy.node_constraints[]` - overrides schema defaults per memory
+
+> **Full Reference**: See [NODE_CONSTRAINTS_API.md](./NODE_CONSTRAINTS_API.md) for complete documentation.
 
 ### Full Structure
 
 ```python
 class NodeConstraint(BaseModel):
     # WHAT - Node type to constrain
-    node_type: str  # Required: "Task", "Project", "Person", etc.
+    node_type: Optional[str]  # Required at memory level, implicit at schema level
 
-    # WHEN - Conditional application (optional)
-    when: Optional[Dict[str, Any]] = None  # {"priority": "high", "status": "active"}
+    # WHEN - Conditional with logical operators (_and, _or, _not)
+    when: Optional[Dict[str, Any]] = None  # Supports: {"_and": [...], "_or": [...], "_not": {...}}
 
     # CREATION POLICY
     create: Literal["auto", "never"] = "auto"  # "auto": create if not found, "never": link only
 
-    # NODE SELECTION (optional)
-    node_id: Optional[str] = None  # Direct reference - skip search
-    search: Optional[SearchConfig] = None  # How to find existing nodes
+    # NODE SELECTION (property-based matching with PropertyMatch)
+    search: Optional[SearchConfig] = None  # Uses PropertyMatch list
 
-    # VALUE POLICIES (optional)
-    force: Optional[Dict[str, Any]] = None  # Always set these values
-    merge: Optional[List[str]] = None  # Update these properties on existing nodes
+    # PROPERTY VALUES (unified)
+    set: Optional[Dict[str, SetValue]] = None  # Exact values or auto-extract
 ```
 
 ### Constraint Examples
 
-#### Controlled Vocabulary (Link Only)
+#### Schema Level - Controlled Vocabulary (Link Only)
 
 ```python
-NodeConstraint(
-    node_type="Person",
-    create="never",  # Don't create new Person nodes
-    search=SearchConfig(mode="semantic", threshold=0.90)
+# In UserNodeType definition
+UserNodeType(
+    name="Person",
+    constraint=NodeConstraint(
+        # node_type is implicit from parent
+        create="never",  # Don't create new Person nodes
+        search=SearchConfig(
+            properties=[
+                PropertyMatch(name="email", mode="exact"),
+                PropertyMatch(name="name", mode="semantic", threshold=0.90)
+            ]
+        )
+    )
 )
 # Result: Only links to existing team members, ignores unknown names
 ```
 
-#### Force Values
+#### Memory Level - Select Specific Node
 
 ```python
+# Use PropertyMatch with value instead of old node_id
 NodeConstraint(
     node_type="Project",
-    force={"workspace_id": "ws_123", "team": "engineering"}
+    search=SearchConfig(
+        properties=[
+            PropertyMatch(name="id", mode="exact", value="proj_alpha_123")
+        ]
+    ),
+    set={
+        "status": {"mode": "auto"},  # Auto-extract from content
+        "milestone": {"mode": "auto"}
+    }
 )
-# Result: All Project nodes get these properties, overriding any AI extraction
 ```
 
-#### Conditional Constraints
+#### Conditional Constraints with Logical Operators
 
 ```python
 NodeConstraint(
     node_type="Task",
-    when={"priority": "high"},  # Only for high-priority tasks
-    force={"urgent": True, "notify_team": True}
+    when={
+        "_and": [
+            {"priority": "high"},
+            {"_not": {"status": "completed"}}
+        ]
+    },
+    set={"urgent": True, "notify_team": True}
 )
 ```
 
-#### Direct Node Reference
-
-```python
-NodeConstraint(
-    node_type="Project",
-    node_id="proj_alpha_123",  # Use this exact node
-    merge=["status", "milestone"]  # Update these from AI
-)
-```
-
-#### Merge on Existing
+#### Auto-Extract on Existing
 
 ```python
 NodeConstraint(
     node_type="Task",
     create="never",
-    merge=["status", "assignee", "due_date"]  # Update existing tasks
+    set={
+        "status": {"mode": "auto"},
+        "assignee": {"mode": "auto"}
+    }
 )
 ```
 
-### Search Configuration
+### Search Configuration (Property-Based Matching)
 
 ```python
 class SearchConfig(BaseModel):
+    # Property-based matching (replaces old node_id + properties as List[str])
+    properties: Optional[List[PropertyMatch]] = None  # PropertyMatch list
+
+    # Default settings when property doesn't specify
     mode: Literal["semantic", "exact", "fuzzy"] = "semantic"
     threshold: float = 0.85  # 0.0-1.0 for semantic search
-    properties: Optional[List[str]] = None  # For exact/fuzzy match
+
+class PropertyMatch(BaseModel):
+    name: str                    # Property name (e.g., "id", "email", "title")
+    mode: Literal["exact", "semantic", "fuzzy"] = "exact"
+    threshold: float = 0.85      # For semantic/fuzzy only
+    value: Optional[Any] = None  # Runtime value override (replaces old node_id)
+```
+
+**Key Change:** `node_id` was removed. Use `PropertyMatch` with `value` instead:
+```python
+# Old approach (removed)
+SearchConfig(node_id="TASK-123")
+
+# New approach
+SearchConfig(properties=[PropertyMatch(name="id", mode="exact", value="TASK-123")])
+```
+
+### SetValue Types
+
+```python
+# SetValue can be:
+# 1. Exact value: str, int, float, bool, list, dict
+# 2. Auto-extract config: PropertyValue
+
+class PropertyValue(BaseModel):
+    mode: Literal["auto"] = "auto"     # LLM extracts from content
+    text_mode: Literal["replace", "append", "merge"] = "replace"
 ```
 
 ---
@@ -384,9 +452,9 @@ Memory policies are stored as Papr-specific extensions in the OMO `ext` namespac
   "acl": {"read": ["user_alice"], "write": ["user_alice"]},
   "ext": {
     "papr:memory_policy": {
-      "mode": "hybrid",
+      "mode": "auto",
       "node_constraints": [
-        {"node_type": "Task", "create": "never", "merge": ["status"]}
+        {"node_type": "Task", "create": "never", "set": {"status": {"mode": "auto"}}}
       ]
     },
     "papr:schema_id": "project_management",
@@ -453,7 +521,7 @@ schema = UserGraphSchema(
     name="project_management",
     description="Schema for project management memories",
     memory_policy={
-        "mode": "hybrid",
+        "mode": "auto",
         "consent": "terms",
         "node_constraints": [
             {"node_type": "Task", "create": "never"},
@@ -508,7 +576,7 @@ response = await client.add_memory(
     content="Transaction: Alice bought Latte for $5.50",
     external_user_id="user_alice_123",
     memory_policy=MemoryPolicy(
-        mode="structured",
+        mode="manual",
         nodes=[
             NodeSpec(id="txn_001", type="Transaction", properties={"amount": 5.50}),
             NodeSpec(id="prod_latte", type="Product", properties={"name": "Latte"})
@@ -528,18 +596,32 @@ response = await client.add_memory(
     content="Sprint planning: John will complete the API review by Friday. Sarah handles testing.",
     external_user_id="user_alice_123",
     memory_policy=MemoryPolicy(
-        mode="hybrid",
+        mode="auto",  # Constraints are automatically applied
         schema_id="project_management",
         node_constraints=[
             NodeConstraint(
                 node_type="Task",
                 create="never",  # Only link to existing Linear tasks
-                search=SearchConfig(mode="semantic", threshold=0.85),
-                merge=["status", "assignee"]
+                search=SearchConfig(
+                    properties=[
+                        PropertyMatch(name="id", mode="exact"),
+                        PropertyMatch(name="title", mode="semantic", threshold=0.85)
+                    ]
+                ),
+                set={
+                    "status": {"mode": "auto"},
+                    "assignee": {"mode": "auto"}
+                }
             ),
             NodeConstraint(
                 node_type="Person",
-                create="never"  # Only team members from HR system
+                create="never",  # Only team members from HR system
+                search=SearchConfig(
+                    properties=[
+                        PropertyMatch(name="email", mode="exact"),
+                        PropertyMatch(name="name", mode="semantic", threshold=0.90)
+                    ]
+                )
             )
         ]
     )
@@ -587,10 +669,15 @@ All existing APIs continue to work. Deprecation warnings are logged but no error
 | `user_id` | `external_user_id` | Deprecated, works |
 | `end_user_id` | `external_user_id` | Alias, works |
 | `graph_generation` | `memory_policy` | Deprecated, auto-converted |
-| `graph_generation.manual` | `memory_policy.mode="structured"` | Auto-converted |
+| `graph_generation.manual` | `memory_policy.mode="manual"` | Auto-converted |
+| `mode="structured"` | `mode="manual"` | Deprecated alias, auto-converted |
+| `mode="hybrid"` | `mode="auto"` | Deprecated alias (constraints now auto-applied) |
 | `metadata.consent` | `memory_policy.consent` | Both work, `memory_policy` preferred |
 | `metadata.risk` | `memory_policy.risk` | Both work, `memory_policy` preferred |
 | `metadata.omo_acl` | `memory_policy.omo_acl` | Both work, `memory_policy` preferred |
+| `search.node_id` | `PropertyMatch.value` | Use `PropertyMatch(name="id", value="...")` |
+| `search.properties` as `List[str]` | `List[PropertyMatch]` | Use `PropertyMatch` with per-property config |
+| `unique_identifiers` in `UserNodeType` | `constraint.search.properties` | Define in `UserNodeType.constraint` |
 
 ### Migration Priority
 
@@ -615,13 +702,14 @@ All existing APIs continue to work. Deprecation warnings are logged but no error
   }
 }
 
-// Invalid node_id reference
+// Invalid property value reference
 {
   "code": 404,
   "error": "Node not found",
   "details": {
-    "node_id": "proj_unknown",
-    "suggestion": "Verify the node_id exists or use search mode instead."
+    "property": "id",
+    "value": "proj_unknown",
+    "suggestion": "Verify the node exists or use semantic matching instead of exact mode."
   }
 }
 
@@ -630,7 +718,7 @@ All existing APIs continue to work. Deprecation warnings are logged but no error
   "code": 400,
   "error": "Invalid NodeConstraint",
   "details": {
-    "issue": "Cannot use 'force' and 'merge' for the same property",
+    "issue": "Cannot set both exact value and auto-extract mode for the same property",
     "properties": ["status"]
   }
 }

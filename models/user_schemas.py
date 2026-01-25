@@ -6,7 +6,7 @@ from uuid import uuid4
 import re
 
 if TYPE_CHECKING:
-    from models.shared_types import MemoryPolicy
+    from models.shared_types import MemoryPolicy, NodeConstraint
 
 class PropertyType(str, Enum):
     STRING = "string"
@@ -62,7 +62,35 @@ class PropertyDefinition(BaseModel):
         return v
 
 class UserNodeType(BaseModel):
-    """User-defined node type"""
+    """
+    User-defined node type with optional inline constraint.
+
+    The `constraint` field allows defining default matching/creation behavior
+    directly within the node type definition. This replaces the need to put
+    constraints only in memory_policy.node_constraints.
+
+    Schema-level constraints:
+    - `node_type` is implicit (taken from parent UserNodeType.name)
+    - Defines default matching strategy via `search.properties`
+    - Can be overridden per-memory via memory_policy.node_constraints
+
+    Example:
+        UserNodeType(
+            name="Task",
+            label="Task",
+            properties={
+                "id": PropertyDefinition(type="string"),
+                "title": PropertyDefinition(type="string", required=True)
+            },
+            constraint=NodeConstraint(
+                search=SearchConfig(properties=[
+                    PropertyMatch(name="id", mode="exact"),
+                    PropertyMatch(name="title", mode="semantic", threshold=0.85)
+                ]),
+                create="auto"
+            )
+        )
+    """
     name: str = Field(..., pattern=r'^[A-Za-z][A-Za-z0-9_]*$')  # Valid identifier
     label: str  # Display name
     description: Optional[str] = None
@@ -71,17 +99,30 @@ class UserNodeType(BaseModel):
         description="Node properties (max 10 per node type)"
     )
     required_properties: List[str] = Field(default_factory=list)
-    
-    # Node merging/deduplication
+
+    # Node merging/deduplication (DEPRECATED: Use constraint.search.properties instead)
     unique_identifiers: List[str] = Field(
         default_factory=list,
-        description="Properties that uniquely identify this node type. Used for MERGE operations to avoid duplicates. Example: ['name', 'email'] for Customer nodes."
+        description="DEPRECATED: Use 'constraint.search.properties' instead. "
+                   "Properties that uniquely identify this node type. "
+                   "Example: ['name', 'email'] for Customer nodes."
     )
-    
+
+    # Node constraint - defines default matching/creation behavior for this node type
+    constraint: Optional["NodeConstraint"] = Field(
+        default=None,
+        description="Default constraint for this node type. Defines: "
+                   "1. search.properties - unique identifiers and how to match them "
+                   "2. create - 'auto' (create if not found) or 'never' (controlled vocabulary) "
+                   "3. when - conditional application with logical operators "
+                   "4. set - default property values. "
+                   "Note: node_type is implicit (taken from this UserNodeType.name)."
+    )
+
     # Visual/UI properties
     color: Optional[str] = "#3498db"  # Hex color for UI
     icon: Optional[str] = None  # Icon identifier
-    
+
     model_config = ConfigDict(extra='forbid')
     
     @field_validator('properties')
@@ -170,7 +211,7 @@ class UserGraphSchema(BaseModel):
     memory_policy: Optional[Dict[str, Any]] = Field(
         default=None,
         description="Default memory policy for memories using this schema. "
-                   "Includes mode ('auto', 'structured', 'hybrid'), node_constraints, "
+                   "Includes mode ('auto', 'manual'), node_constraints (applied in auto mode when present), "
                    "and OMO safety settings (consent, risk). Memory-level policies override schema-level."
     )
 
@@ -239,3 +280,10 @@ class SchemaListResponse(BaseModel):
     code: int = 200
     total: int = 0
 
+
+# ============================================================================
+# Resolve forward references after all models are defined
+# ============================================================================
+# Import NodeConstraint and rebuild UserNodeType to resolve the forward reference
+from models.shared_types import NodeConstraint
+UserNodeType.model_rebuild()

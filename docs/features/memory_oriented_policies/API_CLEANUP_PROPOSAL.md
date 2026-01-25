@@ -105,11 +105,11 @@ AddMemoryRequest (Request Level)
 │
 ├── # === PROCESSING POLICY ===
 ├── memory_policy: MemoryPolicy    # Graph generation mode, constraints
-│   ├── mode: "auto" | "manual" | "hybrid"
+│   ├── mode: "auto" | "manual"    # (constraints auto-applied in auto mode when present)
 │   ├── schema_id: str
 │   ├── nodes: [...]               # For manual mode
 │   ├── relationships: [...]       # For manual mode
-│   └── node_constraints: [...]    # For hybrid mode
+│   └── node_constraints: [...]    # For auto mode (applied when present)
 │
 ├── # === ACCESS CONTROL (NEW - moved from metadata) ===
 ├── acl: ACLConfig                 # Simplified ACL
@@ -203,49 +203,52 @@ class InternalMemoryMetadata(MemoryMetadata):
 
 ---
 
-## Issue 3: Rename PolicyMode.STRUCTURED to MANUAL
+## Issue 3: Simplify PolicyMode to AUTO and MANUAL only
 
-### Current State
+### Previous State (3 modes - confusing)
 ```python
 class PolicyMode(str, Enum):
-    AUTO = "auto"
-    STRUCTURED = "structured"  # Should be MANUAL
-    HYBRID = "hybrid"
+    AUTO = "auto"        # node_constraints IGNORED
+    STRUCTURED = "structured"
+    HYBRID = "hybrid"    # node_constraints APPLIED
 ```
 
-### Rationale for MANUAL
-Based on customer use cases (DeepTrust, Joe.coffee):
-1. **Customer terminology**: Both call it "manual graph generation"
-2. **Legacy consistency**: `graph_generation.mode` already uses `manual` vs `auto`
-3. **Action-oriented**: "Manual" = developer controls, "Structured" = data format (confusing)
-4. **Clear intent**: Mode describes WHO controls the graph, not data format
+**Problem**: Developers would add `node_constraints` to `auto` mode and wonder why they were ignored. Having a separate `hybrid` mode was a footgun.
 
-### Solution
+### Rationale for Simplification
+1. **No footgun**: Constraints should just work when provided
+2. **Intuitive**: `auto` = LLM extraction (with optional constraints), `manual` = developer provides exact nodes
+3. **Customer terminology**: DeepTrust/Joe.coffee call it "manual graph generation"
+4. **Simple**: 2 modes instead of 3
+
+### Solution (Implemented)
 ```python
 class PolicyMode(str, Enum):
     """
     Memory processing mode - describes WHO controls graph generation.
 
-    - AUTO: LLM extracts entities freely (default)
+    - AUTO: LLM extracts entities. If node_constraints provided, they are applied.
     - MANUAL: Developer provides exact nodes (no LLM extraction)
-    - HYBRID: LLM extracts with developer constraints
     """
     AUTO = "auto"
-    MANUAL = "manual"       # Renamed from STRUCTURED
-    HYBRID = "hybrid"
+    MANUAL = "manual"
 
-    # Backwards compatibility alias
-    STRUCTURED = "manual"   # Deprecated alias, maps to MANUAL
+    # Deprecated aliases handled via validation:
+    # - 'structured' → 'manual'
+    # - 'hybrid' → 'auto' (constraints now auto-applied in auto mode)
 ```
 
-**Validation with alias:**
+**Validation with aliases:**
 ```python
 @field_validator('mode', mode='before')
 def normalize_mode(cls, v):
-    """Accept 'structured' as alias for 'manual' for backwards compatibility."""
+    """Accept deprecated aliases for backwards compatibility."""
     if v == 'structured':
         logger.warning("mode='structured' is deprecated, use mode='manual' instead")
         return 'manual'
+    if v == 'hybrid':
+        logger.warning("mode='hybrid' is deprecated, use mode='auto' with node_constraints instead")
+        return 'auto'
     return v
 ```
 
@@ -259,7 +262,7 @@ Schema creation (`POST /schemas`) creates `UserGraphSchema` but doesn't support 
 ### Why Schemas Need memory_policy
 1. **Schema-level defaults**: Define default node_constraints for all memories using this schema
 2. **OMO policy inheritance**: Set default consent/risk levels for schema
-3. **Processing mode**: Define whether schema expects auto, manual, or hybrid mode
+3. **Processing mode**: Define whether schema expects auto or manual mode
 
 ### Proposed UserGraphSchema Extension
 ```python
@@ -282,12 +285,12 @@ class UserGraphSchema(BaseModel):
 ```
 Memory Request                    Schema
 ├── memory_policy                ├── default_memory_policy
-│   ├── mode: "hybrid"          │   ├── mode: "auto"
+│   ├── mode: "auto"            │   ├── mode: "auto"
 │   ├── schema_id: "my_schema"  │   ├── node_constraints: [...]
 │   └── node_constraints: [A]   │   └── consent: "implicit"
 │
 └── Final Policy = Merge(Schema defaults, Memory overrides)
-    ├── mode: "hybrid"           # Memory wins
+    ├── mode: "auto"             # Memory value (same in this case)
     ├── node_constraints: [A]    # Memory wins (can merge with schema)
     └── consent: "implicit"      # Schema default (not overridden)
 ```
@@ -333,10 +336,12 @@ Memory Request                    Schema
 
 ## Summary of Changes
 
-| Issue | Current | Proposed | Breaking? |
+| Issue | Previous | Implemented | Breaking? |
 |-------|---------|----------|-----------|
 | Duplicate memory_policy | Both in mixin and class | Only in mixin | No |
 | PolicyMode.STRUCTURED | "structured" | "manual" (accept both) | No |
+| PolicyMode.HYBRID | "hybrid" | Removed - auto now applies constraints | No |
+| simple_schema_mode | Unused flag | Removed | No |
 | Metadata user_id, etc. | In metadata | Deprecated, use request-level | No |
 | ACL in metadata | 12+ fields in metadata | Simplified ACL at request level | No |
 | Schema memory_policy | Not supported | default_memory_policy field | No |

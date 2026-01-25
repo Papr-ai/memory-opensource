@@ -36,21 +36,21 @@ response = await client.add_memory(
     content="Transaction: Alice bought Latte",
     external_user_id="user_alice_123",
     memory_policy=MemoryPolicy(
-        mode="structured",
+        mode="manual",
         nodes=[NodeSpec(id="txn_1", type="Transaction", properties={...})],
         relationships=[RelationshipSpec(source="txn_1", target="prod_1", type="PURCHASED")]
     )
 )
 ```
 
-### Hybrid (LLM + Constraints)
+### Auto with Constraints (LLM + Rules)
 
 ```python
 response = await client.add_memory(
     content="Meeting notes with task assignments...",
     external_user_id="user_alice_123",
     memory_policy=MemoryPolicy(
-        mode="hybrid",
+        mode="auto",  # Constraints are automatically applied when provided
         node_constraints=[
             NodeConstraint(node_type="Task", create="never", merge=["status"])
         ]
@@ -64,9 +64,10 @@ response = await client.add_memory(
 
 | Mode | Description | Use Case |
 |------|-------------|----------|
-| `auto` | LLM extracts entities freely | Unstructured data (notes, conversations) |
-| `structured` | Developer provides exact nodes | Structured data (database, API) |
-| `hybrid` | LLM extracts with constraints | Unstructured + business rules |
+| `auto` | LLM extracts entities. If `node_constraints` provided, they are applied. | Unstructured data (notes, conversations), with optional business rules |
+| `manual` | Developer provides exact nodes (no LLM extraction) | Structured data (database, API) |
+
+**Note**: `structured` is a deprecated alias for `manual`. `hybrid` is a deprecated alias for `auto` (constraints are now auto-applied).
 
 ### Node Constraints
 
@@ -148,7 +149,7 @@ Memory policies are implemented as Papr-specific extensions to the OMO standard:
   "acl": {"read": ["user_alice"], "write": ["user_alice"]},
   "ext": {
     "papr:memory_policy": {
-      "mode": "hybrid",
+      "mode": "auto",
       "node_constraints": [
         {"node_type": "Task", "create": "never"}
       ]

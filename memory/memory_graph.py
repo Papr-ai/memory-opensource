@@ -3684,7 +3684,7 @@ class MemoryGraph:
         logger.info(f'Total unique memory item ids found: {len(memory_item_ids)}')
         return list(memory_item_ids)  # Convert set back to list before returning
 
-    def add_memory_item(self, memory_item: MemoryItem, relationships_json: dict, sessionToken: str, user_id: str,  imageGenerationCategory=None, add_to_pinecone=True, workspace_id: str = None, api_key: Optional[str] = None, graph_override: Optional[Dict[str, Any]] = None, schema_id: Optional[str] = None, simple_schema_mode: bool = False, property_overrides: Optional[Dict[str, Dict[str, Any]]] = None):
+    def add_memory_item(self, memory_item: MemoryItem, relationships_json: dict, sessionToken: str, user_id: str,  imageGenerationCategory=None, add_to_pinecone=True, workspace_id: str = None, api_key: Optional[str] = None, graph_override: Optional[Dict[str, Any]] = None, schema_id: Optional[str] = None, property_overrides: Optional[Dict[str, Dict[str, Any]]] = None):
         import asyncio
         from services.user_utils import User
 
@@ -3755,7 +3755,6 @@ class MemoryGraph:
                             legacy_route=False,  # Use new route by default - this should be passed from caller
                             graph_override=graph_override,  # Pass graph_override to processing
                             schema_id=schema_id,  # Pass schema_id for enforcement
-                            simple_schema_mode=simple_schema_mode,  # Pass simple_schema_mode
                             property_overrides=property_overrides  # Pass property_overrides for node customization
                         )
 
@@ -3786,38 +3785,37 @@ class MemoryGraph:
 
         return [added_item_properties] if added_item_properties else []
     
-    def _extract_graph_generation_config(self, memory_dict: dict) -> tuple[Optional[Dict[str, Any]], Optional[str], bool, Optional[Dict[str, Dict[str, Any]]]]:
+    def _extract_graph_generation_config(self, memory_dict: dict) -> tuple[Optional[Dict[str, Any]], Optional[str], Optional[Dict[str, Dict[str, Any]]]]:
         """
         Extract graph generation configuration from memory_dict.
-        
+
         Returns:
-            tuple: (graph_override, schema_id, simple_schema_mode, property_overrides)
+            tuple: (graph_override, schema_id, property_overrides)
         """
         graph_generation = memory_dict.get('graph_generation')
         # Check for direct schema_id and property_overrides in memory_dict (added by add_memory_item_async)
         direct_schema_id = memory_dict.get('schema_id')
         direct_property_overrides = memory_dict.get('property_overrides')
-        
+
         if direct_schema_id or direct_property_overrides:
             logger.info(f"✅ EXTRACT: Found direct parameters - schema_id: {direct_schema_id}, property_overrides: {bool(direct_property_overrides)}")
-            return (None, direct_schema_id, False, direct_property_overrides)
-        
+            return (None, direct_schema_id, direct_property_overrides)
+
         # Handle default auto mode or explicit configuration
         if not graph_generation:
             logger.info("🤖 DEFAULT GRAPH GENERATION: No graph_generation specified, defaulting to auto mode")
             # Return auto mode configuration as default
-            return (None, None, False, None)  # This will trigger LLM generation in process_memory_item_async
-        
+            return (None, None, None)  # This will trigger LLM generation in process_memory_item_async
+
         # Handle both dict format (from API) and Pydantic object format (from default_factory)
         if isinstance(graph_generation, dict):
             mode = graph_generation.get('mode', 'auto')
-            
+
             if mode == 'manual':
                 manual_config = graph_generation.get('manual', {})
                 return (
                     manual_config,  # The manual config IS the graph_override
                     None,  # No schema_id in manual mode
-                    False,  # No simple_schema_mode in manual mode
                     None   # No property_overrides in manual mode
                 )
             else:  # auto mode
@@ -3825,19 +3823,17 @@ class MemoryGraph:
                 return (
                     None,  # No graph_override in auto mode
                     auto_config.get('schema_id'),
-                    auto_config.get('simple_schema_mode', False),
                     auto_config.get('property_overrides')
                 )
         else:
             # Pydantic GraphGeneration object
             mode = graph_generation.mode.value if hasattr(graph_generation.mode, 'value') else str(graph_generation.mode)
-            
+
             if mode == 'manual':
                 manual_config = graph_generation.manual.model_dump() if graph_generation.manual else {}
                 return (
                     manual_config,  # The manual config IS the graph_override
                     None,  # No schema_id in manual mode
-                    False,  # No simple_schema_mode in manual mode
                     None   # No property_overrides in manual mode
                 )
             else:  # auto mode (default)
@@ -3845,28 +3841,27 @@ class MemoryGraph:
                 return (
                     None,  # No graph_override in auto mode
                     auto_config.get('schema_id'),
-                    auto_config.get('simple_schema_mode', False),
                     auto_config.get('property_overrides')
                 )
-        
+
         # This should never be reached now
-        return (None, None, False, None)
+        return (None, None, None)
     
-    async def process_memory_item_async(self, session_token: str, memory_dict: dict, relationships_json: List[RelationshipItem] = None, workspace_id: str = None, user_id: str = None, user_workspace_ids: Optional[List[str]] = None, api_key: Optional[str] = None, neo_session: Optional[AsyncSession] = None, legacy_route: bool = True, graph_override: Optional[Dict[str, Any]] = None, schema_id: Optional[str] = None, simple_schema_mode: bool = False, property_overrides: Optional[Dict[str, Dict[str, Any]]] = None, developer_user_id: Optional[str] = None) -> ProcessMemoryResponse:
+    async def process_memory_item_async(self, session_token: str, memory_dict: dict, relationships_json: List[RelationshipItem] = None, workspace_id: str = None, user_id: str = None, user_workspace_ids: Optional[List[str]] = None, api_key: Optional[str] = None, neo_session: Optional[AsyncSession] = None, legacy_route: bool = True, graph_override: Optional[Dict[str, Any]] = None, schema_id: Optional[str] = None, property_overrides: Optional[Dict[str, Dict[str, Any]]] = None, developer_user_id: Optional[str] = None) -> ProcessMemoryResponse:
         """
         Process a memory item asynchronously.
-        
+
         Parameters are passed directly from the API request via memory_service.py
         """
         # Use parameters passed directly instead of extracting from memory_dict
         # (The memory_dict doesn't contain graph_generation field - it's extracted in memory_service.py)
         logger.info(f"🔍 PROCESS_MEMORY_ASYNC: Using passed parameters directly")
-        logger.info(f"🔍 PASSED PARAMS: graph_override={graph_override is not None}, schema_id={schema_id}, simple_schema_mode={simple_schema_mode} property_overrides={property_overrides is not None}")
+        logger.info(f"🔍 PASSED PARAMS: graph_override={graph_override is not None}, schema_id={schema_id}, property_overrides={property_overrides is not None}")
         if property_overrides:
             logger.info(f"🔍 PASSED PROPERTY OVERRIDES: {property_overrides}")
-        
+
         logger.info(f"🔍 PROCESS_MEMORY_ASYNC: fallback_mode={self.async_neo_conn.fallback_mode}")
-        logger.info(f"🔍 GRAPH CONFIG: graph_override={graph_override is not None}, schema_id={schema_id}, simple_schema_mode={simple_schema_mode} property_overrides={property_overrides is not None}")
+        logger.info(f"🔍 GRAPH CONFIG: graph_override={graph_override is not None}, schema_id={schema_id}, property_overrides={property_overrides is not None}")
         if property_overrides:
             logger.info(f"🔍 PROPERTY OVERRIDES: {property_overrides}")
         
@@ -3894,7 +3889,6 @@ class MemoryGraph:
                     legacy_route=legacy_route,
                     graph_override=graph_override,
                     schema_id=schema_id,
-                    simple_schema_mode=simple_schema_mode,
                     property_overrides=property_overrides,
                     developer_user_id=developer_user_id
                 )
@@ -3908,7 +3902,7 @@ class MemoryGraph:
                 "data": None
             }
 
-    async def _index_memories_and_process(self, neo_session: AsyncSession, session_token: str, memory_dict: dict, relationships_json: List[RelationshipItem] = None, workspace_id: str = None, user_id: str = None, user_workspace_ids: Optional[List[str]] = None, api_key: Optional[str] = None, legacy_route: bool = True, graph_override: Optional[Dict[str, Any]] = None, schema_id: Optional[str] = None, simple_schema_mode: bool = False, property_overrides: Optional[Dict[str, Dict[str, Any]]] = None, developer_user_id: Optional[str] = None) -> ProcessMemoryResponse:
+    async def _index_memories_and_process(self, neo_session: AsyncSession, session_token: str, memory_dict: dict, relationships_json: List[RelationshipItem] = None, workspace_id: str = None, user_id: str = None, user_workspace_ids: Optional[List[str]] = None, api_key: Optional[str] = None, legacy_route: bool = True, graph_override: Optional[Dict[str, Any]] = None, schema_id: Optional[str] = None, property_overrides: Optional[Dict[str, Dict[str, Any]]] = None, developer_user_id: Optional[str] = None) -> ProcessMemoryResponse:
         # Start timing the entire process
         process_start_time = time.time()
         
@@ -12370,12 +12364,11 @@ class MemoryGraph:
         developer_user_id: Optional[str] = None,
         graph_override: Optional[Dict[str, Any]] = None,
         schema_id: Optional[str] = None,
-        simple_schema_mode: bool = False,
         property_overrides: Optional[Dict[str, Dict[str, Any]]] = None
     ) -> List[ParseStoredMemory]:
         """
         Batch version of add_memory_item_async - processes multiple memories in a single database transaction.
-        
+
         Args:
             memory_items: List of MemoryItem objects to process
             relationships_json_list: List of relationship lists, one per memory
@@ -12393,9 +12386,8 @@ class MemoryGraph:
             developer_user_id: Developer user ID for schema selection
             graph_override: Optional graph override for manual mode
             schema_id: Optional schema ID for enforcement
-            simple_schema_mode: Use simplified schema mode
             property_overrides: Optional property overrides
-            
+
         Returns:
             List of ParseStoredMemory objects
         """
@@ -12449,19 +12441,18 @@ class MemoryGraph:
                         developer_user_id,
                         graph_override,
                         schema_id,
-                        simple_schema_mode,
                         property_overrides
                     )
-            
+
             logger.info(f"✅ batch_add_memory_items_async: Completed {len(stored_memories)} memories")
             return stored_memories
-            
+
         except Exception as e:
             logger.error(f"❌ Error in batch_add_memory_items_async: {e}", exc_info=True)
             raise  # Re-raise the exception instead of falling back to individual processing
 
     async def add_memory_item_async(
-        self, 
+        self,
         memory_item: MemoryItem,
         relationships_json: List[RelationshipItem],
         sessionToken: str,
@@ -12471,15 +12462,14 @@ class MemoryGraph:
         add_to_pinecone: bool = True,
         workspace_id: Optional[str] = None,
         skip_background_processing: bool = False,
-        user_workspace_ids: Optional[List[str]] = None, 
+        user_workspace_ids: Optional[List[str]] = None,
         api_key: Optional[str] = None,
         developer_user_object_id: Optional[str] = None,
         legacy_route: bool = True,
-        developer_user_id: Optional[str] = None,  # Add the missing parameter
-        graph_override: Optional[Dict[str, Any]] = None,  # Add graph_override parameter
-        schema_id: Optional[str] = None,  # Add schema_id for enforcement
-        simple_schema_mode: bool = False,  # Add simple_schema_mode parameter
-        property_overrides: Optional[Dict[str, Dict[str, Any]]] = None  # Add property_overrides parameter
+        developer_user_id: Optional[str] = None,
+        graph_override: Optional[Dict[str, Any]] = None,
+        schema_id: Optional[str] = None,
+        property_overrides: Optional[Dict[str, Dict[str, Any]]] = None
     ) -> List[ParseStoredMemory]:  # Updated return type
         """
         Async version of add_memory_item that quickly stores the memory and processes relationships in the background.
@@ -12642,7 +12632,6 @@ class MemoryGraph:
                             neo_session=None,
                             legacy_route=legacy_route,
                             graph_override=graph_override,  # Pass graph_override to background processing
-                            simple_schema_mode=simple_schema_mode,  # Pass simple_schema_mode
                             property_overrides=property_overrides,  # Pass property_overrides for node customization
                             developer_user_id=developer_user_id  # Pass developer_user_id for schema selection
                         )
