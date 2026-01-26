@@ -2238,7 +2238,8 @@ class User(UserMixin):
         enable_rank_results: bool = False,
         api_key_id: Optional[str] = None,
         organization_id: Optional[str] = None,
-        namespace_id: Optional[str] = None
+        namespace_id: Optional[str] = None,
+        defer_usage_tracking: bool = False
     ) -> Optional[Tuple[Dict[str, Any], int, bool]]:
         """
         ULTRA-FAST version of check_interaction_limits using MongoDB and aggressive caching.
@@ -2326,11 +2327,57 @@ class User(UserMixin):
             logger.info(f"workspace_data keys: {list(workspace_data.keys()) if workspace_data else 'None'}")
             logger.info(f"subscription_data keys: {list(subscription_data.keys()) if subscription_data else 'None'}")
 
-            # Phase 2: Parallel operations (target: 50-100ms)
-            # Run Stripe checks, interaction updates, and tier lookup in parallel
+            # Set current date for interaction tracking
             current_date = datetime.now()
             current_month = current_date.month
             current_year = current_date.year
+
+            # Fast path: metered billing enabled, skip tier/subscription checks
+            if is_metered_billing_on:
+                logger.info("Metered billing enabled - skipping tier/subscription checks")
+
+                async def _safe_task(coro, label: str):
+                    try:
+                        await coro
+                    except Exception as e:
+                        logger.warning(f"{label} failed (non-critical): {e}")
+
+                # Always update interaction counts; optionally defer to background
+                operation_name = operation.value if operation else "unknown"
+                interaction_coro = self._update_interaction_count_fast(
+                    workspace_data.get('objectId'),
+                    interaction_type,
+                    current_month,
+                    current_year,
+                    subscription_data.get('objectId'),
+                    workspace_data.get('company', {}).get('objectId') if workspace_data.get('company') else None,
+                    memory_graph,
+                    increment_by=interaction_cost,
+                    operation_type=operation_name,
+                    organization_id=organization_id,
+                    namespace_id=namespace_id,
+                    api_key_id=api_key_id
+                )
+
+                if defer_usage_tracking:
+                    asyncio.create_task(_safe_task(interaction_coro, "Interaction update"))
+                    if api_key_id:
+                        asyncio.create_task(_safe_task(self._update_api_key_last_used(api_key_id), "API key update"))
+                    logger.info("Deferred usage tracking for metered billing")
+                    return None, 200, False
+
+                # Synchronous update for metered billing
+                interaction_result = await interaction_coro
+                if isinstance(interaction_result, Exception):
+                    logger.error(f"Interaction update failed: {interaction_result}", exc_info=True)
+                    return {"error": "Unable to update usage record"}, 500, True
+                if api_key_id:
+                    await _safe_task(self._update_api_key_last_used(api_key_id), "API key update")
+                return None, 200, False
+
+            # Phase 2: Parallel operations (target: 50-100ms)
+            # Run Stripe checks, interaction updates, and tier lookup in parallel
+            # current_date/current_month/current_year already set above
 
             # Create all parallel tasks
             tasks = []

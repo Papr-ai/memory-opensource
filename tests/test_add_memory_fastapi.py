@@ -5308,6 +5308,10 @@ async def test_v1_search_performance_under_500ms(app, caplog):
                         pass
 
             logger.info(f"First search - End-to-end time: {first_search_time:.2f}ms")
+            if server_total_time_first_ms is not None:
+                client_overhead_ms = max(first_search_time - server_total_time_first_ms, 0.0)
+                logger.info(f"First search - SERVER-ONLY time: {server_total_time_first_ms:.2f}ms")
+                logger.info(f"First search - CLIENT overhead: {client_overhead_ms:.2f}ms")
             if qdrant_search_time:
                 logger.info(f"First search - Qdrant search time: {qdrant_search_time:.2f}ms")
             if total_execution_time:
@@ -5363,16 +5367,28 @@ async def test_v1_search_performance_under_500ms(app, caplog):
                         pass
 
             logger.info(f"Second search - End-to-end time: {second_search_time:.2f}ms")
+            if server_total_time_second_ms is not None:
+                client_overhead_ms = max(second_search_time - server_total_time_second_ms, 0.0)
+                logger.info(f"Second search - SERVER-ONLY time: {server_total_time_second_ms:.2f}ms")
+                logger.info(f"Second search - CLIENT overhead: {client_overhead_ms:.2f}ms")
             if qdrant_search_time_cache:
                 logger.info(f"Second search - Qdrant search time: {qdrant_search_time_cache:.2f}ms")
             if total_execution_time_cache:
                 logger.info(f"Second search - Total execution time: {total_execution_time_cache:.2f}ms")
 
             # Performance assertions
-            logger.info(f"Performance test results:")
-            logger.info(f"  First search (no cache): {first_search_time:.2f}ms")
-            logger.info(f"  Second search (with cache): {second_search_time:.2f}ms")
-            logger.info(f"  Cache improvement: {((first_search_time - second_search_time) / first_search_time * 100):.1f}%")
+            logger.info("Performance test results:")
+            logger.info(f"  First search (end-to-end): {first_search_time:.2f}ms")
+            logger.info(f"  Second search (end-to-end): {second_search_time:.2f}ms")
+            logger.info(
+                f"  First search (server-only): {server_total_time_first_ms:.2f}ms"
+            )
+            logger.info(
+                f"  Second search (server-only): {server_total_time_second_ms:.2f}ms"
+            )
+            logger.info(
+                f"  Cache improvement (server-only): {((server_total_time_first_ms - server_total_time_second_ms) / server_total_time_first_ms * 100):.1f}%"
+            )
 
             # Assert performance requirements
             # Prefer server-side timing which excludes client transport/serialization overhead

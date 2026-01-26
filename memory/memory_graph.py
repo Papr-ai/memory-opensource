@@ -697,6 +697,9 @@ class MemoryGraph:
         else:
             logger.warning("QDRANT_URL not set - Qdrant client will not be initialized")
         
+        # Track Qdrant warmup status
+        self.qdrant_warmed = False
+        
         # Initialize memory_items dictionary
         self.memory_items = {}
         
@@ -845,6 +848,43 @@ class MemoryGraph:
         except Exception as e:
             logger.error(f"❌ MongoDB warmup failed: {e}")
             self.mongodb_warmed = False
+
+    async def warm_qdrant_connection(self):
+        """
+        Warm up Qdrant connection to reduce first-search latency.
+        Performs a lightweight collection info fetch and a minimal search.
+        """
+        if not self.qdrant_client or not self.qdrant_collection:
+            logger.warning("Qdrant client or collection not available - skipping warmup")
+            return
+
+        if getattr(self, "qdrant_warmed", False):
+            logger.debug("Qdrant already warmed, skipping")
+            return
+
+        try:
+            logger.info("🔥 Warming up Qdrant connection...")
+            start_time = time.time()
+
+            collection_info = await self.qdrant_client.get_collection(self.qdrant_collection)
+            vector_size = collection_info.config.params.vectors.size
+
+            dummy_vector = [0.0] * vector_size
+            await self._qdrant_search_async(
+                collection_name=self.qdrant_collection,
+                query_vector=dummy_vector,
+                query_filter=None,
+                limit=1,
+                with_payload=False,
+                with_vectors=False,
+            )
+
+            total_time = (time.time() - start_time) * 1000
+            logger.info(f"🔥 Qdrant warmup completed in {total_time:.2f}ms")
+            self.qdrant_warmed = True
+        except Exception as e:
+            logger.warning(f"Qdrant warmup failed (non-critical): {e}")
+            self.qdrant_warmed = False
 
     def _warmup_api_key_lookup(self):
         """Warm up the exact API key lookup operation that happens during authentication"""
@@ -5869,10 +5909,22 @@ class MemoryGraph:
             logger.debug(f'Processed memory IDs: {processed_memory_ids}')
         else:
             # Only run Qwen/Qdrant
-            query_qdrant_embedding_list, _ = await self.embedding_model.get_qwen_embedding_4b(
-                query_context_combined, max_retries=3, retry_delay=1
-            )
-            query_qdrant_embedding = query_qdrant_embedding_list[0] if query_qdrant_embedding_list else None
+            # Cache search embeddings to avoid repeated network calls for identical queries
+            from services.cache_utils import search_embedding_cache
+            import hashlib
+
+            cache_key = f"qwen_search:{hashlib.sha256(query_context_combined.encode()).hexdigest()[:24]}"
+            query_qdrant_embedding = search_embedding_cache.get(cache_key)
+            if query_qdrant_embedding:
+                logger.info(f"Search embedding cache HIT (qwen only): {cache_key}")
+            else:
+                query_qdrant_embedding_list, _ = await self.embedding_model.get_qwen_embedding_4b(
+                    query_context_combined, max_retries=3, retry_delay=1
+                )
+                query_qdrant_embedding = query_qdrant_embedding_list[0] if query_qdrant_embedding_list else None
+                if query_qdrant_embedding:
+                    search_embedding_cache.set(cache_key, query_qdrant_embedding)
+                    logger.info(f"Search embedding cache SET (qwen only): {cache_key}")
             embedding_time = (time.time() - embedding_start) * 1000
             logger.warning(f"Embedding generation (qwen only) took {embedding_time:.2f}ms")
             search_start = time.time()
@@ -5881,18 +5933,20 @@ class MemoryGraph:
                 chunk_factor = 3  # Assume average 3 chunks per memory
                 vector_top_k = top_k * chunk_factor  # Get 3x more from Qdrant
                 
-                # Run both main search and fallback search in parallel
-                qdrant_embeddings_results, qdrant_fallback_results = await asyncio.gather(
-                    self.get_qdrant_related_memories_async(
-                        query_qdrant_embedding,
-                        final_filter,
-                        top_k=vector_top_k  # Increased for chunking
-                    ),
-                    self.get_qdrant_related_memories_async_fallback(
+                # Run main search first; fallback only if main returns no results
+                qdrant_embeddings_results = await self.get_qdrant_related_memories_async(
+                    query_qdrant_embedding,
+                    final_filter,
+                    top_k=vector_top_k  # Increased for chunking
+                )
+                if qdrant_embeddings_results.get('matches'):
+                    qdrant_fallback_results = {"matches": []}
+                    logger.info("Skipping Qdrant fallback search (main results found)")
+                else:
+                    qdrant_fallback_results = await self.get_qdrant_related_memories_async_fallback(
                         final_filter,
                         top_k=vector_top_k  # Increased for chunking
                     )
-                )
                 
                 # Log raw results from both Qdrant searches
                 qdrant_main_count = len(qdrant_embeddings_results.get('matches', []))

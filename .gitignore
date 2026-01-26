@@ -22,3 +22,4 @@ __pycache__/main.cpython-311.pyc
 keys/jwt-private.pem
 .env
 .env
+.env

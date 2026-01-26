@@ -2388,22 +2388,78 @@ async def search_v1(
         client_type = request.headers.get('X-Client-Type', 'papr_plugin')
         auth_start_time = time.time()
         try:
-            async with httpx.AsyncClient() as httpx_client:
+            async def _authenticate_with_client(httpx_client: httpx.AsyncClient):
                 # Use optimized authentication that gets workspace_id, isQwenRoute, user_roles, user_workspace_ids, and resolves user in parallel
                 # OPTIMIZATION: Skip schema fetching for search (only active patterns needed)
                 if api_key and bearer_token:
                     # Developer provides API key + Bearer token for end user - use Bearer token for auth but developer's API key for Parse
-                    auth_response = await get_user_from_token_optimized(f"Bearer {bearer_token.credentials}", client_type, memory_graph, api_key=api_key, search_request=search_request, httpx_client=httpx_client, include_schemas=False, url_enable_agentic_graph=enable_agentic_graph)
-                elif api_key and session_token:
-                    auth_response = await get_user_from_token_optimized(f"Session {session_token}", client_type, memory_graph, api_key=api_key, search_request=search_request, httpx_client=httpx_client, include_schemas=False, url_enable_agentic_graph=enable_agentic_graph)
-                elif api_key:
-                    auth_response = await get_user_from_token_optimized(f"APIKey {api_key}", client_type, memory_graph, search_request=search_request, httpx_client=httpx_client, include_schemas=False, url_enable_agentic_graph=enable_agentic_graph)
-                elif bearer_token:
-                    auth_response = await get_user_from_token_optimized(f"Bearer {bearer_token.credentials}", client_type, memory_graph, search_request=search_request, httpx_client=httpx_client, include_schemas=False, url_enable_agentic_graph=enable_agentic_graph)
-                elif session_token:
-                    auth_response = await get_user_from_token_optimized(f"Session {session_token}", client_type, memory_graph, search_request=search_request, httpx_client=httpx_client, include_schemas=False, url_enable_agentic_graph=enable_agentic_graph)
-                else:
-                    auth_response = await get_user_from_token_optimized(auth_header, client_type, memory_graph, search_request=search_request, httpx_client=httpx_client, include_schemas=False, url_enable_agentic_graph=enable_agentic_graph)
+                    return await get_user_from_token_optimized(
+                        f"Bearer {bearer_token.credentials}",
+                        client_type,
+                        memory_graph,
+                        api_key=api_key,
+                        search_request=search_request,
+                        httpx_client=httpx_client,
+                        include_schemas=False,
+                        url_enable_agentic_graph=enable_agentic_graph,
+                    )
+                if api_key and session_token:
+                    return await get_user_from_token_optimized(
+                        f"Session {session_token}",
+                        client_type,
+                        memory_graph,
+                        api_key=api_key,
+                        search_request=search_request,
+                        httpx_client=httpx_client,
+                        include_schemas=False,
+                        url_enable_agentic_graph=enable_agentic_graph,
+                    )
+                if api_key:
+                    return await get_user_from_token_optimized(
+                        f"APIKey {api_key}",
+                        client_type,
+                        memory_graph,
+                        search_request=search_request,
+                        httpx_client=httpx_client,
+                        include_schemas=False,
+                        url_enable_agentic_graph=enable_agentic_graph,
+                    )
+                if bearer_token:
+                    return await get_user_from_token_optimized(
+                        f"Bearer {bearer_token.credentials}",
+                        client_type,
+                        memory_graph,
+                        search_request=search_request,
+                        httpx_client=httpx_client,
+                        include_schemas=False,
+                        url_enable_agentic_graph=enable_agentic_graph,
+                    )
+                if session_token:
+                    return await get_user_from_token_optimized(
+                        f"Session {session_token}",
+                        client_type,
+                        memory_graph,
+                        search_request=search_request,
+                        httpx_client=httpx_client,
+                        include_schemas=False,
+                        url_enable_agentic_graph=enable_agentic_graph,
+                    )
+                return await get_user_from_token_optimized(
+                    auth_header,
+                    client_type,
+                    memory_graph,
+                    search_request=search_request,
+                    httpx_client=httpx_client,
+                    include_schemas=False,
+                    url_enable_agentic_graph=enable_agentic_graph,
+                )
+
+            httpx_client = getattr(request.app.state, "httpx_client", None)
+            if httpx_client:
+                auth_response = await _authenticate_with_client(httpx_client)
+            else:
+                async with httpx.AsyncClient() as httpx_client:
+                    auth_response = await _authenticate_with_client(httpx_client)
         except ValueError as e:
             logger.error(f"Invalid authentication token: {e}")
             result = SearchResponse.failure(
@@ -2580,7 +2636,8 @@ async def search_v1(
                     enable_rank_results=rank_results,
                     api_key_id=api_key_id,
                     organization_id=organization_id,
-                    namespace_id=namespace_id
+                    namespace_id=namespace_id,
+                    defer_usage_tracking=True
                 )
                 rate_limit_completion_time = time.time()
                 return result
