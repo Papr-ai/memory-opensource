@@ -5260,6 +5260,17 @@ async def test_v1_search_performance_under_500ms(app, caplog):
                     user_id=performance_user_id
                 )
 
+                def _get_relevance_scores(search_json):
+                    memories = (search_json.get("data") or {}).get("memories") or []
+                    return [mem.get("relevance_score") for mem in memories]
+
+                def _assert_sorted_desc(scores, label):
+                    assert scores, f"{label}: expected at least one relevance_score"
+                    assert all(score is not None for score in scores), f"{label}: relevance_score missing"
+                    assert scores == sorted(scores, reverse=True), (
+                        f"{label}: relevance_score not sorted desc: {scores}"
+                    )
+
                 # First search (no cache)
                 logger.info("Performing first search (no cache)...")
                 first_records_start = len(caplog.records)
@@ -5389,10 +5400,52 @@ async def test_v1_search_performance_under_500ms(app, caplog):
                 if total_execution_time_cache:
                     logger.info(f"Second search - Total execution time: {total_execution_time_cache:.2f}ms")
 
+                second_scores = _get_relevance_scores(response_body)
+                _assert_sorted_desc(second_scores, "Second search (rank_results=false)")
+    
+                # Third search (rank_results=True)
+                logger.info("Performing third search (rank_results=true)...")
+                third_records_start = len(caplog.records)
+                start_time = time.time()
+                search_request_ranked = SearchRequest(
+                    query="quarterly planning meeting",
+                    rank_results=True,
+                    user_id=performance_user_id
+                )
+                with caplog.at_level("WARNING"):
+                    response = await async_client.post(
+                        "/v1/memory/search?max_memories=20&max_nodes=10",
+                        json=search_request_ranked.model_dump(),
+                        headers=headers
+                    )
+                end_time = time.time()
+                third_search_time = (end_time - start_time) * 1000
+                third_records = caplog.records[third_records_start:]
+    
+                logger.info(f"Third search response status: {response.status_code}")
+                server_timing_header = response.headers.get("X-Server-Processing-Ms")
+                if server_timing_header:
+                    logger.info(f"Third search - X-Server-Processing-Ms: {server_timing_header}ms")
+                response_body = response.json()
+                validated_response = SearchResponse.model_validate(response_body)
+                assert validated_response.error is None, "Response should not have errors"
+                assert validated_response.code == 200, "Logical status code in the response body"
+                assert validated_response.data.memories is not None, "Response should have memories"
+                assert validated_response.data.nodes is not None, "Response should have nodes"
+                logger.info(f"Found {len(validated_response.data.memories)} memories in third search")
+                logger.info(f"Found {len(validated_response.data.nodes)} nodes in third search")
+    
+                third_scores = _get_relevance_scores(response_body)
+                _assert_sorted_desc(third_scores, "Third search (rank_results=true)")
+    
+                if second_scores == third_scores:
+                    logger.warning("rank_results=true produced identical relevance_score ordering to rank_results=false")
+    
                 # Performance assertions
                 logger.info("Performance test results:")
                 logger.info(f"  First search (end-to-end): {first_search_time:.2f}ms")
                 logger.info(f"  Second search (end-to-end): {second_search_time:.2f}ms")
+                logger.info(f"  Third search (end-to-end): {third_search_time:.2f}ms")
                 logger.info(
                     f"  First search (server-only): {server_total_time_first_ms:.2f}ms"
                 )
@@ -5402,7 +5455,7 @@ async def test_v1_search_performance_under_500ms(app, caplog):
                 logger.info(
                     f"  Cache improvement (server-only): {((server_total_time_first_ms - server_total_time_second_ms) / server_total_time_first_ms * 100):.1f}%"
                 )
-
+    
                 # Assert performance requirements
                 # Prefer server-side timing which excludes client transport/serialization overhead
                 assert server_total_time_first_ms is not None, "Could not parse server total processing time for first search"
@@ -5420,7 +5473,7 @@ async def test_v1_search_performance_under_500ms(app, caplog):
                 # Assert cache hit provides significant improvement (at least 20% faster)
                 cache_improvement = (server_total_time_first_ms - server_total_time_second_ms) / server_total_time_first_ms
                 assert cache_improvement > 0.2, f"Cache hit should provide at least 20% improvement, got {cache_improvement:.1%}"
-
+    
                 logger.info(f"✅ Performance test passed! Both searches under 500ms with {cache_improvement:.1%} cache improvement")
                 logger.info(f"Performance test user {performance_user_id} preserved for future testing")
     finally:

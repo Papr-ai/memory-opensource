@@ -2813,6 +2813,50 @@ async def search_v1(
             )
             response.status_code = result.code
             return result
+
+        # Normalize relevance scores and sorting for memory items
+        rank_results = getattr(search_request, 'rank_results', False)
+        memory_items_full = list(relevant_items.memory_items or [])
+        similarity_scores_by_id = relevant_items.similarity_scores_by_id or {}
+        confidence_scores = relevant_items.confidence_scores or []
+        has_rerank_scores = bool(confidence_scores) and len(confidence_scores) == len(memory_items_full)
+
+        def _score_from_similarity(mem):
+            mem_id = getattr(mem, "memoryId", None) or getattr(mem, "id", None) or getattr(mem, "objectId", None)
+            if mem_id and mem_id in similarity_scores_by_id:
+                return similarity_scores_by_id.get(mem_id)
+            chunk_ids = getattr(mem, "memoryChunkIds", None) or []
+            for chunk_id in chunk_ids:
+                if chunk_id in similarity_scores_by_id:
+                    return similarity_scores_by_id.get(chunk_id)
+            return None
+
+        relevance_scores = []
+        if has_rerank_scores:
+            for mem, score in zip(memory_items_full, confidence_scores):
+                if score is not None:
+                    mem.relevance_score = float(score)
+                    relevance_scores.append(mem.relevance_score)
+        else:
+            if rank_results:
+                logger.warning("rank_results=True but no rerank scores available; using similarity scores for relevance")
+            for mem in memory_items_full:
+                score = _score_from_similarity(mem)
+                if score is not None:
+                    mem.relevance_score = float(score)
+                    relevance_scores.append(mem.relevance_score)
+
+        if relevance_scores and len(set(relevance_scores)) <= 1 and rank_results:
+            logger.warning("rank_results=True but relevance_score values are identical; check reranker output")
+
+        if memory_items_full:
+            def _sort_key(mem):
+                score = getattr(mem, "relevance_score", None)
+                if score is None:
+                    score = _score_from_similarity(mem)
+                return score if score is not None else -1.0
+            memory_items_full = sorted(memory_items_full, key=_sort_key, reverse=True)
+            relevant_items.memory_items = memory_items_full
         
         # Use max_memories from request body if present, otherwise use query param
         
