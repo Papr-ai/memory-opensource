@@ -5,6 +5,7 @@ import asyncio
 import json
 import yaml
 import httpx
+import time
 from pathlib import Path
 from fastapi import FastAPI, Request, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
@@ -303,6 +304,20 @@ def create_app() -> FastAPI:
         expose_headers=["*"]  # Expose all response headers
     )
     app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+    @app.middleware("http")
+    async def add_server_timing_headers(request: Request, call_next):
+        start_time = time.perf_counter()
+        response = await call_next(request)
+        duration_ms = (time.perf_counter() - start_time) * 1000
+        response.headers["X-Server-Processing-Ms"] = f"{duration_ms:.2f}"
+        existing_server_timing = response.headers.get("Server-Timing")
+        timing_value = f"app;dur={duration_ms:.2f}"
+        if existing_server_timing:
+            response.headers["Server-Timing"] = f"{existing_server_timing}, {timing_value}"
+        else:
+            response.headers["Server-Timing"] = timing_value
+        return response
     
     # Add authentication middleware to support request.auth
     from starlette.middleware.authentication import AuthenticationMiddleware

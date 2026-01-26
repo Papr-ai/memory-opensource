@@ -2662,6 +2662,8 @@ async def search_v1(
         # --- Optimized execution: Neo4j session created only when needed ---
         # Run rate limit check and memory search in parallel
         memory_search_start_time = time.time()
+        pre_search_time_ms = (memory_search_start_time - search_start_time) * 1000
+        logger.warning(f"Pre-search overhead (auth/parse/etc): {pre_search_time_ms:.2f}ms")
         
         # Create tasks for parallel execution
         tasks = []
@@ -2741,6 +2743,8 @@ async def search_v1(
         
         memory_search_end_time = time.time()
         logger.warning(f"Memory search timing: {(memory_search_end_time - memory_search_start_time) * 1000:.2f}ms")
+        post_search_time_ms = (time.time() - memory_search_end_time) * 1000
+        logger.warning(f"Post-search overhead (response/build/logging): {post_search_time_ms:.2f}ms")
         if isinstance(relevant_items, Exception):
             logger.error(f"Error in memory search: {relevant_items}", exc_info=True)
             result = SearchResponse.failure(
@@ -2941,27 +2945,32 @@ async def search_v1(
                 # Fall back to JSON if TOON encoding fails
                 logger.warning("Falling back to JSON response due to TOON encoding error")
         
-        # Add QueryLog and MemoryRetrievalLog creation as background task
+        # Fire-and-forget logging tasks to avoid blocking response timing (tests + clients)
         background_task_start_time = time.time()
-        if workspace_id:  # Only log if we have a workspace
-            background_tasks.add_task(
-                query_log_service.create_query_and_retrieval_logs_background,
-                query=query,
-                search_request=search_request,
-                metadata=metadata,
-                resolved_user_id=resolved_user_id,
-                workspace_id=workspace_id,
-                relevant_items=relevant_items,
-                retrieval_latency_ms=retrieval_latency_ms,
-                search_start_time=search_start_time,
-                session_token=session_token,
-                api_key=api_key,
-                client_type=client_type,
-                chat_gpt=chat_gpt,
-                search_id=search_id  # Pass the generated search_id
-            )
 
-        # Add telemetry logging as background task (edition-aware)
+        if workspace_id:  # Only log if we have a workspace
+            try:
+                asyncio.create_task(
+                    query_log_service.create_query_and_retrieval_logs_background(
+                        query=query,
+                        search_request=search_request,
+                        metadata=metadata,
+                        resolved_user_id=resolved_user_id,
+                        workspace_id=workspace_id,
+                        relevant_items=relevant_items,
+                        retrieval_latency_ms=retrieval_latency_ms,
+                        search_start_time=search_start_time,
+                        session_token=session_token,
+                        api_key=api_key,
+                        client_type=client_type,
+                        chat_gpt=chat_gpt,
+                        search_id=search_id  # Pass the generated search_id
+                    )
+                )
+            except Exception as e:
+                logger.error(f"Error scheduling query log background task: {e}")
+
+        # Add telemetry logging as fire-and-forget task (edition-aware)
         # Uses TelemetryService which handles OSS (PostHog) vs Cloud (Amplitude) automatically
         async def log_search_telemetry():
             """Background task for telemetry"""
@@ -2984,33 +2993,12 @@ async def search_v1(
                 )
             except Exception as e:
                 logger.error(f"Error tracking search: {e}")
-        
-        background_tasks.add_task(log_search_telemetry)
-        # Add telemetry logging as background task (edition-aware)
-        # Uses TelemetryService which handles OSS (PostHog) vs Cloud (Amplitude) automatically
-        async def log_search_telemetry():
-            """Background task for telemetry"""
-            try:
-                from core.services.telemetry import get_telemetry
-                telemetry = get_telemetry()
-                await telemetry.track(
-                    "search",
-                    {
-                        "client_type": client_type,
-                        "has_results": len(memory_items) > 0 if memory_items else False,
-                        "result_count": len(memory_items) if memory_items else 0,
-                        "neo_node_count": len(neo_nodes) if neo_nodes else 0,
-                        "retrieval_latency_ms": retrieval_latency_ms,
-                        "enable_agentic_graph": search_request.enable_agentic_graph,
-                        "api_key": api_key,  # Track which API key is used (anonymized in OSS)
-                    },
-                    user_id=resolved_user_id,  # End user
-                    developer_id=developer_id  # API key owner
-                )
-            except Exception as e:
-                logger.error(f"Error tracking search: {e}")
-        
-        background_tasks.add_task(log_search_telemetry)
+
+        try:
+            asyncio.create_task(log_search_telemetry())
+        except Exception as e:
+            logger.error(f"Error scheduling telemetry background task: {e}")
+
         background_task_end_time = time.time()
         logger.warning(f"Background task setup timing: {(background_task_end_time - background_task_start_time) * 1000:.2f}ms")
 

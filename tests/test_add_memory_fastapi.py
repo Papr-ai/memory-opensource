@@ -5271,6 +5271,9 @@ async def test_v1_search_performance_under_500ms(app, caplog):
             first_records = caplog.records[first_records_start:]
             
             logger.info(f"First search response status: {response.status_code}")
+            server_timing_header = response.headers.get("X-Server-Processing-Ms")
+            if server_timing_header:
+                logger.info(f"First search - X-Server-Processing-Ms: {server_timing_header}ms")
             response_body = response.json()
             validated_response = SearchResponse.model_validate(response_body)
             assert validated_response.error is None, "Response should not have errors"
@@ -5332,6 +5335,9 @@ async def test_v1_search_performance_under_500ms(app, caplog):
             second_records = caplog.records[second_records_start:]
             
             logger.info(f"Second search response status: {response.status_code}")
+            server_timing_header = response.headers.get("X-Server-Processing-Ms")
+            if server_timing_header:
+                logger.info(f"Second search - X-Server-Processing-Ms: {server_timing_header}ms")
             response_body = response.json()
             validated_response = SearchResponse.model_validate(response_body)
             assert validated_response.error is None, "Response should not have errors"
