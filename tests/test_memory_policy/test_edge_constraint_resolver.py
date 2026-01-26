@@ -825,3 +825,123 @@ class TestDocumentedExamples:
 
         # Condition not met, constraint skipped
         assert should_create is True
+
+    @pytest.mark.asyncio
+    async def test_edge_search_with_explicit_value(self, mock_memory_graph):
+        """Test edge constraint search with explicit value in PropertyMatch."""
+        source_node = {"type": "SecurityBehavior", "properties": {"id": "SB080"}}
+        target_node = {"type": "TacticDef", "properties": {"id": "TA9999"}}  # Different from search value
+        constraints = [
+            {
+                "edge_type": "MITIGATES",
+                "source_type": "SecurityBehavior",
+                "target_type": "TacticDef",
+                "search": {"properties": [{
+                    "name": "id",
+                    "mode": "exact",
+                    "value": "TA0005"  # Explicit value - different from target_node
+                }]}
+            }
+        ]
+
+        mock_memory_graph.find_node_by_property = AsyncMock(return_value={
+            "id": "tactic_1",
+            "type": "TacticDef",
+            "properties": {"id": "TA0005", "name": "Defense Evasion"}
+        })
+
+        should_create, final_target, props = await apply_edge_constraints(
+            source_node=source_node,
+            target_node=target_node,
+            edge_type="MITIGATES",
+            edge_constraints=constraints,
+            memory_graph=mock_memory_graph,
+            extracted_edge_properties={}
+        )
+
+        # Should search with explicit value, not target_node property
+        mock_memory_graph.find_node_by_property.assert_called_once_with(
+            node_type="TacticDef",
+            property_name="id",
+            property_value="TA0005",  # Explicit value used
+            context=None
+        )
+        assert should_create is True
+        assert final_target["properties"]["id"] == "TA0005"
+
+    @pytest.mark.asyncio
+    async def test_edge_search_semantic_with_explicit_value(self, mock_memory_graph):
+        """Test edge constraint semantic search with explicit value."""
+        source_node = {"type": "SecurityBehavior", "properties": {}}
+        target_node = {"type": "TacticDef", "properties": {"name": "Something Else"}}
+        constraints = [
+            {
+                "edge_type": "MITIGATES",
+                "search": {"properties": [{
+                    "name": "name",
+                    "mode": "semantic",
+                    "value": "Defense Evasion",  # Explicit value
+                    "threshold": 0.85
+                }]}
+            }
+        ]
+
+        mock_memory_graph.find_node_by_semantic_match = AsyncMock(return_value={
+            "id": "tactic_1",
+            "type": "TacticDef",
+            "properties": {"name": "Defense Evasion Techniques"}
+        })
+
+        should_create, final_target, props = await apply_edge_constraints(
+            source_node=source_node,
+            target_node=target_node,
+            edge_type="MITIGATES",
+            edge_constraints=constraints,
+            memory_graph=mock_memory_graph,
+            extracted_edge_properties={}
+        )
+
+        # Should search with explicit value
+        mock_memory_graph.find_node_by_semantic_match.assert_called_once_with(
+            node_type="TacticDef",
+            property_name="name",
+            query_text="Defense Evasion",  # Explicit value used
+            threshold=0.85,
+            context=None
+        )
+        assert final_target is not None
+
+    @pytest.mark.asyncio
+    async def test_edge_search_fallback_to_target_props(self, mock_memory_graph):
+        """Test edge search falls back to target_node.properties when no explicit value."""
+        source_node = {"type": "SecurityBehavior", "properties": {}}
+        target_node = {"type": "TacticDef", "properties": {"id": "TA0005"}}
+        constraints = [
+            {
+                "edge_type": "MITIGATES",
+                "search": {"properties": [{"name": "id", "mode": "exact"}]}  # No explicit value
+            }
+        ]
+
+        mock_memory_graph.find_node_by_property = AsyncMock(return_value={
+            "id": "tactic_1",
+            "type": "TacticDef",
+            "properties": {"id": "TA0005"}
+        })
+
+        should_create, final_target, props = await apply_edge_constraints(
+            source_node=source_node,
+            target_node=target_node,
+            edge_type="MITIGATES",
+            edge_constraints=constraints,
+            memory_graph=mock_memory_graph,
+            extracted_edge_properties={}
+        )
+
+        # Should use value from target_node.properties
+        mock_memory_graph.find_node_by_property.assert_called_once_with(
+            node_type="TacticDef",
+            property_name="id",
+            property_value="TA0005",  # From target_node.properties
+            context=None
+        )

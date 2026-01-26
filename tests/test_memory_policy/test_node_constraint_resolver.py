@@ -1055,3 +1055,158 @@ class TestDocumentedExamples:
 
         # Condition not met, original props
         assert "status" not in props or props.get("status") != "completed"
+
+    @pytest.mark.asyncio
+    async def test_link_to_with_explicit_value(self, mock_memory_graph):
+        """Test: link_to="Task:id=TASK-123" - explicit value search."""
+        # DSL "Task:id=TASK-123" expands to PropertyMatch(name="id", mode="exact", value="TASK-123")
+        # The explicit value overrides any extracted property
+        node = {"type": "Task", "properties": {}}
+        constraints = [
+            {
+                "node_type": "Task",
+                "search": {"properties": [{"name": "id", "mode": "exact", "value": "TASK-123"}]}
+            }
+        ]
+        extracted = {"id": "TASK-456"}  # Different from search value
+
+        mock_memory_graph.find_node_by_property = AsyncMock(return_value={
+            "id": "node_1",
+            "type": "Task",
+            "properties": {"id": "TASK-123", "title": "Specific Task"}
+        })
+
+        should_create, existing, props = await apply_node_constraints(
+            node=node,
+            node_type="Task",
+            node_constraints=constraints,
+            memory_graph=mock_memory_graph,
+            extracted_node_properties=extracted
+        )
+
+        # Should search with explicit value, not extracted value
+        mock_memory_graph.find_node_by_property.assert_called_once_with(
+            node_type="Task",
+            property_name="id",
+            property_value="TASK-123",  # Explicit value used
+            context=None
+        )
+        assert existing is not None
+        assert existing["properties"]["id"] == "TASK-123"
+
+    @pytest.mark.asyncio
+    async def test_link_to_semantic_with_explicit_value(self, mock_memory_graph):
+        """Test: search with semantic mode and explicit value."""
+        # PropertyMatch with mode="semantic" and explicit value
+        node = {"type": "Task", "properties": {}}
+        constraints = [
+            {
+                "node_type": "Task",
+                "search": {"properties": [{
+                    "name": "title",
+                    "mode": "semantic",
+                    "value": "Bug Fix",  # Explicit value
+                    "threshold": 0.9
+                }]}
+            }
+        ]
+        extracted = {"title": "Different Title"}
+
+        mock_memory_graph.find_node_by_semantic_match = AsyncMock(return_value={
+            "id": "node_1",
+            "type": "Task",
+            "properties": {"title": "Critical Bug Fix"}
+        })
+
+        should_create, existing, props = await apply_node_constraints(
+            node=node,
+            node_type="Task",
+            node_constraints=constraints,
+            memory_graph=mock_memory_graph,
+            extracted_node_properties=extracted
+        )
+
+        # Should search with explicit value
+        mock_memory_graph.find_node_by_semantic_match.assert_called_once_with(
+            node_type="Task",
+            property_name="title",
+            query_text="Bug Fix",  # Explicit value used
+            threshold=0.9,
+            context=None
+        )
+        assert existing is not None
+
+    @pytest.mark.asyncio
+    async def test_link_to_fuzzy_with_explicit_value(self, mock_memory_graph):
+        """Test: search with fuzzy mode and explicit value."""
+        node = {"type": "Person", "properties": {}}
+        constraints = [
+            {
+                "node_type": "Person",
+                "search": {"properties": [{
+                    "name": "name",
+                    "mode": "fuzzy",
+                    "value": "Jon Smith",  # Explicit value with typo
+                    "threshold": 0.8
+                }]}
+            }
+        ]
+        extracted = {"name": "Different Name"}
+
+        mock_memory_graph.find_node_by_fuzzy_match = AsyncMock(return_value={
+            "id": "person_1",
+            "type": "Person",
+            "properties": {"name": "John Smith"}  # Correct spelling
+        })
+
+        should_create, existing, props = await apply_node_constraints(
+            node=node,
+            node_type="Person",
+            node_constraints=constraints,
+            memory_graph=mock_memory_graph,
+            extracted_node_properties=extracted
+        )
+
+        # Should search with explicit value
+        mock_memory_graph.find_node_by_fuzzy_match.assert_called_once_with(
+            node_type="Person",
+            property_name="name",
+            query_text="Jon Smith",  # Explicit value used
+            threshold=0.8,
+            context=None
+        )
+        assert existing is not None
+
+    @pytest.mark.asyncio
+    async def test_explicit_value_fallback_to_node_props(self, mock_memory_graph):
+        """Test: when explicit value not provided, fallback to node props."""
+        node = {"type": "Task", "properties": {"id": "TASK-999"}}
+        constraints = [
+            {
+                "node_type": "Task",
+                "search": {"properties": [{"name": "id", "mode": "exact"}]}  # No value field
+            }
+        ]
+        extracted = {}
+
+        mock_memory_graph.find_node_by_property = AsyncMock(return_value={
+            "id": "node_1",
+            "type": "Task",
+            "properties": {"id": "TASK-999"}
+        })
+
+        should_create, existing, props = await apply_node_constraints(
+            node=node,
+            node_type="Task",
+            node_constraints=constraints,
+            memory_graph=mock_memory_graph,
+            extracted_node_properties=extracted
+        )
+
+        # Should use value from node.properties
+        mock_memory_graph.find_node_by_property.assert_called_once_with(
+            node_type="Task",
+            property_name="id",
+            property_value="TASK-999",  # From node.properties
+            context=None
+        )
