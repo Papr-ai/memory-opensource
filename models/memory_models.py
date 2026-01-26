@@ -1217,6 +1217,11 @@ class SchemaSpecificationMixin(BaseModel):
     3. **Schema Integration**: Reference schema-level defaults
        - schema_id: Inherit memory_policy from schema
 
+    4. **link_to Shorthand**: DSL syntax for common operations
+       - String: "Type:property" or "Source->EDGE->Target:property"
+       - List: ["Type:property", "Type2:property2"]
+       - Dict: {"Type:property": {"set": {...}, "when": {...}, "create": "never"}}
+
     **Precedence**: Request-level > Schema-level > System defaults
 
     Note: 'structured' is deprecated alias for 'manual'. 'hybrid' is deprecated alias for 'auto'.
@@ -1230,6 +1235,20 @@ class SchemaSpecificationMixin(BaseModel):
                    "Includes consent, risk, and ACL settings. "
                    "If schema_id is set, schema's memory_policy is used as defaults. "
                    "Note: 'structured' → 'manual', 'hybrid' → 'auto' (deprecated aliases)."
+    )
+
+    # SHORTHAND: link_to DSL for common constraint patterns
+    link_to: Optional[Union[str, List[str], Dict[str, Any]]] = Field(
+        default=None,
+        description="Shorthand DSL for node and edge constraints. Expands to memory_policy.node_constraints "
+                   "and memory_policy.edge_constraints. Three forms supported:\n"
+                   "1. String: 'Task:title' - semantic match on property\n"
+                   "2. List: ['Task:title', 'Person:email'] - multiple constraints\n"
+                   "3. Dict: {'Task:title': {'set': {...}}} - with options (set, when, create)\n\n"
+                   "**Node syntax:** Type:property, Type:property=value, Type:property~value\n"
+                   "**Edge syntax (arrow):** Source->EDGE->Target:property\n"
+                   "**Special refs:** $this, $previous, $context:N\n\n"
+                   "If both link_to and memory_policy are provided, link_to expands and merges with memory_policy."
     )
 
     # DEPRECATED: Legacy graph generation (kept for backwards compatibility)

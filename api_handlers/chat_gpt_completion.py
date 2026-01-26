@@ -4348,7 +4348,7 @@ RETURN {
                 
 
     async def generate_memory_graph_schema_async(
-            self, 
+            self,
             memory_item: Dict[str, Any],
             usecase_memory_item: Dict[str, Any],
             neo_session: AsyncSession,
@@ -4360,7 +4360,8 @@ RETURN {
             developer_user_id: Optional[str] = None,
             developer_workspace_id: Optional[str] = None,
             organization_id: Optional[str] = None,
-            namespace_id: Optional[str] = None
+            namespace_id: Optional[str] = None,
+            memory_policy: Optional[Dict[str, Any]] = None
         ) -> Dict[str, Union[MemoryGraphSchema, Dict[str, float]]]:
         """
         Generate a memory graph schema using OpenAI's Structured Outputs feature with direct JSON schema.
@@ -5329,11 +5330,12 @@ RETURN {
                             memory_item,
                             neo_session,
                             workspace_id,
-                            user_schema=schema_for_indexing
+                            user_schema=schema_for_indexing,
+                            memory_policy=memory_policy  # Pass resolved memory_policy with constraints
                         )
                         logger.info(f"🏗️ STORAGE STEP 3: ✅ User schema storage completed successfully")
                         neo4j_storage_success = True
-                        
+
                     else:
                         logger.info(f"🏗️ STORAGE STEP 2: Using fallback storage (no user_id)")
                         # Fallback to original method
@@ -5343,7 +5345,8 @@ RETURN {
                             memory_item,
                             neo_session,
                             workspace_id,
-                            user_schema=None
+                            user_schema=None,
+                            memory_policy=memory_policy  # Pass resolved memory_policy with constraints
                         )
                         logger.info(f"🏗️ STORAGE STEP 3: ✅ Fallback storage completed successfully")
                         neo4j_storage_success = True

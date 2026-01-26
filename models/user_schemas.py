@@ -6,7 +6,7 @@ from uuid import uuid4
 import re
 
 if TYPE_CHECKING:
-    from models.shared_types import MemoryPolicy, NodeConstraint
+    from models.shared_types import MemoryPolicy, NodeConstraint, EdgeConstraint
 
 class PropertyType(str, Enum):
     STRING = "string"
@@ -153,20 +153,56 @@ class UserNodeType(BaseModel):
         return v
 
 class UserRelationshipType(BaseModel):
-    """User-defined relationship type"""
+    """
+    User-defined relationship type with optional inline constraint.
+
+    The `constraint` field allows defining default matching/creation behavior
+    directly within the relationship type definition. This mirrors the pattern
+    used in UserNodeType.constraint for nodes.
+
+    Schema-level edge constraints:
+    - `edge_type` is implicit (taken from parent UserRelationshipType.name)
+    - Defines default target node matching strategy via `search.properties`
+    - Can be overridden per-memory via memory_policy.edge_constraints
+
+    Example:
+        UserRelationshipType(
+            name="MITIGATES",
+            label="Mitigates",
+            allowed_source_types=["SecurityBehavior"],
+            allowed_target_types=["TacticDef"],
+            constraint=EdgeConstraint(
+                search=SearchConfig(properties=[
+                    PropertyMatch(name="name", mode="semantic", threshold=0.90)
+                ]),
+                create="never"  # Controlled vocabulary - only link to existing targets
+            )
+        )
+    """
     name: str = Field(..., pattern=r'^[A-Z][A-Z0-9_]*$')  # Convention: UPPER_CASE
     label: str  # Display name
     description: Optional[str] = None
     properties: Dict[str, PropertyDefinition] = Field(default_factory=dict)
-    
+
     # Relationship constraints
     allowed_source_types: List[str]  # Which node types can be source
     allowed_target_types: List[str]  # Which node types can be target
     cardinality: Literal["one-to-one", "one-to-many", "many-to-many"] = "many-to-many"
-    
+
+    # Edge constraint - defines default matching/creation behavior for this relationship type
+    constraint: Optional["EdgeConstraint"] = Field(
+        default=None,
+        description="Default constraint for this relationship type. Defines: "
+                   "1. search.properties - how to find existing target nodes "
+                   "2. create - 'auto' (create if not found) or 'never' (controlled vocabulary) "
+                   "3. when - conditional application with logical operators "
+                   "4. set - default edge property values. "
+                   "Note: edge_type is implicit (taken from this UserRelationshipType.name)."
+    )
+
     # Visual/UI properties
     color: Optional[str] = "#e74c3c"  # Hex color for UI
-    
+
     model_config = ConfigDict(extra='forbid')
 
 class SchemaStatus(str, Enum):
@@ -284,6 +320,7 @@ class SchemaListResponse(BaseModel):
 # ============================================================================
 # Resolve forward references after all models are defined
 # ============================================================================
-# Import NodeConstraint and rebuild UserNodeType to resolve the forward reference
-from models.shared_types import NodeConstraint
+# Import NodeConstraint and EdgeConstraint, then rebuild models to resolve forward references
+from models.shared_types import NodeConstraint, EdgeConstraint
 UserNodeType.model_rebuild()
+UserRelationshipType.model_rebuild()

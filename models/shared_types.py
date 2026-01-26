@@ -982,6 +982,15 @@ class SearchConfig(BaseModel):
                    "Use PropertyMatch with 'value' field for specific node selection."
     )
 
+    # === RELATIONSHIP-BASED MATCHING (via_relationship) ===
+    via_relationship: Optional[List["RelationshipMatch"]] = Field(
+        default=None,
+        description="Search for nodes via their relationships. "
+                   "Example: Find tasks assigned to a specific person. "
+                   "Each RelationshipMatch specifies edge_type, target_type, and target_search. "
+                   "Multiple relationship matches are ANDed together."
+    )
+
     # === DEFAULT SETTINGS ===
     mode: SearchMode = Field(
         default=SearchMode.SEMANTIC,
@@ -1068,6 +1077,100 @@ class SearchConfig(BaseModel):
                             {"name": "email", "mode": "exact"},
                             {"name": "name", "mode": "semantic", "threshold": 0.90}
                         ]
+                    }
+                },
+                {
+                    "name": "Via Relationship - Find nodes through edges",
+                    "summary": "Find tasks via their ASSIGNED_TO relationship to Person",
+                    "value": {
+                        "via_relationship": [
+                            {
+                                "edge_type": "ASSIGNED_TO",
+                                "target_type": "Person",
+                                "target_search": {
+                                    "properties": [{"name": "email", "mode": "exact", "value": "alice@example.com"}]
+                                }
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+    )
+
+
+class RelationshipMatch(BaseModel):
+    """
+    Search for nodes via their relationships (for via_relationship in SearchConfig).
+
+    Enables finding nodes based on their connections to other nodes.
+    For example: "Find all Tasks assigned to person with email alice@example.com"
+
+    **Use Cases:**
+    - Find nodes connected to a specific node
+    - Navigate graph relationships during search
+    - Filter nodes by their relationship targets
+
+    **Example:**
+        RelationshipMatch(
+            edge_type="ASSIGNED_TO",
+            target_type="Person",
+            target_search=SearchConfig(properties=[
+                PropertyMatch.exact("email", "alice@example.com")
+            ])
+        )
+    """
+
+    edge_type: str = Field(
+        ...,
+        min_length=1,
+        description="The relationship type to traverse (e.g., 'ASSIGNED_TO', 'BELONGS_TO')"
+    )
+
+    target_type: str = Field(
+        ...,
+        min_length=1,
+        description="The target node type at the end of the relationship (e.g., 'Person', 'Project')"
+    )
+
+    target_search: "SearchConfig" = Field(
+        ...,
+        description="Search configuration for finding the target node. "
+                   "Uses the same PropertyMatch-based search as direct node search."
+    )
+
+    direction: Literal["outgoing", "incoming"] = Field(
+        default="outgoing",
+        description="Direction of the relationship from the node being searched. "
+                   "'outgoing': node --edge--> target (default). "
+                   "'incoming': target --edge--> node."
+    )
+
+    model_config = ConfigDict(
+        extra='forbid',
+        json_schema_extra={
+            "examples": [
+                {
+                    "name": "Find via ASSIGNED_TO",
+                    "summary": "Find nodes assigned to a specific person",
+                    "value": {
+                        "edge_type": "ASSIGNED_TO",
+                        "target_type": "Person",
+                        "target_search": {
+                            "properties": [{"name": "email", "mode": "exact", "value": "alice@example.com"}]
+                        }
+                    }
+                },
+                {
+                    "name": "Find via BELONGS_TO (incoming)",
+                    "summary": "Find project that tasks belong to",
+                    "value": {
+                        "edge_type": "BELONGS_TO",
+                        "target_type": "Task",
+                        "target_search": {
+                            "properties": [{"name": "id", "mode": "exact"}]
+                        },
+                        "direction": "incoming"
                     }
                 }
             ]
@@ -1476,6 +1579,301 @@ class NodeConstraint(BaseModel):
         )
 
 
+class EdgeConstraint(BaseModel):
+    """
+    Policy for how edges/relationships of a specific type should be handled.
+
+    Used in two places:
+    1. **Schema level**: Inside `UserRelationshipType.constraint` - `edge_type` is implicit from parent
+    2. **Memory level**: In `memory_policy.edge_constraints[]` - `edge_type` is required
+
+    Edge constraints allow developers to control:
+    - Which edge types can be created vs. linked to existing targets
+    - How to find/select target nodes (via `search`)
+    - What edge property values to set (exact or auto-extracted)
+    - When to apply the constraint (conditional with logical operators)
+    - Filter by source/target node types
+
+    **The `search` field** handles target node selection:
+    - Uses SearchConfig to define how to find existing target nodes
+    - Example: `{"properties": [{"name": "name", "mode": "semantic"}]}`
+    - For controlled vocabulary: find existing target, don't create new
+
+    **The `set` field** controls edge property values:
+    - Exact value: `{"weight": 1.0}` - sets exact value
+    - Auto-extract: `{"reason": {"mode": "auto"}}` - LLM extracts from content
+
+    **The `when` field** supports logical operators (same as NodeConstraint):
+    - Simple: `{"severity": "high"}`
+    - AND: `{"_and": [{"severity": "high"}, {"confirmed": true}]}`
+    - OR: `{"_or": [{"type": "MITIGATES"}, {"type": "PREVENTS"}]}`
+    - NOT: `{"_not": {"status": "deprecated"}}`
+    """
+
+    # === WHAT EDGE THIS APPLIES TO ===
+    edge_type: Optional[str] = Field(
+        default=None,
+        min_length=1,
+        description="Edge/relationship type this constraint applies to (e.g., 'MITIGATES', 'ASSIGNED_TO'). "
+                   "Optional at schema level (implicit from parent UserRelationshipType), "
+                   "required at memory level (in memory_policy.edge_constraints)."
+    )
+
+    # === FILTER BY NODE TYPES ===
+    source_type: Optional[str] = Field(
+        default=None,
+        description="Filter: only apply when source node is of this type. "
+                   "Example: source_type='SecurityBehavior' - only applies to edges from SecurityBehavior nodes."
+    )
+    target_type: Optional[str] = Field(
+        default=None,
+        description="Filter: only apply when target node is of this type. "
+                   "Example: target_type='TacticDef' - only applies to edges targeting TacticDef nodes."
+    )
+    direction: Literal["outgoing", "incoming", "both"] = Field(
+        default="outgoing",
+        description="Direction of edges this constraint applies to. "
+                   "'outgoing': edges where current node is source (default). "
+                   "'incoming': edges where current node is target. "
+                   "'both': applies in either direction."
+    )
+
+    # === WHEN (conditional application with logical operators) ===
+    when: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Condition for when this constraint applies. "
+                   "Supports logical operators: '_and', '_or', '_not'. "
+                   "Applied to edge properties or context. "
+                   "Example: {'_and': [{'severity': 'high'}, {'_not': {'status': 'deprecated'}}]}"
+    )
+
+    # === CREATION POLICY ===
+    create: Literal["auto", "never"] = Field(
+        default="auto",
+        description="'auto': Create target node if not found via search (default). "
+                   "'never': Only link to existing target nodes (controlled vocabulary). "
+                   "When 'never', edges to non-existing targets are skipped."
+    )
+
+    # === TARGET NODE SELECTION ===
+    search: Optional[SearchConfig] = Field(
+        default=None,
+        description="How to find/select existing target nodes for this edge. "
+                   "Uses SearchConfig to define matching strategy. "
+                   "Example: {'properties': [{'name': 'name', 'mode': 'semantic', 'threshold': 0.90}]}. "
+                   "For controlled vocabulary (create='never'), this defines how to find valid targets."
+    )
+
+    # === EDGE PROPERTY VALUES ===
+    set: Optional[Dict[str, SetValue]] = Field(
+        default=None,
+        description="Set property values on edges. Supports: "
+                   "1. Exact value: {'weight': 1.0} - sets exact value. "
+                   "2. Auto-extract: {'reason': {'mode': 'auto'}} - LLM extracts from content. "
+                   "Edge properties are useful for relationship metadata (weight, timestamp, reason, etc.)."
+    )
+
+    model_config = ConfigDict(
+        extra='forbid',
+        json_schema_extra={
+            "examples": [
+                {
+                    "name": "Schema Level - Controlled Vocabulary Edge",
+                    "summary": "Link to existing targets only, don't create new (edge_type implicit)",
+                    "value": {
+                        "create": "never",
+                        "search": {
+                            "properties": [
+                                {"name": "name", "mode": "semantic", "threshold": 0.90}
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Memory Level - MITIGATES Edge Constraint",
+                    "summary": "SecurityBehavior->MITIGATES->TacticDef with controlled vocabulary",
+                    "value": {
+                        "edge_type": "MITIGATES",
+                        "source_type": "SecurityBehavior",
+                        "target_type": "TacticDef",
+                        "create": "never",
+                        "search": {
+                            "properties": [
+                                {"name": "name", "mode": "semantic", "threshold": 0.90}
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Edge with Auto-Extracted Properties",
+                    "summary": "Set edge properties from content",
+                    "value": {
+                        "edge_type": "ASSIGNED_TO",
+                        "set": {
+                            "assigned_date": {"mode": "auto"},
+                            "priority": {"mode": "auto"}
+                        }
+                    }
+                },
+                {
+                    "name": "Conditional Edge Constraint",
+                    "summary": "Apply constraint only for high-severity edges",
+                    "value": {
+                        "edge_type": "MITIGATES",
+                        "when": {
+                            "_and": [
+                                {"severity": "high"},
+                                {"_not": {"status": "deprecated"}}
+                            ]
+                        },
+                        "create": "never"
+                    }
+                }
+            ]
+        }
+    )
+
+    # =========================================================================
+    # Validators
+    # =========================================================================
+
+    @field_validator('when', mode='before')
+    @classmethod
+    def validate_when_operators(cls, v):
+        """Validate the 'when' clause (same logic as NodeConstraint)."""
+        if v is None:
+            return v
+        if not isinstance(v, dict):
+            raise ValueError(
+                f"'when' must be a dictionary, got {type(v).__name__}.\n"
+                f"Examples:\n"
+                f"  Simple: {{'severity': 'high'}}\n"
+                f"  AND: {{'_and': [{{'severity': 'high'}}, {{'confirmed': true}}]}}\n"
+                f"  OR: {{'_or': [{{'type': 'MITIGATES'}}, {{'type': 'PREVENTS'}}]}}"
+            )
+
+        valid_operators = {'_and', '_or', '_not'}
+        for key in v.keys():
+            if key.startswith('_') and key not in valid_operators:
+                raise ValueError(
+                    f"Unknown operator '{key}' in 'when' clause.\n"
+                    f"Valid operators: _and, _or, _not"
+                )
+
+        if '_and' in v and not isinstance(v['_and'], list):
+            raise ValueError("'_and' operator requires a list of conditions.")
+        if '_or' in v and not isinstance(v['_or'], list):
+            raise ValueError("'_or' operator requires a list of conditions.")
+        if '_not' in v and not isinstance(v['_not'], dict):
+            raise ValueError("'_not' operator requires a dictionary condition.")
+
+        return v
+
+    # =========================================================================
+    # Helper Methods
+    # =========================================================================
+
+    def validate_for_memory_level(self) -> None:
+        """
+        Validate that this constraint is valid for memory-level usage.
+
+        Call this when using EdgeConstraint in memory_policy.edge_constraints[].
+        Raises ValueError with helpful message if validation fails.
+        """
+        if self.edge_type is None:
+            raise ValueError(
+                "edge_type is required at memory level.\n\n"
+                "You're using EdgeConstraint inside memory_policy.edge_constraints[].\n"
+                "At memory level, you must specify which edge type this constraint applies to.\n\n"
+                "Fix: Add edge_type to your constraint:\n"
+                "    EdgeConstraint(\n"
+                "        edge_type='MITIGATES',  # <-- Add this\n"
+                "        search=SearchConfig(properties=['name']),\n"
+                "        create='never'\n"
+                "    )\n\n"
+                "Note: At schema level (inside UserRelationshipType.constraint), edge_type is implicit\n"
+                "from the parent UserRelationshipType and should be omitted."
+            )
+
+    # =========================================================================
+    # Shorthand Constructors
+    # =========================================================================
+
+    @classmethod
+    def for_controlled_vocabulary(
+        cls,
+        edge_type: str,
+        target_search: List[Union[str, PropertyMatch]],
+        source_type: Optional[str] = None,
+        target_type: Optional[str] = None,
+        when: Optional[Dict[str, Any]] = None
+    ) -> "EdgeConstraint":
+        """
+        Create a controlled vocabulary edge constraint (never create new target nodes).
+
+        Use this when you only want to link to existing target nodes, not create new ones.
+        Common for: taxonomy links, reference data relationships, controlled terms.
+
+        Args:
+            edge_type: The edge type (e.g., "MITIGATES", "CATEGORIZED_AS")
+            target_search: Properties to match target nodes (strings or PropertyMatch objects)
+            source_type: Optional filter by source node type
+            target_type: Optional filter by target node type
+            when: Optional conditional clause
+
+        Example:
+            EdgeConstraint.for_controlled_vocabulary(
+                "MITIGATES",
+                [PropertyMatch.semantic("name", 0.90)],
+                source_type="SecurityBehavior",
+                target_type="TacticDef"
+            )
+        """
+        return cls(
+            edge_type=edge_type,
+            source_type=source_type,
+            target_type=target_type,
+            create="never",
+            search=SearchConfig(properties=target_search),
+            when=when
+        )
+
+    @classmethod
+    def for_semantic_target_match(
+        cls,
+        edge_type: str,
+        property_name: str,
+        threshold: float = 0.85,
+        source_type: Optional[str] = None,
+        target_type: Optional[str] = None
+    ) -> "EdgeConstraint":
+        """
+        Create an edge constraint with semantic matching on target nodes.
+
+        Args:
+            edge_type: The edge type (e.g., "REFERENCES", "RELATED_TO")
+            property_name: Target node property to match semantically
+            threshold: Similarity threshold (default 0.85)
+            source_type: Optional filter by source node type
+            target_type: Optional filter by target node type
+
+        Example:
+            EdgeConstraint.for_semantic_target_match(
+                "REFERENCES",
+                "title",
+                threshold=0.80
+            )
+        """
+        return cls(
+            edge_type=edge_type,
+            source_type=source_type,
+            target_type=target_type,
+            search=SearchConfig(properties=[
+                PropertyMatch.semantic(property_name, threshold)
+            ])
+        )
+
+
 class NodeSpec(BaseModel):
     """
     Specification for a node in manual mode.
@@ -1606,6 +2004,18 @@ class MemoryPolicy(BaseModel):
         description="Rules for how LLM-extracted nodes should be created/updated. "
                    "Used in 'auto' mode when present. Controls creation policy, "
                    "property forcing, and merge behavior."
+    )
+
+    # For AUTO mode: Edge constraints (policies)
+    edge_constraints: Optional[List["EdgeConstraint"]] = Field(
+        default=None,
+        description="Rules for how LLM-extracted edges/relationships should be created/handled. "
+                   "Used in 'auto' mode when present. Controls: "
+                   "- create: 'auto' (create target if not found) or 'never' (controlled vocabulary) "
+                   "- search: How to find existing target nodes "
+                   "- set: Edge property values (exact or auto-extracted) "
+                   "- source_type/target_type: Filter by connected node types "
+                   "Example: {edge_type: 'MITIGATES', create: 'never', search: {properties: ['name']}}"
     )
 
     # Schema reference
@@ -2036,3 +2446,12 @@ class OMOFilter(BaseModel):
             ]
         }
     )
+
+
+# ============================================================================
+# Resolve forward references after all models are defined
+# ============================================================================
+# Rebuild models that have forward references to resolve them
+SearchConfig.model_rebuild()  # References RelationshipMatch via via_relationship
+RelationshipMatch.model_rebuild()  # References SearchConfig via target_search
+MemoryPolicy.model_rebuild()  # References EdgeConstraint via edge_constraints

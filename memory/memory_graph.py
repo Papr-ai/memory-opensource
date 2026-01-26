@@ -73,6 +73,8 @@ if services_dir not in sys.path:
 
 from models.parse_server import PineconeMatch, ErrorDetail, SystemUpdateStatus, PineconeQueryResponse, ParseStoredMemory, ParseUserPointer, MemoryRetrievalResult, RelatedMemoriesSuccess, RelatedMemoriesError, DeleteMemoryResponse, DeleteMemoryResult, DeletionStatus, UpdateMemoryItem, UpdateMemoryResponse, MemoryParseServerUpdate, ParsePointer, DeveloperUserPointer
 from services.memory_management import store_memory_item, retrieve_memory_item_by_qdrant_id, retrieve_multiple_memory_items,retrieve_memory_item_parse, batch_store_memories, batch_store_memories_async, retrieve_memory_items_with_users_async
+from services.node_constraint_resolver import apply_node_constraints
+from services.edge_constraint_resolver import apply_edge_constraints
 from memory.memory_item import MemoryItem, TextMemoryItem, CodeSnippetMemoryItem, WebpageMemoryItem, CodeFileMemoryItem, MeetingMemoryItem, PluginMemoryItem, DocumentMemoryItem, IssueMemoryItem, CustomerMemoryItem, memory_item_to_dict
 from neo4j import GraphDatabase
 from scipy import spatial
@@ -3847,7 +3849,7 @@ class MemoryGraph:
         # This should never be reached now
         return (None, None, None)
     
-    async def process_memory_item_async(self, session_token: str, memory_dict: dict, relationships_json: List[RelationshipItem] = None, workspace_id: str = None, user_id: str = None, user_workspace_ids: Optional[List[str]] = None, api_key: Optional[str] = None, neo_session: Optional[AsyncSession] = None, legacy_route: bool = True, graph_override: Optional[Dict[str, Any]] = None, schema_id: Optional[str] = None, property_overrides: Optional[Dict[str, Dict[str, Any]]] = None, developer_user_id: Optional[str] = None) -> ProcessMemoryResponse:
+    async def process_memory_item_async(self, session_token: str, memory_dict: dict, relationships_json: List[RelationshipItem] = None, workspace_id: str = None, user_id: str = None, user_workspace_ids: Optional[List[str]] = None, api_key: Optional[str] = None, neo_session: Optional[AsyncSession] = None, legacy_route: bool = True, graph_override: Optional[Dict[str, Any]] = None, schema_id: Optional[str] = None, property_overrides: Optional[Dict[str, Dict[str, Any]]] = None, developer_user_id: Optional[str] = None, memory_policy: Optional[Dict[str, Any]] = None) -> ProcessMemoryResponse:
         """
         Process a memory item asynchronously.
 
@@ -3890,7 +3892,8 @@ class MemoryGraph:
                     graph_override=graph_override,
                     schema_id=schema_id,
                     property_overrides=property_overrides,
-                    developer_user_id=developer_user_id
+                    developer_user_id=developer_user_id,
+                    memory_policy=memory_policy
                 )
         except Exception as e:
             logger.error(f"Error in process_memory_item_async: {e}")
@@ -3902,7 +3905,7 @@ class MemoryGraph:
                 "data": None
             }
 
-    async def _index_memories_and_process(self, neo_session: AsyncSession, session_token: str, memory_dict: dict, relationships_json: List[RelationshipItem] = None, workspace_id: str = None, user_id: str = None, user_workspace_ids: Optional[List[str]] = None, api_key: Optional[str] = None, legacy_route: bool = True, graph_override: Optional[Dict[str, Any]] = None, schema_id: Optional[str] = None, property_overrides: Optional[Dict[str, Dict[str, Any]]] = None, developer_user_id: Optional[str] = None) -> ProcessMemoryResponse:
+    async def _index_memories_and_process(self, neo_session: AsyncSession, session_token: str, memory_dict: dict, relationships_json: List[RelationshipItem] = None, workspace_id: str = None, user_id: str = None, user_workspace_ids: Optional[List[str]] = None, api_key: Optional[str] = None, legacy_route: bool = True, graph_override: Optional[Dict[str, Any]] = None, schema_id: Optional[str] = None, property_overrides: Optional[Dict[str, Dict[str, Any]]] = None, developer_user_id: Optional[str] = None, memory_policy: Optional[Dict[str, Any]] = None) -> ProcessMemoryResponse:
         # Start timing the entire process
         process_start_time = time.time()
         
@@ -4374,9 +4377,10 @@ class MemoryGraph:
                     memory_item=memory_dict,
                     neo_session=neo_session,
                     workspace_id=workspace_id,
-                    user_schema=user_schema_for_manual
+                    user_schema=user_schema_for_manual,
+                    memory_policy=memory_policy
                 )
-                
+
                 logger.info("🎯 GRAPH OVERRIDE: Successfully stored developer-provided graph structure")
                 
                 # Create automatic EXTRACTED relationships from Memory to all manually created nodes
@@ -4491,7 +4495,7 @@ class MemoryGraph:
                 
                 schema_response = await chat_gpt.generate_memory_graph_schema_async(
                     memory_dict,
-                    usecase_memory_item,  
+                    usecase_memory_item,
                     neo_session,
                     workspace_id,
                     trimmed_related_memories,
@@ -4501,7 +4505,8 @@ class MemoryGraph:
                     developer_user_id=developer_user_id,  # Pass developer_user_id for schema selection
                     developer_workspace_id=developer_workspace_id,  # Pass developer's workspace ID for schema selection
                     organization_id=organization_id,  # Pass organization context for multi-tenant schema access
-                    namespace_id=namespace_id  # Pass namespace context for multi-tenant schema access
+                    namespace_id=namespace_id,  # Pass namespace context for multi-tenant schema access
+                    memory_policy=memory_policy  # Pass resolved memory_policy with constraints
                 )
 
                 if not schema_response:
@@ -11119,13 +11124,20 @@ class MemoryGraph:
         nodes: List[LLMGraphNode],
         relationships: List[LLMGraphRelationship],
         memory_item: Dict[str, Any],
-        neo_session: AsyncSession, 
+        neo_session: AsyncSession,
         workspace_id: Optional[str] = None,
-        user_schema: Optional[Any] = None
+        user_schema: Optional[Any] = None,
+        memory_policy: Optional[Dict[str, Any]] = None
     ):
         """
         Stores the LLM-generated graph structure in Neo4j, applying proper metadata and access controls.
         Integrates with OMO (Open Memory Object) safety standards for consent, risk, and audit tracking.
+
+        Now also applies node_constraints and edge_constraints from memory_policy to control:
+        - Which nodes/edges can be created (create: auto/never)
+        - How to find existing nodes/edges (search config)
+        - Property values to set (set config)
+        - Conditional application (when clause)
         """
         # Fallback mode check: skip Neo4j operations if in fallback
         if self.async_neo_conn.fallback_mode:
@@ -11240,14 +11252,62 @@ class MemoryGraph:
 
         # Create nodes first and collect results for property indexing
         neo4j_results = []
-        
+        skipped_node_ids = set()  # Track nodes skipped due to constraints
+
+        # Extract node constraints from memory_policy
+        node_constraints = []
+        if memory_policy:
+            node_constraints = memory_policy.get('node_constraints', [])
+            if node_constraints:
+                logger.info(f"🔧 NODE CONSTRAINTS: {len(node_constraints)} constraints to apply")
+
         for node in nodes_objects:
             node_id = node.properties.get('id', str(uuid4()))
             node_content = node.properties.get('content') or node.properties.get('name')
+            node_label = node.label.value if hasattr(node.label, 'value') else str(node.label)
 
-            logger.info(f"Processing {node.label} node with content: {node_content}")
-            
+            logger.info(f"Processing {node_label} node with content: {node_content}")
+
             try:
+                # Apply node constraints if configured
+                if node_constraints and node_label != 'Memory':  # Don't constraint-check Memory nodes
+                    node_props = node.properties.model_dump() if hasattr(node.properties, 'model_dump') else dict(node.properties)
+                    should_create, existing_node, final_props = await apply_node_constraints(
+                        node={'type': node_label, 'properties': node_props},
+                        node_type=node_label,
+                        node_constraints=node_constraints,
+                        memory_graph=self,
+                        extracted_node_properties=node_props,
+                        context={'workspace_id': workspace_id, 'metadata': common_metadata}
+                    )
+
+                    if not should_create and not existing_node:
+                        # Node skipped: create='never' and no existing found
+                        logger.info(f"⏭️ CONSTRAINT SKIP: Node {node_label} skipped - create='never' and no existing found")
+                        skipped_node_ids.add(node_id)
+                        skipped_node_ids.add(node_props.get('llmGenNodeId', node_id))
+                        continue
+
+                    if existing_node:
+                        # Use existing node instead of creating
+                        logger.info(f"🔗 CONSTRAINT LINK: Using existing {node_label} node: {existing_node.get('id')}")
+                        node.properties['id'] = existing_node.get('id')
+                        neo4j_results.append({
+                            'label': node_label,
+                            'properties': existing_node,
+                            'was_created': False,
+                            'sync_operation': 'constraint_link',
+                            'node_id': existing_node.get('id')
+                        })
+                        continue
+
+                    # Apply final_props if set values were configured
+                    if final_props and final_props != node_props:
+                        for key, value in final_props.items():
+                            if hasattr(node.properties, key):
+                                setattr(node.properties, key, value)
+                            elif isinstance(node.properties, dict):
+                                node.properties[key] = value
                 # Memory nodes: Keep existing content-based deduplication with tenant scoping
                 if node.label == 'Memory':
                     logger.info(f"Processing Memory node with existing logic")
@@ -11356,14 +11416,31 @@ class MemoryGraph:
         
         logger.info(f"📍 ID MAPPING: Built mapping for {len(id_mapping)} successfully created node IDs")
 
+        # Extract edge constraints from memory_policy
+        edge_constraints = []
+        if memory_policy:
+            edge_constraints = memory_policy.get('edge_constraints', [])
+            if edge_constraints:
+                logger.info(f"🔧 EDGE CONSTRAINTS: {len(edge_constraints)} constraints to apply")
+
         # Filter relationships - only create for nodes that were successfully created
         valid_relationships = []
         skipped_count = 0
-        
+
         for rel in relationship_objects:
             source_original_id = rel.source.id
             target_original_id = rel.target.id
-            
+
+            # Check if source or target was skipped due to node constraints
+            if source_original_id in skipped_node_ids:
+                logger.debug(f"⚠️  Skipping relationship {rel.type}: source node '{source_original_id}' was skipped by constraint")
+                skipped_count += 1
+                continue
+            if target_original_id in skipped_node_ids:
+                logger.debug(f"⚠️  Skipping relationship {rel.type}: target node '{target_original_id}' was skipped by constraint")
+                skipped_count += 1
+                continue
+
             # Check if both source and target nodes were successfully created
             if source_original_id not in id_mapping:
                 logger.debug(f"⚠️  Skipping relationship {rel.type}: source node '{source_original_id}' was not created")
@@ -11373,19 +11450,62 @@ class MemoryGraph:
                 logger.debug(f"⚠️  Skipping relationship {rel.type}: target node '{target_original_id}' was not created")
                 skipped_count += 1
                 continue
-            
+
             # Update relationship IDs to Neo4j UUIDs
             rel.source.id = id_mapping[source_original_id]
             rel.target.id = id_mapping[target_original_id]
             valid_relationships.append(rel)
-        
+
         if skipped_count > 0:
-            logger.warning(f"⚠️  Skipped {skipped_count} relationships - nodes were not created (missing unique identifiers or creation failed)")
+            logger.warning(f"⚠️  Skipped {skipped_count} relationships - nodes were not created/skipped")
         logger.info(f"✅ Creating {len(valid_relationships)} relationships for successfully created nodes")
 
-        # Create only valid relationships
+        # Create only valid relationships (with edge constraint checking)
+        edge_skipped_count = 0
         for rel in valid_relationships:
+            rel_type = rel.type.value if hasattr(rel.type, 'value') else str(rel.type)
+            source_label = rel.source.label.value if hasattr(rel.source.label, 'value') else str(rel.source.label)
+            target_label = rel.target.label.value if hasattr(rel.target.label, 'value') else str(rel.target.label)
+
+            # Apply edge constraints if configured
+            if edge_constraints:
+                # Get node dicts for constraint evaluation
+                source_node = {'type': source_label, 'properties': {'id': rel.source.id}}
+                target_node = {'type': target_label, 'properties': {'id': rel.target.id}}
+
+                # Get relationship properties if any
+                rel_props = rel.properties.model_dump() if hasattr(rel, 'properties') and hasattr(rel.properties, 'model_dump') else {}
+
+                should_create, final_target, final_props = await apply_edge_constraints(
+                    source_node=source_node,
+                    target_node=target_node,
+                    edge_type=rel_type,
+                    edge_constraints=edge_constraints,
+                    memory_graph=self,
+                    extracted_edge_properties=rel_props,
+                    context={'workspace_id': workspace_id, 'metadata': common_metadata}
+                )
+
+                if not should_create:
+                    logger.info(f"⏭️ EDGE CONSTRAINT SKIP: Relationship {rel_type} skipped - create='never' and no existing target found")
+                    edge_skipped_count += 1
+                    continue
+
+                if final_target and final_target.get('id') != rel.target.id:
+                    # Use different target node found by constraint search
+                    logger.info(f"🔗 EDGE CONSTRAINT LINK: Using existing target for {rel_type}: {final_target.get('id')}")
+                    rel.target.id = final_target.get('id')
+
+                # Apply final_props if set values were configured
+                if final_props and hasattr(rel, 'properties'):
+                    for key, value in final_props.items():
+                        if hasattr(rel.properties, key):
+                            setattr(rel.properties, key, value)
+
             await self._create_relationship(neo_session=neo_session, relationship=rel, common_metadata=common_metadata)
+
+        if edge_skipped_count > 0:
+            logger.info(f"🔧 EDGE CONSTRAINTS: Skipped {edge_skipped_count} relationships due to constraints")
         
         # CRITICAL FIX: Make property indexing synchronous (await instead of background task)
         # This ensures properties are indexed BEFORE the response is returned
@@ -12469,14 +12589,16 @@ class MemoryGraph:
         developer_user_id: Optional[str] = None,
         graph_override: Optional[Dict[str, Any]] = None,
         schema_id: Optional[str] = None,
-        property_overrides: Optional[Dict[str, Dict[str, Any]]] = None
+        property_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
+        memory_policy: Optional[Dict[str, Any]] = None
     ) -> List[ParseStoredMemory]:  # Updated return type
         """
         Async version of add_memory_item that quickly stores the memory and processes relationships in the background.
         Accepts an optional neo_session for robust session management.
-        
+
         Args:
             schema_id: Optional custom schema ID to enforce during graph generation
+            memory_policy: Optional resolved memory policy with node_constraints and edge_constraints
         """
         logger.info(f"🔍 DEBUG: add_memory_item_async received graph_override: {graph_override}")
         logger.info(f"🔍 DEBUG: add_memory_item_async graph_override type: {type(graph_override)}")
@@ -12633,7 +12755,8 @@ class MemoryGraph:
                             legacy_route=legacy_route,
                             graph_override=graph_override,  # Pass graph_override to background processing
                             property_overrides=property_overrides,  # Pass property_overrides for node customization
-                            developer_user_id=developer_user_id  # Pass developer_user_id for schema selection
+                            developer_user_id=developer_user_id,  # Pass developer_user_id for schema selection
+                            memory_policy=memory_policy  # Pass resolved memory_policy with constraints
                         )
 
                         # Process relationships in background

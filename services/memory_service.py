@@ -30,6 +30,7 @@ from services.memory_policy_resolver import (
     extract_omo_fields_from_policy,
     should_skip_graph_extraction
 )
+from services.link_to_parser import expand_link_to_to_policy, validate_link_to
 
 # Create a logger instance for this module
 logger = LoggerSingleton.get_logger(__name__)
@@ -574,12 +575,39 @@ async def handle_incoming_memory(
         property_overrides = None
         memory_policy_dict = None
 
+        # SHORTHAND: Expand link_to DSL if provided
+        # link_to is a shorthand for memory_policy.node_constraints and edge_constraints
+        if hasattr(memory_request, 'link_to') and memory_request.link_to:
+            try:
+                logger.info(f"🔗 LINK_TO DSL: Expanding shorthand syntax")
+                # Get existing memory_policy dict if present
+                existing_policy = None
+                if hasattr(memory_request, 'memory_policy') and memory_request.memory_policy:
+                    mp = memory_request.memory_policy
+                    existing_policy = mp.model_dump() if hasattr(mp, 'model_dump') else mp
+
+                # Expand link_to and merge with existing policy
+                expanded_policy = expand_link_to_to_policy(
+                    link_to=memory_request.link_to,
+                    existing_policy=existing_policy,
+                    schema=None  # TODO: Fetch schema for type inference if schema_id is known
+                )
+                memory_policy_dict = expanded_policy
+                logger.info(f"🔗 LINK_TO EXPANDED: node_constraints={len(expanded_policy.get('node_constraints', []))}, "
+                           f"edge_constraints={len(expanded_policy.get('edge_constraints', []))}")
+            except ValueError as e:
+                logger.error(f"❌ LINK_TO ERROR: {e}")
+                return AddMemoryResponse.failure(error=f"Invalid link_to syntax: {e}", code=400)
+
         # NEW: Check for memory_policy first (new unified API)
-        if hasattr(memory_request, 'memory_policy') and memory_request.memory_policy:
+        # Skip if already populated by link_to expansion
+        if memory_policy_dict is None and hasattr(memory_request, 'memory_policy') and memory_request.memory_policy:
             mp = memory_request.memory_policy
             # Convert Pydantic model to dict if needed
             memory_policy_dict = mp.model_dump() if hasattr(mp, 'model_dump') else mp
 
+        # Process memory_policy_dict (from link_to expansion or direct memory_policy)
+        if memory_policy_dict:
             # Extract schema_id from memory_policy
             schema_id = memory_policy_dict.get('schema_id')
 
@@ -612,6 +640,7 @@ async def handle_incoming_memory(
                     logger.info(f"🔧 PROPERTY OVERRIDES: {len(property_overrides)} rules")
 
         # Resolve schema-level memory_policy if schema_id is provided
+        resolved_policy = None  # Initialize before conditional block
         if schema_id:
             try:
                 resolved_policy = await resolve_memory_policy_from_schema(
@@ -661,6 +690,8 @@ async def handle_incoming_memory(
         logger.info(f"🔍 DEBUG: Extracted schema_id: {schema_id}")
         logger.info(f"🔍 DEBUG: Extracted property_overrides: {property_overrides}")
         try:
+            # Use resolved_policy if available, otherwise use memory_policy_dict
+            final_memory_policy = resolved_policy or memory_policy_dict
             memory_items = await memory_graph.add_memory_item_async(
                 memory_item,
                 relationship_items,
@@ -678,7 +709,8 @@ async def handle_incoming_memory(
                 developer_user_id=developer_user_id,  # Pass developer ID for schema selection
                 graph_override=graph_override,  # Pass extracted graph_override for bypassing LLM
                 schema_id=schema_id,  # Pass extracted schema_id for enforcement
-                property_overrides=property_overrides # Pass extracted property_overrides
+                property_overrides=property_overrides,  # Pass extracted property_overrides
+                memory_policy=final_memory_policy  # Pass resolved memory_policy with constraints
             )
         except Exception as e:
             logger.error(f"Error adding memory item to graph: {str(e)}")
