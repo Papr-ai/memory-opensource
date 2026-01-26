@@ -34,6 +34,29 @@ Developers have **two distinct needs**:
 | `{"Task:title": {"set": {...}}}` | `NodeConstraint(..., set={...})` |
 | `{"Task:title": {"when": {...}}}` | `NodeConstraint(..., when={...})` |
 | `{"Task:title": {"create": "never"}}` | `NodeConstraint(..., create="never")` |
+| `{"Task:title": {"link_only": true}}` | `NodeConstraint(..., link_only=True)` ≡ `create="never"` |
+
+### Shorthand: `link_only` Field
+
+The `link_only` field is a shorthand for `create="never"`:
+
+```python
+# These are equivalent:
+{"Task:title": {"create": "never"}}
+{"Task:title": {"link_only": true}}
+
+# At schema level (dict-based):
+UserNodeType(name="Person", link_only=True, ...)  # Shorthand field on UserNodeType
+
+# At schema level (class-based decorators):
+@node
+@link_only  # Decorator equivalent
+class Person: ...
+
+@node
+@controlled_vocabulary  # Alias for @link_only
+class Person: ...
+```
 
 **Target Outcomes:**
 - Time-to-first-success: 30 minutes → 5 minutes
@@ -56,8 +79,8 @@ schema = UserGraphSchema(
         "SecurityPolicy": UserNodeType(
             name="SecurityPolicy",
             properties={"name": PropertyDefinition(type="string")},
+            link_only=True,  # Shorthand for create="never" - controlled vocabulary
             constraint=NodeConstraint(
-                create="never",  # Controlled vocabulary - never create new
                 search=SearchConfig(properties=[
                     PropertyMatch.semantic("name", 0.85)
                 ])
@@ -154,12 +177,12 @@ schema = UserGraphSchema(
                 "email": PropertyDefinition(type="string"),
                 "name": PropertyDefinition(type="string", required=True)
             },
+            link_only=True,  # Shorthand for create="never" - controlled vocabulary
             constraint=NodeConstraint(
                 search=SearchConfig(properties=[
                     PropertyMatch(name="email", mode="exact"),
                     PropertyMatch(name="name", mode="semantic", threshold=0.90)
-                ]),
-                create="never"  # Controlled vocabulary
+                ])
             )
         )
     }
@@ -186,6 +209,7 @@ await client.add_memory(
             ),
             NodeConstraint(
                 node_type="Person",
+                link_only=True,  # Shorthand for create="never"
                 search=SearchConfig(
                     properties=[PropertyMatch(name="name", mode="semantic")]
                 ),
@@ -1181,6 +1205,73 @@ papr codegen my_schema_id --lang typescript --output ./src/papr-types
 # From local schema file
 papr codegen ./schemas/project_management.json --lang python --output ./papr_types
 ```
+
+#### Alternative: Class-Based Schema Definition (Full IDE Support)
+
+Instead of dict-based schema definition, use Python decorators for full IDE introspection:
+
+```python
+from papr.sdk import schema, node, prop, edge, constraint
+from papr.sdk import exact, semantic, controlled_vocabulary, auto_create
+from typing import Optional
+
+@schema("project_management")
+class ProjectManagementSchema:
+    """Project management schema with task tracking."""
+
+    @node
+    @auto_create
+    class Task:
+        """Task entity - can create new."""
+        id: str = prop(search=exact())
+        title: str = prop(required=True, search=semantic(0.85))
+        status: str = prop(enum=["open", "in_progress", "completed"])
+        priority: str = prop(enum=["low", "medium", "high"])
+        assignee: Optional[str] = prop()
+
+        # Relationships
+        belongs_to = edge(to="Project")
+
+    @node
+    @controlled_vocabulary  # create="never" (or use @link_only - they're equivalent)
+    class Person:
+        """Person entity - controlled vocabulary."""
+        email: str = prop(search=exact())
+        name: str = prop(required=True, search=semantic(0.90))
+        role: Optional[str] = prop()
+
+    @node
+    @auto_create
+    class Project:
+        """Project entity - can create new."""
+        id: str = prop(search=exact())
+        name: str = prop(required=True, search=semantic(0.85))
+        status: Optional[str] = prop()
+
+
+# Register schema
+await client.register_schema(ProjectManagementSchema)
+
+# Generated types available for memory operations:
+from papr.schemas.project_management import Task, Person, Project
+from papr import Auto
+
+await client.add_memory(
+    content="John completed the auth bug",
+    link={
+        Task.title.semantic(0.85).set({Task.status: Auto()}),
+        Person.name.controlled_vocabulary()
+    }
+)
+```
+
+**Benefits of Class-Based Schema:**
+- Full IDE autocomplete for properties and types
+- Type checking catches errors at development time
+- Docstrings visible in IDE
+- Refactoring support (rename propagates everywhere)
+- More Pythonic and readable
+- Relationships defined inline with `edge()`
 
 #### SDK vs String DSL Comparison
 

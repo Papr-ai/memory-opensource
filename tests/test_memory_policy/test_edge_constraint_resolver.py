@@ -945,3 +945,159 @@ class TestDocumentedExamples:
             property_value="TA0005",  # From target_node.properties
             context=None
         )
+
+
+class TestLinkOnlyShorthand:
+    """Test the link_only shorthand field for EdgeConstraint."""
+
+    def test_link_only_sets_create_never(self):
+        """link_only=True should set create='never'."""
+        from models.shared_types import EdgeConstraint
+
+        constraint = EdgeConstraint(link_only=True)
+        assert constraint.create == "never"
+        assert constraint.link_only is True
+
+    def test_link_only_false_keeps_default_create(self):
+        """link_only=False should keep create='auto' (default)."""
+        from models.shared_types import EdgeConstraint
+
+        constraint = EdgeConstraint(link_only=False)
+        assert constraint.create == "auto"
+        assert constraint.link_only is False
+
+    def test_link_only_overrides_explicit_create_auto(self):
+        """link_only=True should override explicit create='auto'."""
+        from models.shared_types import EdgeConstraint
+
+        # Even if create='auto' is explicitly set, link_only=True should override
+        constraint = EdgeConstraint(create="auto", link_only=True)
+        assert constraint.create == "never"
+
+    def test_link_only_with_create_never(self):
+        """link_only=True with create='never' should work correctly."""
+        from models.shared_types import EdgeConstraint
+
+        constraint = EdgeConstraint(create="never", link_only=True)
+        assert constraint.create == "never"
+
+    def test_link_only_with_search_config(self):
+        """link_only=True should work with search configuration."""
+        from models.shared_types import EdgeConstraint, SearchConfig, PropertyMatch
+
+        constraint = EdgeConstraint(
+            edge_type="MITIGATES",
+            source_type="SecurityBehavior",
+            target_type="TacticDef",
+            link_only=True,
+            search=SearchConfig(properties=[
+                PropertyMatch(name="name", mode="semantic", threshold=0.90)
+            ])
+        )
+        assert constraint.create == "never"
+        assert constraint.edge_type == "MITIGATES"
+        assert constraint.search is not None
+
+    def test_link_only_equivalent_to_for_controlled_vocabulary(self):
+        """link_only=True should produce same result as for_controlled_vocabulary."""
+        from models.shared_types import EdgeConstraint, SearchConfig, PropertyMatch
+
+        # Using link_only
+        constraint1 = EdgeConstraint(
+            edge_type="MITIGATES",
+            link_only=True,
+            search=SearchConfig(properties=[
+                PropertyMatch(name="name", mode="semantic", threshold=0.90)
+            ])
+        )
+
+        # Using for_controlled_vocabulary
+        constraint2 = EdgeConstraint.for_controlled_vocabulary(
+            edge_type="MITIGATES",
+            target_search=[PropertyMatch(name="name", mode="semantic", threshold=0.90)]
+        )
+
+        assert constraint1.create == constraint2.create == "never"
+        assert constraint1.edge_type == constraint2.edge_type
+
+    @pytest.mark.asyncio
+    async def test_link_only_blocks_edge_creation(self, mock_memory_graph):
+        """Constraint with link_only=True should block edge creation when target not found."""
+        from models.shared_types import EdgeConstraint
+
+        # Verify link_only=True sets create="never"
+        constraint = EdgeConstraint(link_only=True)
+        assert constraint.create == "never"
+
+        # Use dict format like other tests (resolver expects dicts, not model objects)
+        constraints = [
+            {
+                "edge_type": "MITIGATES",
+                "source_type": "SecurityBehavior",
+                "target_type": "TacticDef",
+                "create": "never",  # link_only=True is equivalent to this
+                "search": {"properties": [{"name": "id", "mode": "exact"}]}
+            }
+        ]
+
+        source_node = {"type": "SecurityBehavior", "properties": {"id": "SB080"}}
+        target_node = {"type": "TacticDef", "properties": {"id": "TA9999"}}  # Unknown
+
+        # Mock returns None (no existing target)
+        mock_memory_graph.find_node_by_property = AsyncMock(return_value=None)
+
+        should_create, final_target, props = await apply_edge_constraints(
+            source_node=source_node,
+            target_node=target_node,
+            edge_type="MITIGATES",
+            edge_constraints=constraints,
+            memory_graph=mock_memory_graph,
+            extracted_edge_properties={}
+        )
+
+        assert should_create is False
+        assert final_target is None
+        assert props is None
+
+    @pytest.mark.asyncio
+    async def test_link_only_allows_linking_existing_target(self, mock_memory_graph):
+        """Constraint with link_only=True should allow linking to existing target."""
+        from models.shared_types import EdgeConstraint
+
+        # Verify link_only=True sets create="never"
+        constraint = EdgeConstraint(link_only=True)
+        assert constraint.create == "never"
+
+        # Use dict format like other tests
+        constraints = [
+            {
+                "edge_type": "MITIGATES",
+                "source_type": "SecurityBehavior",
+                "target_type": "TacticDef",
+                "create": "never",
+                "search": {"properties": [{"name": "id", "mode": "exact"}]}
+            }
+        ]
+
+        source_node = {"type": "SecurityBehavior", "properties": {"id": "SB080"}}
+        target_node = {"type": "TacticDef", "properties": {"id": "TA0005"}}
+
+        # Mock returns existing target
+        mock_memory_graph.find_node_by_property = AsyncMock(return_value={
+            "id": "existing_tactic",
+            "type": "TacticDef",
+            "properties": {"id": "TA0005", "name": "Defense Evasion"}
+        })
+
+        should_create, final_target, props = await apply_edge_constraints(
+            source_node=source_node,
+            target_node=target_node,
+            edge_type="MITIGATES",
+            edge_constraints=constraints,
+            memory_graph=mock_memory_graph,
+            extracted_edge_properties={"confidence": 0.95}
+        )
+
+        assert should_create is True
+        assert final_target is not None
+        assert final_target["properties"]["id"] == "TA0005"

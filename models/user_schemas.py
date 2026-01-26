@@ -119,6 +119,15 @@ class UserNodeType(BaseModel):
                    "Note: node_type is implicit (taken from this UserNodeType.name)."
     )
 
+    # Link-only shorthand (equivalent to @link_only decorator)
+    link_only: bool = Field(
+        default=False,
+        description="Shorthand for constraint with create='never'. "
+                   "When True, only links to existing nodes (controlled vocabulary). "
+                   "Equivalent to @link_only decorator. If constraint is also provided, "
+                   "link_only=True will override constraint.create to 'never'."
+    )
+
     # Visual/UI properties
     color: Optional[str] = "#3498db"  # Hex color for UI
     icon: Optional[str] = None  # Icon identifier
@@ -151,6 +160,19 @@ class UserNodeType(BaseModel):
                 if unique_prop not in properties:
                     raise ValueError(f"Unique identifier property '{unique_prop}' not found in properties")
         return v
+
+    def model_post_init(self, __context):
+        """Apply link_only to constraint after initialization."""
+        if self.link_only:
+            # Import here to avoid circular dependency issues
+            from models.shared_types import NodeConstraint
+            if self.constraint is None:
+                # Create a new constraint with create='never'
+                object.__setattr__(self, 'constraint', NodeConstraint(create="never"))
+            else:
+                # Override the existing constraint's create field
+                object.__setattr__(self.constraint, 'create', 'never')
+
 
 class UserRelationshipType(BaseModel):
     """
@@ -200,10 +222,32 @@ class UserRelationshipType(BaseModel):
                    "Note: edge_type is implicit (taken from this UserRelationshipType.name)."
     )
 
+    # Link-only shorthand (equivalent to @link_only decorator)
+    link_only: bool = Field(
+        default=False,
+        description="Shorthand for constraint with create='never'. "
+                   "When True, only links to existing target nodes (controlled vocabulary). "
+                   "Equivalent to @link_only decorator. If constraint is also provided, "
+                   "link_only=True will override constraint.create to 'never'."
+    )
+
     # Visual/UI properties
     color: Optional[str] = "#e74c3c"  # Hex color for UI
 
     model_config = ConfigDict(extra='forbid')
+
+    def model_post_init(self, __context):
+        """Apply link_only to constraint after initialization."""
+        if self.link_only:
+            # Import here to avoid circular dependency issues
+            from models.shared_types import EdgeConstraint
+            if self.constraint is None:
+                # Create a new constraint with create='never'
+                object.__setattr__(self, 'constraint', EdgeConstraint(create="never"))
+            else:
+                # Override the existing constraint's create field
+                object.__setattr__(self.constraint, 'create', 'never')
+
 
 class SchemaStatus(str, Enum):
     DRAFT = "draft"

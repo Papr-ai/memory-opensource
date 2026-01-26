@@ -600,3 +600,38 @@ def complex_nested_when_condition() -> Dict[str, Any]:
             }
         ]
     }
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Link-Only Fixtures
+# ═══════════════════════════════════════════════════════════════════
+
+@pytest.fixture
+def link_only_node_constraint() -> Dict[str, Any]:
+    """Node constraint using link_only shorthand."""
+    return {
+        "node_type": "TacticDef",
+        "link_only": True,
+        "search": {
+            "properties": [
+                {"name": "id", "mode": "exact"},
+                {"name": "name", "mode": "semantic", "threshold": 0.90}
+            ]
+        }
+    }
+
+
+@pytest.fixture
+def link_only_edge_constraint() -> Dict[str, Any]:
+    """Edge constraint using link_only shorthand."""
+    return {
+        "edge_type": "MITIGATES",
+        "source_type": "SecurityBehavior",
+        "target_type": "TacticDef",
+        "link_only": True,
+        "search": {
+            "properties": [
+                {"name": "name", "mode": "semantic", "threshold": 0.90}
+            ]
+        }
+    }

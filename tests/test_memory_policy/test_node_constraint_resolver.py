@@ -1210,3 +1210,146 @@ class TestDocumentedExamples:
             property_value="TASK-999",  # From node.properties
             context=None
         )
+
+
+class TestLinkOnlyShorthand:
+    """Test the link_only shorthand field for NodeConstraint."""
+
+    def test_link_only_sets_create_never(self):
+        """link_only=True should set create='never'."""
+        from models.shared_types import NodeConstraint
+
+        constraint = NodeConstraint(link_only=True)
+        assert constraint.create == "never"
+        assert constraint.link_only is True
+
+    def test_link_only_false_keeps_default_create(self):
+        """link_only=False should keep create='auto' (default)."""
+        from models.shared_types import NodeConstraint
+
+        constraint = NodeConstraint(link_only=False)
+        assert constraint.create == "auto"
+        assert constraint.link_only is False
+
+    def test_link_only_overrides_explicit_create_auto(self):
+        """link_only=True should override explicit create='auto'."""
+        from models.shared_types import NodeConstraint
+
+        # Even if create='auto' is explicitly set, link_only=True should override
+        constraint = NodeConstraint(create="auto", link_only=True)
+        assert constraint.create == "never"
+
+    def test_link_only_with_create_never(self):
+        """link_only=True with create='never' should work correctly."""
+        from models.shared_types import NodeConstraint
+
+        constraint = NodeConstraint(create="never", link_only=True)
+        assert constraint.create == "never"
+
+    def test_link_only_with_search_config(self):
+        """link_only=True should work with search configuration."""
+        from models.shared_types import NodeConstraint, SearchConfig, PropertyMatch
+
+        constraint = NodeConstraint(
+            node_type="Person",
+            link_only=True,
+            search=SearchConfig(properties=[
+                PropertyMatch(name="email", mode="exact")
+            ])
+        )
+        assert constraint.create == "never"
+        assert constraint.node_type == "Person"
+        assert constraint.search is not None
+
+    def test_link_only_equivalent_to_for_controlled_vocabulary(self):
+        """link_only=True should produce same result as for_controlled_vocabulary."""
+        from models.shared_types import NodeConstraint, SearchConfig, PropertyMatch
+
+        # Using link_only
+        constraint1 = NodeConstraint(
+            node_type="TacticDef",
+            link_only=True,
+            search=SearchConfig(properties=[
+                PropertyMatch(name="id", mode="exact")
+            ])
+        )
+
+        # Using for_controlled_vocabulary
+        constraint2 = NodeConstraint.for_controlled_vocabulary(
+            node_type="TacticDef",
+            match_on=[PropertyMatch(name="id", mode="exact")]
+        )
+
+        assert constraint1.create == constraint2.create == "never"
+        assert constraint1.node_type == constraint2.node_type
+
+    @pytest.mark.asyncio
+    async def test_link_only_blocks_node_creation(self, mock_memory_graph):
+        """Constraint with link_only=True should block node creation when not found."""
+        from models.shared_types import NodeConstraint
+
+        # Create constraint with link_only (equivalent to create='never')
+        constraint = NodeConstraint(link_only=True)
+        assert constraint.create == "never"  # Verify link_only works
+
+        # Use dict format like other tests (resolver expects dicts, not model objects)
+        constraints = [
+            {
+                "node_type": "TacticDef",
+                "create": "never",  # link_only=True is equivalent to this
+                "search": {"properties": [{"name": "id", "mode": "exact"}]}
+            }
+        ]
+
+        node = {"type": "TacticDef", "properties": {"id": "TA9999"}}  # Unknown ID
+        extracted = {"id": "TA9999", "name": "Unknown Tactic"}
+
+        # Mock returns None (no existing node)
+        mock_memory_graph.find_node_by_property = AsyncMock(return_value=None)
+
+        should_create, existing, props = await apply_node_constraints(
+            node=node,
+            node_type="TacticDef",
+            node_constraints=constraints,
+            memory_graph=mock_memory_graph,
+            extracted_node_properties=extracted
+        )
+
+        assert should_create is False
+        assert existing is None
+        assert props is None
+
+    @pytest.mark.asyncio
+    async def test_link_only_allows_linking_existing(self, mock_memory_graph):
+        """Constraint with link_only=True should allow linking to existing node."""
+        from models.shared_types import NodeConstraint
+
+        # Verify link_only=True sets create="never"
+        constraint = NodeConstraint(link_only=True)
+        assert constraint.create == "never"
+
+        # Use dict format like other tests
+        constraints = [
+            {
+                "node_type": "TacticDef",
+                "create": "never",
+                "search": {"properties": [{"name": "id", "mode": "exact"}]}
+            }
+        ]
+
+        node = {"type": "TacticDef", "properties": {"id": "TA0005"}}
+        extracted = {"id": "TA0005", "name": "Defense Evasion"}
+
+        # mock_memory_graph fixture returns existing node for TA0005
+
+        should_create, existing, props = await apply_node_constraints(
+            node=node,
+            node_type="TacticDef",
+            node_constraints=constraints,
+            memory_graph=mock_memory_graph,
+            extracted_node_properties=extracted
+        )
+
+        assert should_create is False
+        assert existing is not None
+        assert existing["properties"]["id"] == "TA0005"

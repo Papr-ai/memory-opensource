@@ -55,6 +55,13 @@ NodeConstraint.for_controlled_vocabulary(
     ["email", PropertyMatch.semantic("name", 0.9)]
 )
 
+# Or use link_only shorthand directly
+NodeConstraint(
+    node_type="Person",
+    link_only=True,  # Equivalent to create="never"
+    search=SearchConfig(properties=["email", PropertyMatch.semantic("name", 0.9)])
+)
+
 # Update a specific node by ID
 NodeConstraint.for_update(
     "Task",
@@ -88,6 +95,7 @@ class NodeConstraint(BaseModel):
 
     # === CREATION ===
     create: Literal["auto", "never"] = "auto"
+    link_only: bool = False  # Shorthand for create="never" (controlled vocabulary)
 
     # === SELECTION (property-based matching) ===
     search: Optional[SearchConfig]  # Uses PropertyMatch list or string shorthand
@@ -95,6 +103,9 @@ class NodeConstraint(BaseModel):
     # === VALUES ===
     set: Optional[Dict[str, SetValue]]
 ```
+
+> **Note:** When `link_only=True`, the `create` field is automatically set to `"never"`.
+> This is equivalent to the `@link_only` decorator in schema definitions.
 
 ### SearchConfig (Property-Based Matching)
 
@@ -294,6 +305,60 @@ NodeConstraint(node_type="Task", ...)
 
 ---
 
+### `link_only` (Shorthand for Controlled Vocabulary)
+
+**Type:** `bool`
+**Default:** `False`
+**Description:** Shorthand for `create="never"`. When `True`, only links to existing nodes (controlled vocabulary).
+
+This is equivalent to the `@link_only` decorator in schema definitions.
+
+```python
+# These are equivalent:
+NodeConstraint(link_only=True)
+NodeConstraint(create="never")
+
+# At schema level with decorator:
+@node
+@link_only
+class TacticDef:
+    id: str = prop(search=exact())
+    name: str = prop(search=semantic(0.90))
+```
+
+**When to use `link_only`:**
+- Pre-populated reference data (MITRE tactics, categories, status codes)
+- External systems of record (users from IdP, products from catalog)
+- Controlled vocabularies where you never want to create new entries
+
+**Example:**
+```python
+# Using link_only shorthand
+UserNodeType(
+    name="TacticDef",
+    label="Tactic Definition",
+    properties={...},
+    link_only=True,  # Shorthand - creates constraint with create="never"
+    constraint=NodeConstraint(
+        search=SearchConfig(properties=[
+            PropertyMatch(name="id", mode="exact"),
+            PropertyMatch(name="name", mode="semantic", threshold=0.90)
+        ])
+    )
+)
+
+# Or directly on constraint
+NodeConstraint(
+    node_type="Person",
+    link_only=True,  # Equivalent to create="never"
+    search=SearchConfig(properties=[
+        PropertyMatch(name="email", mode="exact")
+    ])
+)
+```
+
+---
+
 ### `search` (Property-Based Matching)
 
 **Type:** `SearchConfig`
@@ -386,6 +451,7 @@ UserNodeType(
 ### Example 2: Schema Level - Controlled Vocabulary (Never Create)
 
 ```python
+# Option 1: Using create="never"
 UserNodeType(
     name="Person",
     label="Person",
@@ -401,6 +467,25 @@ UserNodeType(
             ]
         ),
         create="never"  # Controlled vocabulary
+    )
+)
+
+# Option 2: Using link_only shorthand (equivalent to above)
+UserNodeType(
+    name="Person",
+    label="Person",
+    properties={
+        "email": PropertyDefinition(type="string"),
+        "name": PropertyDefinition(type="string", required=True)
+    },
+    link_only=True,  # Shorthand - auto-creates constraint with create="never"
+    constraint=NodeConstraint(
+        search=SearchConfig(
+            properties=[
+                PropertyMatch(name="email", mode="exact"),
+                PropertyMatch(name="name", mode="semantic", threshold=0.90)
+            ]
+        )
     )
 )
 ```

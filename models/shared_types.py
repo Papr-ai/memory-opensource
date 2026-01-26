@@ -1284,6 +1284,13 @@ class NodeConstraint(BaseModel):
         description="'auto': Create if not found via search. 'never': Only link to existing nodes (controlled vocabulary)."
     )
 
+    # === LINK-ONLY SHORTHAND ===
+    link_only: bool = Field(
+        default=False,
+        description="Shorthand for create='never'. When True, only links to existing nodes (controlled vocabulary). "
+                   "Equivalent to @link_only decorator in schema definitions."
+    )
+
     # === NODE SELECTION (property-based matching) ===
     search: Optional[SearchConfig] = Field(
         default=None,
@@ -1444,6 +1451,13 @@ class NodeConstraint(BaseModel):
             )
 
         return v
+
+    @model_validator(mode='after')
+    def apply_link_only(self):
+        """If link_only=True, set create='never'."""
+        if self.link_only:
+            object.__setattr__(self, 'create', 'never')
+        return self
 
     # =========================================================================
     # Helper Methods
@@ -1655,6 +1669,13 @@ class EdgeConstraint(BaseModel):
                    "When 'never', edges to non-existing targets are skipped."
     )
 
+    # === LINK-ONLY SHORTHAND ===
+    link_only: bool = Field(
+        default=False,
+        description="Shorthand for create='never'. When True, only links to existing target nodes (controlled vocabulary). "
+                   "Equivalent to @link_only decorator in schema definitions."
+    )
+
     # === TARGET NODE SELECTION ===
     search: Optional[SearchConfig] = Field(
         default=None,
@@ -1768,6 +1789,13 @@ class EdgeConstraint(BaseModel):
             raise ValueError("'_not' operator requires a dictionary condition.")
 
         return v
+
+    @model_validator(mode='after')
+    def apply_link_only(self):
+        """If link_only=True, set create='never'."""
+        if self.link_only:
+            object.__setattr__(self, 'create', 'never')
+        return self
 
     # =========================================================================
     # Helper Methods
