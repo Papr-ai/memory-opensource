@@ -7208,6 +7208,8 @@ class MemoryGraph:
             List[ParseStoredMemory]: A list of final memory items after processing.
         """
         
+        fetch_source = env.get("MEMORY_FETCH_SOURCE", "mongo").lower()
+
         # Process memory IDs to handle both legacy and chunked formats
         base_memory_ids = set()  # Use set to avoid duplicates
         chunk_id_mapping = {}  # Map to track original chunked IDs
@@ -7231,65 +7233,323 @@ class MemoryGraph:
         all_memory_ids = list(set(memory_item_ids + processed_memory_ids))
 
         try:
-            # Only fetch from Parse Server (no Neo4j)
-            memory_class: str = "Memory"
-            parse_response = await self.fetch_parse_server_async(
-                session_token, 
-                all_memory_ids, 
-                processed_memory_ids, 
-                memory_class, 
+            if fetch_source == "mongo":
+                logger.info("Memory fetch source: mongo")
+                try:
+                    mongo_items = await self.fetch_memory_items_from_sources_mongo(
+                        memory_item_ids=all_memory_ids,
+                        user_id=user_id
+                    )
+                    return mongo_items
+                except Exception as mongo_error:
+                    logger.warning(f"Mongo fetch failed, falling back to Parse: {mongo_error}")
+                    memory_items_parse = await self._fetch_memory_items_from_parse(
+                        session_token=session_token,
+                        all_memory_ids=all_memory_ids,
+                        processed_memory_ids=processed_memory_ids,
+                        api_key=api_key
+                    )
+                    return memory_items_parse
+
+            if fetch_source == "compare":
+                logger.info("Memory fetch source: compare (parse vs mongo)")
+                parse_start = time.time()
+                memory_items_parse = await self._fetch_memory_items_from_parse(
+                    session_token=session_token,
+                    all_memory_ids=all_memory_ids,
+                    processed_memory_ids=processed_memory_ids,
+                    api_key=api_key
+                )
+                parse_duration_ms = (time.time() - parse_start) * 1000
+
+                mongo_start = time.time()
+                memory_items_mongo = await self.fetch_memory_items_from_sources_mongo(
+                    memory_item_ids=all_memory_ids,
+                    user_id=user_id
+                )
+                mongo_duration_ms = (time.time() - mongo_start) * 1000
+
+                parse_ids = {item.memoryId for item in memory_items_parse if item.memoryId}
+                mongo_ids = {item.memoryId for item in memory_items_mongo if item.memoryId}
+                missing_in_mongo = list(parse_ids - mongo_ids)
+                missing_in_parse = list(mongo_ids - parse_ids)
+
+                logger.info(
+                    "Memory fetch compare results - parse: %s items (%.2fms), mongo: %s items (%.2fms)",
+                    len(memory_items_parse),
+                    parse_duration_ms,
+                    len(memory_items_mongo),
+                    mongo_duration_ms,
+                )
+                logger.info(
+                    "Memory fetch compare - missing_in_mongo=%s, missing_in_parse=%s",
+                    missing_in_mongo[:10],
+                    missing_in_parse[:10],
+                )
+
+                # Return Parse results as source of truth while comparing.
+                return memory_items_parse
+
+            logger.info("Memory fetch source: parse")
+            memory_items_parse = await self._fetch_memory_items_from_parse(
+                session_token=session_token,
+                all_memory_ids=all_memory_ids,
+                processed_memory_ids=processed_memory_ids,
                 api_key=api_key
             )
+            return memory_items_parse
 
-            # Handle potential exceptions
-            if isinstance(parse_response, Exception):
-                logger.error(f"Parse Server query failed: {parse_response}")
-                return []
-
-            # Extract Parse Server results
-            memory_items_parse: List[ParseStoredMemory] = parse_response['results']
-            missing_memory_ids: List[str] = parse_response['missing_memory_ids']
-
-            logger.info(f'Parse Server fetched {len(memory_items_parse)} items.')
-            logger.info(f'Parse Server missing {len(missing_memory_ids)} items.')
-
-            # Since we're only using Parse Server, no need to normalize/merge with Neo4j
-            # Just use the Parse Server results directly
-            normalized_memory_items: List[ParseStoredMemory] = memory_items_parse
-            
-            # Process final items with chunk handling
-            final_memory_items: List[ParseStoredMemory] = []
-            for item in normalized_memory_items:
-                # Optionally, set matchingChunkIds if you want to indicate which chunks matched
-                if item.memoryChunkIds:
-                    matching_chunks = [
-                        chunk_id for chunk_id in item.memoryChunkIds 
-                        if chunk_id in memory_item_ids
-                    ]
-                    if matching_chunks:
-                        updated_item = item.model_copy()
-                        setattr(updated_item, 'matchingChunkIds', matching_chunks)
-                        final_memory_items.append(updated_item)
-                        continue
-                final_memory_items.append(item)
-
-            logger.info(f'Final Memory Items Count: {len(final_memory_items)}')
-
-            # Validation is handled by ParseStoredMemory model, but we can still log if needed
-            items_without_content = [
-                item.memoryId for item in final_memory_items 
-                if not item.content
-            ]
-            if items_without_content:
-                logger.error(f"Final memory items missing content: {items_without_content}")
-
-            logger.info(f'Final memory items: {final_memory_items}')
-
-            return final_memory_items
-        
         except Exception as e:
             logger.error(f"Error in fetch_memory_items_from_sources_async_fast: {e}")
             return []
+
+    async def _fetch_memory_items_from_parse(
+        self,
+        session_token: str,
+        all_memory_ids: List[str],
+        processed_memory_ids: List[str],
+        api_key: Optional[str] = None,
+    ) -> List[ParseStoredMemory]:
+        """Internal helper to fetch memory items from Parse and normalize."""
+        memory_class: str = "Memory"
+        parse_response = await self.fetch_parse_server_async(
+            session_token,
+            all_memory_ids,
+            processed_memory_ids,
+            memory_class,
+            api_key=api_key
+        )
+
+        if isinstance(parse_response, Exception):
+            logger.error(f"Parse Server query failed: {parse_response}")
+            return []
+
+        memory_items_parse: List[ParseStoredMemory] = parse_response['results']
+        missing_memory_ids: List[str] = parse_response['missing_memory_ids']
+
+        logger.info(f'Parse Server fetched {len(memory_items_parse)} items.')
+        logger.info(f'Parse Server missing {len(missing_memory_ids)} items.')
+
+        final_memory_items: List[ParseStoredMemory] = []
+        for item in memory_items_parse:
+            if item.memoryChunkIds:
+                matching_chunks = [
+                    chunk_id for chunk_id in item.memoryChunkIds
+                    if chunk_id in all_memory_ids
+                ]
+                if matching_chunks:
+                    updated_item = item.model_copy()
+                    setattr(updated_item, 'matchingChunkIds', matching_chunks)
+                    final_memory_items.append(updated_item)
+                    continue
+            final_memory_items.append(item)
+
+        logger.info(f'Final Memory Items Count: {len(final_memory_items)}')
+
+        items_without_content = [
+            item.memoryId for item in final_memory_items
+            if not item.content
+        ]
+        if items_without_content:
+            logger.error(f"Final memory items missing content: {items_without_content}")
+
+        return final_memory_items
+
+    async def fetch_memory_items_from_sources_mongo(
+        self,
+        memory_item_ids: List[str],
+        user_id: str
+    ) -> List[ParseStoredMemory]:
+        """
+        Fetch memory items directly from MongoDB (Parse database) and expand pointers.
+        Intended to mimic Parse Server response shape as closely as possible.
+        """
+        if self.db is None:
+            logger.warning("MongoDB not available; falling back to empty results")
+            return []
+
+        # Strip grouped suffixes to match Parse storage conventions
+        def strip_grouped_suffix(memory_id: str) -> str:
+            return re.sub(r'_grouped(?=_\d+$|$)', '', memory_id)
+
+        stripped_ids = [strip_grouped_suffix(mid) for mid in memory_item_ids]
+        unique_ids = list(set(stripped_ids))
+
+        # Query by memoryId or memoryChunkIds (and _id as safety)
+        query = {
+            "$or": [
+                {"memoryId": {"$in": unique_ids}},
+                {"memoryChunkIds": {"$in": unique_ids}},
+                {"_id": {"$in": unique_ids}},
+            ]
+        }
+
+        projection = {
+            "_id": 1,
+            "_created_at": 1,
+            "_updated_at": 1,
+            "_acl": 1,
+            "_p_user": 1,
+            "_p_workspace": 1,
+            "_p_post": 1,
+            "_p_postMessage": 1,
+            "_p_developerUser": 1,
+            "_p_organization": 1,
+            "_p_namespace": 1,
+            "content": 1,
+            "metadata": 1,
+            "customMetadata": 1,
+            "sourceType": 1,
+            "context": 1,
+            "title": 1,
+            "location": 1,
+            "emojiTags": 1,
+            "hierarchicalStructures": 1,
+            "type": 1,
+            "sourceUrl": 1,
+            "conversationId": 1,
+            "role": 1,
+            "category": 1,
+            "memoryId": 1,
+            "topics": 1,
+            "steps": 1,
+            "current_step": 1,
+            "memoryChunkIds": 1,
+            "external_user_read_access": 1,
+            "external_user_write_access": 1,
+            "user_read_access": 1,
+            "user_write_access": 1,
+            "workspace_read_access": 1,
+            "workspace_write_access": 1,
+            "role_read_access": 1,
+            "role_write_access": 1,
+            "namespace_read_access": 1,
+            "namespace_write_access": 1,
+            "organization_read_access": 1,
+            "organization_write_access": 1,
+        }
+
+        def _fetch_docs():
+            return list(self.db["Memory"].find(query, projection))
+
+        memory_docs = await asyncio.to_thread(_fetch_docs)
+
+        def parse_pointer(pointer_value: Optional[str]) -> Optional[Dict[str, Any]]:
+            if not pointer_value or not isinstance(pointer_value, str):
+                return None
+            if "$" not in pointer_value:
+                return None
+            class_name, object_id = pointer_value.split("$", 1)
+            return {"__type": "Pointer", "className": class_name, "objectId": object_id}
+
+        # Expand user pointers
+        user_ids: List[str] = []
+        for doc in memory_docs:
+            user_ptr = doc.get("_p_user")
+            if isinstance(user_ptr, str) and "$" in user_ptr:
+                _, object_id = user_ptr.split("$", 1)
+                user_ids.append(object_id)
+        user_ids = list(set(user_ids))
+
+        user_map: Dict[str, Dict[str, Any]] = {}
+        if user_ids:
+            def _fetch_users():
+                return list(
+                    self.db["_User"].find(
+                        {"_id": {"$in": user_ids}},
+                        {
+                            "_id": 1,
+                            "displayName": 1,
+                            "fullname": 1,
+                            "profileimage": 1,
+                            "title": 1,
+                            "isOnline": 1,
+                            "user_type": 1,
+                            "organization_id": 1,
+                            "developer_organization_id": 1,
+                            "external_id": 1,
+                        },
+                    )
+                )
+            user_docs = await asyncio.to_thread(_fetch_users)
+            for user_doc in user_docs:
+                user_map[user_doc["_id"]] = user_doc
+
+        results: List[ParseStoredMemory] = []
+        for doc in memory_docs:
+            user_pointer = None
+            user_ptr = parse_pointer(doc.get("_p_user"))
+            if user_ptr:
+                user_doc = user_map.get(user_ptr["objectId"])
+                if user_doc:
+                    user_pointer = {
+                        "__type": "Pointer",
+                        "className": "_User",
+                        "objectId": user_doc["_id"],
+                        "displayName": user_doc.get("displayName"),
+                        "fullname": user_doc.get("fullname"),
+                        "profileimage": user_doc.get("profileimage"),
+                        "title": user_doc.get("title"),
+                        "isOnline": user_doc.get("isOnline"),
+                    }
+                else:
+                    user_pointer = {
+                        "__type": "Pointer",
+                        "className": "_User",
+                        "objectId": user_ptr["objectId"],
+                    }
+
+            data = {
+                "objectId": str(doc.get("_id")),
+                "createdAt": doc.get("_created_at"),
+                "updatedAt": doc.get("_updated_at"),
+                "ACL": doc.get("_acl", {}) or {},
+                "content": doc.get("content") or "",
+                "metadata": doc.get("metadata") or {},
+                "customMetadata": doc.get("customMetadata"),
+                "sourceType": doc.get("sourceType", "papr"),
+                "context": doc.get("context") or [],
+                "title": doc.get("title"),
+                "location": doc.get("location"),
+                "emojiTags": doc.get("emojiTags") or [],
+                "hierarchicalStructures": doc.get("hierarchicalStructures") or "",
+                "type": doc.get("type") or "TextMemoryItem",
+                "sourceUrl": doc.get("sourceUrl") or "",
+                "conversationId": doc.get("conversationId") or "",
+                "role": doc.get("role"),
+                "category": doc.get("category"),
+                "memoryId": doc.get("memoryId") or str(doc.get("_id")),
+                "topics": doc.get("topics") or [],
+                "steps": doc.get("steps") or [],
+                "current_step": doc.get("current_step"),
+                "memoryChunkIds": doc.get("memoryChunkIds") or [],
+                "user": user_pointer,
+                "developerUser": parse_pointer(doc.get("_p_developerUser")),
+                "workspace": parse_pointer(doc.get("_p_workspace")),
+                "post": parse_pointer(doc.get("_p_post")),
+                "postMessage": parse_pointer(doc.get("_p_postMessage")),
+                "organization": parse_pointer(doc.get("_p_organization")),
+                "namespace": parse_pointer(doc.get("_p_namespace")),
+                "external_user_read_access": doc.get("external_user_read_access") or [],
+                "external_user_write_access": doc.get("external_user_write_access") or [],
+                "user_read_access": doc.get("user_read_access") or [],
+                "user_write_access": doc.get("user_write_access") or [],
+                "workspace_read_access": doc.get("workspace_read_access") or [],
+                "workspace_write_access": doc.get("workspace_write_access") or [],
+                "role_read_access": doc.get("role_read_access") or [],
+                "role_write_access": doc.get("role_write_access") or [],
+                "namespace_read_access": doc.get("namespace_read_access") or [],
+                "namespace_write_access": doc.get("namespace_write_access") or [],
+                "organization_read_access": doc.get("organization_read_access") or [],
+                "organization_write_access": doc.get("organization_write_access") or [],
+            }
+            try:
+                results.append(ParseStoredMemory.from_dict(data))
+            except Exception as e:
+                logger.error(f"Failed to parse Mongo memory doc {doc.get('_id')}: {e}")
+
+        logger.info(f'Mongo fetched {len(results)} items.')
+        return results
 
     async def get_pinecone_related_memories_async(self, query_embedding, acl_filter: dict, top_k=20):
         """
