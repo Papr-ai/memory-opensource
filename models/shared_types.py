@@ -1278,17 +1278,30 @@ class NodeConstraint(BaseModel):
                    "Complex: {'_and': [{'priority': 'high'}, {'_or': [{'status': 'active'}, {'urgent': true}]}]}"
     )
 
-    # === CREATION POLICY ===
-    create: Literal["auto", "never"] = Field(
-        default="auto",
-        description="'auto': Create if not found via search. 'never': Only link to existing nodes (controlled vocabulary)."
+    # === CREATION POLICY (renamed from auto/never to upsert/lookup) ===
+    create: Literal["upsert", "lookup", "auto", "never"] = Field(
+        default="upsert",
+        description="'upsert': Create if not found via search (default). "
+                   "'lookup': Only link to existing nodes (controlled vocabulary). "
+                   "Deprecated aliases: 'auto' -> 'upsert', 'never' -> 'lookup'."
     )
 
-    # === LINK-ONLY SHORTHAND ===
+    # === ON_MISS BEHAVIOR (explicit resolution policy) ===
+    on_miss: Optional[Literal["create", "ignore", "error"]] = Field(
+        default=None,
+        description="Explicit behavior when no match found via search. "
+                   "'create': create new node (same as upsert). "
+                   "'ignore': skip node creation (same as lookup). "
+                   "'error': raise error if node not found. "
+                   "If specified, overrides 'create' field."
+    )
+
+    # === LINK-ONLY SHORTHAND (DEPRECATED: Use create='lookup' instead) ===
     link_only: bool = Field(
         default=False,
-        description="Shorthand for create='never'. When True, only links to existing nodes (controlled vocabulary). "
-                   "Equivalent to @link_only decorator in schema definitions."
+        description="DEPRECATED: Use create='lookup' instead. "
+                   "Shorthand for create='lookup'. When True, only links to existing nodes (controlled vocabulary). "
+                   "Equivalent to @lookup decorator in schema definitions."
     )
 
     # === NODE SELECTION (property-based matching) ===
@@ -1453,10 +1466,37 @@ class NodeConstraint(BaseModel):
         return v
 
     @model_validator(mode='after')
-    def apply_link_only(self):
-        """If link_only=True, set create='never'."""
+    def apply_resolution_policy(self):
+        """Apply resolution policy based on create/on_miss/link_only fields.
+
+        Priority (highest to lowest):
+        1. on_miss (if specified, maps to create value)
+        2. link_only (if True, sets create='lookup')
+        3. create value with backwards compatibility mapping
+        """
+        # Backwards compatibility: map old values to new
+        create_mapping = {
+            "auto": "upsert",
+            "never": "lookup"
+        }
+
+        current_create = self.create
+
+        # Handle deprecated link_only
         if self.link_only:
-            object.__setattr__(self, 'create', 'never')
+            object.__setattr__(self, 'create', 'lookup')
+            return self
+
+        # on_miss overrides create if specified
+        if self.on_miss == "create":
+            object.__setattr__(self, 'create', 'upsert')
+        elif self.on_miss == "ignore":
+            object.__setattr__(self, 'create', 'lookup')
+        # on_miss="error" is handled in resolver - keeps current create value
+        elif current_create in create_mapping:
+            # Apply backwards compatibility mapping
+            object.__setattr__(self, 'create', create_mapping[current_create])
+
         return self
 
     # =========================================================================
@@ -1661,19 +1701,31 @@ class EdgeConstraint(BaseModel):
                    "Example: {'_and': [{'severity': 'high'}, {'_not': {'status': 'deprecated'}}]}"
     )
 
-    # === CREATION POLICY ===
-    create: Literal["auto", "never"] = Field(
-        default="auto",
-        description="'auto': Create target node if not found via search (default). "
-                   "'never': Only link to existing target nodes (controlled vocabulary). "
-                   "When 'never', edges to non-existing targets are skipped."
+    # === CREATION POLICY (renamed from auto/never to upsert/lookup) ===
+    create: Literal["upsert", "lookup", "auto", "never"] = Field(
+        default="upsert",
+        description="'upsert': Create target node if not found via search (default). "
+                   "'lookup': Only link to existing target nodes (controlled vocabulary). "
+                   "When 'lookup', edges to non-existing targets are skipped. "
+                   "Deprecated aliases: 'auto' -> 'upsert', 'never' -> 'lookup'."
     )
 
-    # === LINK-ONLY SHORTHAND ===
+    # === ON_MISS BEHAVIOR (explicit resolution policy) ===
+    on_miss: Optional[Literal["create", "ignore", "error"]] = Field(
+        default=None,
+        description="Explicit behavior when no target match found via search. "
+                   "'create': create new target node (same as upsert). "
+                   "'ignore': skip edge creation (same as lookup). "
+                   "'error': raise error if target not found. "
+                   "If specified, overrides 'create' field."
+    )
+
+    # === LINK-ONLY SHORTHAND (DEPRECATED: Use create='lookup' instead) ===
     link_only: bool = Field(
         default=False,
-        description="Shorthand for create='never'. When True, only links to existing target nodes (controlled vocabulary). "
-                   "Equivalent to @link_only decorator in schema definitions."
+        description="DEPRECATED: Use create='lookup' instead. "
+                   "Shorthand for create='lookup'. When True, only links to existing target nodes. "
+                   "Equivalent to @lookup decorator in schema definitions."
     )
 
     # === TARGET NODE SELECTION ===
@@ -1791,10 +1843,37 @@ class EdgeConstraint(BaseModel):
         return v
 
     @model_validator(mode='after')
-    def apply_link_only(self):
-        """If link_only=True, set create='never'."""
+    def apply_resolution_policy(self):
+        """Apply resolution policy based on create/on_miss/link_only fields.
+
+        Priority (highest to lowest):
+        1. on_miss (if specified, maps to create value)
+        2. link_only (if True, sets create='lookup')
+        3. create value with backwards compatibility mapping
+        """
+        # Backwards compatibility: map old values to new
+        create_mapping = {
+            "auto": "upsert",
+            "never": "lookup"
+        }
+
+        current_create = self.create
+
+        # Handle deprecated link_only
         if self.link_only:
-            object.__setattr__(self, 'create', 'never')
+            object.__setattr__(self, 'create', 'lookup')
+            return self
+
+        # on_miss overrides create if specified
+        if self.on_miss == "create":
+            object.__setattr__(self, 'create', 'upsert')
+        elif self.on_miss == "ignore":
+            object.__setattr__(self, 'create', 'lookup')
+        # on_miss="error" is handled in resolver - keeps current create value
+        elif current_create in create_mapping:
+            # Apply backwards compatibility mapping
+            object.__setattr__(self, 'create', create_mapping[current_create])
+
         return self
 
     # =========================================================================

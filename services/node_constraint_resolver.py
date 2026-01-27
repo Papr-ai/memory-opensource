@@ -66,7 +66,7 @@ async def apply_node_constraints(
         logger.debug(f"No constraint found for node {node_type}, allowing creation")
         return True, None, extracted_node_properties
 
-    logger.info(f"Applying node constraint for {node_type}: create={constraint.get('create', 'auto')}")
+    logger.info(f"Applying node constraint for {node_type}: create={constraint.get('create', 'upsert')}")
 
     # Evaluate 'when' condition if present
     if constraint.get("when"):
@@ -92,15 +92,33 @@ async def apply_node_constraints(
         if existing_node:
             logger.info(f"Found existing node for {node_type}")
 
-    # Apply create policy
-    create_policy = constraint.get("create", "auto")
-    if create_policy == "never":
+    # Apply create policy with backwards compatibility
+    create_policy = constraint.get("create", "upsert")
+
+    # Backwards compatibility: map old values to new
+    if create_policy == "auto":
+        create_policy = "upsert"
+    elif create_policy == "never":
+        create_policy = "lookup"
+
+    # Handle on_miss if specified (overrides create policy behavior)
+    on_miss = constraint.get("on_miss")
+
+    if create_policy == "lookup":
         if not existing_node:
-            # No existing node found and create='never' - skip node creation
-            logger.info(f"Node {node_type} skipped: create='never' and no existing node found")
+            # No existing node found and create='lookup' - check on_miss behavior
+            if on_miss == "error":
+                raise ValueError(f"Node {node_type} not found and on_miss='error'. "
+                               f"No existing node matched the search criteria.")
+            # Default lookup behavior: skip node creation
+            logger.info(f"Node {node_type} skipped: create='lookup' and no existing node found")
             return False, None, None
         # Existing node found - use it instead of creating
         return False, existing_node, None
+    elif on_miss == "error" and not existing_node:
+        # upsert with on_miss='error' should fail if not found (before creating)
+        raise ValueError(f"Node {node_type} not found and on_miss='error'. "
+                        f"No existing node matched the search criteria.")
 
     # Apply 'set' values to node properties
     final_properties = _apply_set_values(
@@ -479,10 +497,11 @@ def validate_node_constraints(node_constraints: List[Dict[str, Any]]) -> List[st
         if not constraint.get("node_type"):
             errors.append(f"{prefix}: node_type is required at memory level")
 
-        # Validate create value
-        create_value = constraint.get("create", "auto")
-        if create_value not in ("auto", "never"):
-            errors.append(f"{prefix}: create must be 'auto' or 'never', got '{create_value}'")
+        # Validate create value (including backwards-compatible values)
+        create_value = constraint.get("create", "upsert")
+        valid_create_values = ("upsert", "lookup", "auto", "never")
+        if create_value not in valid_create_values:
+            errors.append(f"{prefix}: create must be 'upsert' or 'lookup' (or deprecated 'auto'/'never'), got '{create_value}'")
 
         # Validate search config if present
         search = constraint.get("search")

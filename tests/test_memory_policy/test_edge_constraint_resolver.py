@@ -602,7 +602,7 @@ class TestValidateEdgeConstraints:
         errors = validate_edge_constraints(constraints)
 
         assert len(errors) == 1
-        assert "create must be 'auto' or 'never'" in errors[0]
+        assert "create must be 'upsert' or 'lookup'" in errors[0]
 
     def test_invalid_direction_value(self):
         """Invalid direction value should produce error."""
@@ -947,65 +947,98 @@ class TestDocumentedExamples:
         )
 
 
-class TestLinkOnlyShorthand:
-    """Test the link_only shorthand field for EdgeConstraint."""
+class TestResolutionPolicy:
+    """Test the resolution policy (@upsert/@lookup) for EdgeConstraint."""
 
-    def test_link_only_sets_create_never(self):
-        """link_only=True should set create='never'."""
+    def test_lookup_sets_create_lookup(self):
+        """create='lookup' should be the new controlled vocabulary mode."""
+        from models.shared_types import EdgeConstraint
+
+        constraint = EdgeConstraint(create="lookup")
+        assert constraint.create == "lookup"
+
+    def test_upsert_is_default(self):
+        """create='upsert' should be the default."""
+        from models.shared_types import EdgeConstraint
+
+        constraint = EdgeConstraint()
+        assert constraint.create == "upsert"
+
+    def test_backwards_compat_auto_maps_to_upsert(self):
+        """Deprecated create='auto' should map to 'upsert'."""
+        from models.shared_types import EdgeConstraint
+
+        constraint = EdgeConstraint(create="auto")
+        assert constraint.create == "upsert"
+
+    def test_backwards_compat_never_maps_to_lookup(self):
+        """Deprecated create='never' should map to 'lookup'."""
+        from models.shared_types import EdgeConstraint
+
+        constraint = EdgeConstraint(create="never")
+        assert constraint.create == "lookup"
+
+    def test_backwards_compat_link_only_maps_to_lookup(self):
+        """Deprecated link_only=True should set create='lookup'."""
         from models.shared_types import EdgeConstraint
 
         constraint = EdgeConstraint(link_only=True)
-        assert constraint.create == "never"
+        assert constraint.create == "lookup"
         assert constraint.link_only is True
 
-    def test_link_only_false_keeps_default_create(self):
-        """link_only=False should keep create='auto' (default)."""
+    def test_on_miss_create_sets_upsert(self):
+        """on_miss='create' should set create='upsert'."""
         from models.shared_types import EdgeConstraint
 
-        constraint = EdgeConstraint(link_only=False)
-        assert constraint.create == "auto"
-        assert constraint.link_only is False
+        constraint = EdgeConstraint(on_miss="create")
+        assert constraint.create == "upsert"
 
-    def test_link_only_overrides_explicit_create_auto(self):
-        """link_only=True should override explicit create='auto'."""
+    def test_on_miss_ignore_sets_lookup(self):
+        """on_miss='ignore' should set create='lookup'."""
         from models.shared_types import EdgeConstraint
 
-        # Even if create='auto' is explicitly set, link_only=True should override
-        constraint = EdgeConstraint(create="auto", link_only=True)
-        assert constraint.create == "never"
+        constraint = EdgeConstraint(on_miss="ignore")
+        assert constraint.create == "lookup"
 
-    def test_link_only_with_create_never(self):
-        """link_only=True with create='never' should work correctly."""
+    def test_on_miss_error_preserved(self):
+        """on_miss='error' should preserve create value (handled in resolver)."""
         from models.shared_types import EdgeConstraint
 
-        constraint = EdgeConstraint(create="never", link_only=True)
-        assert constraint.create == "never"
+        # Default upsert with on_miss=error
+        constraint = EdgeConstraint(on_miss="error")
+        assert constraint.create == "upsert"
+        assert constraint.on_miss == "error"
 
-    def test_link_only_with_search_config(self):
-        """link_only=True should work with search configuration."""
+        # Explicit lookup with on_miss=error
+        constraint2 = EdgeConstraint(create="lookup", on_miss="error")
+        assert constraint2.create == "lookup"
+        assert constraint2.on_miss == "error"
+
+    def test_lookup_with_search_config(self):
+        """create='lookup' should work with search configuration."""
         from models.shared_types import EdgeConstraint, SearchConfig, PropertyMatch
 
         constraint = EdgeConstraint(
             edge_type="MITIGATES",
             source_type="SecurityBehavior",
             target_type="TacticDef",
-            link_only=True,
+            create="lookup",
             search=SearchConfig(properties=[
                 PropertyMatch(name="name", mode="semantic", threshold=0.90)
             ])
         )
-        assert constraint.create == "never"
+        assert constraint.create == "lookup"
         assert constraint.edge_type == "MITIGATES"
         assert constraint.search is not None
 
-    def test_link_only_equivalent_to_for_controlled_vocabulary(self):
-        """link_only=True should produce same result as for_controlled_vocabulary."""
+    def test_lookup_equivalent_to_for_controlled_vocabulary(self):
+        """create='lookup' should produce same result as for_controlled_vocabulary."""
         from models.shared_types import EdgeConstraint, SearchConfig, PropertyMatch
 
-        # Using link_only
+        # Using create='lookup'
         constraint1 = EdgeConstraint(
             edge_type="MITIGATES",
-            link_only=True,
+            create="lookup",
             search=SearchConfig(properties=[
                 PropertyMatch(name="name", mode="semantic", threshold=0.90)
             ])
@@ -1017,17 +1050,17 @@ class TestLinkOnlyShorthand:
             target_search=[PropertyMatch(name="name", mode="semantic", threshold=0.90)]
         )
 
-        assert constraint1.create == constraint2.create == "never"
+        assert constraint1.create == constraint2.create == "lookup"
         assert constraint1.edge_type == constraint2.edge_type
 
     @pytest.mark.asyncio
-    async def test_link_only_blocks_edge_creation(self, mock_memory_graph):
-        """Constraint with link_only=True should block edge creation when target not found."""
+    async def test_lookup_blocks_edge_creation(self, mock_memory_graph):
+        """Constraint with create='lookup' should block edge creation when target not found."""
         from models.shared_types import EdgeConstraint
 
-        # Verify link_only=True sets create="never"
-        constraint = EdgeConstraint(link_only=True)
-        assert constraint.create == "never"
+        # Verify create="lookup" works
+        constraint = EdgeConstraint(create="lookup")
+        assert constraint.create == "lookup"
 
         # Use dict format like other tests (resolver expects dicts, not model objects)
         constraints = [
@@ -1035,7 +1068,7 @@ class TestLinkOnlyShorthand:
                 "edge_type": "MITIGATES",
                 "source_type": "SecurityBehavior",
                 "target_type": "TacticDef",
-                "create": "never",  # link_only=True is equivalent to this
+                "create": "lookup",
                 "search": {"properties": [{"name": "id", "mode": "exact"}]}
             }
         ]
@@ -1060,13 +1093,13 @@ class TestLinkOnlyShorthand:
         assert props is None
 
     @pytest.mark.asyncio
-    async def test_link_only_allows_linking_existing_target(self, mock_memory_graph):
-        """Constraint with link_only=True should allow linking to existing target."""
+    async def test_lookup_allows_linking_existing_target(self, mock_memory_graph):
+        """Constraint with create='lookup' should allow linking to existing target."""
         from models.shared_types import EdgeConstraint
 
-        # Verify link_only=True sets create="never"
-        constraint = EdgeConstraint(link_only=True)
-        assert constraint.create == "never"
+        # Verify create="lookup" works
+        constraint = EdgeConstraint(create="lookup")
+        assert constraint.create == "lookup"
 
         # Use dict format like other tests
         constraints = [
@@ -1074,7 +1107,7 @@ class TestLinkOnlyShorthand:
                 "edge_type": "MITIGATES",
                 "source_type": "SecurityBehavior",
                 "target_type": "TacticDef",
-                "create": "never",
+                "create": "lookup",
                 "search": {"properties": [{"name": "id", "mode": "exact"}]}
             }
         ]
@@ -1101,3 +1134,36 @@ class TestLinkOnlyShorthand:
         assert should_create is True
         assert final_target is not None
         assert final_target["properties"]["id"] == "TA0005"
+
+    @pytest.mark.asyncio
+    async def test_on_miss_error_raises_exception(self, mock_memory_graph):
+        """on_miss='error' should raise exception when no target found."""
+        constraints = [
+            {
+                "edge_type": "MITIGATES",
+                "source_type": "SecurityBehavior",
+                "target_type": "TacticDef",
+                "create": "lookup",
+                "on_miss": "error",
+                "search": {"properties": [{"name": "id", "mode": "exact"}]}
+            }
+        ]
+
+        source_node = {"type": "SecurityBehavior", "properties": {"id": "SB080"}}
+        target_node = {"type": "TacticDef", "properties": {"id": "TA9999"}}
+
+        # Mock returns None (no existing target)
+        mock_memory_graph.find_node_by_property = AsyncMock(return_value=None)
+
+        with pytest.raises(ValueError) as exc_info:
+            await apply_edge_constraints(
+                source_node=source_node,
+                target_node=target_node,
+                edge_type="MITIGATES",
+                edge_constraints=constraints,
+                memory_graph=mock_memory_graph,
+                extracted_edge_properties={}
+            )
+
+        assert "not found" in str(exc_info.value)
+        assert "on_miss='error'" in str(exc_info.value)

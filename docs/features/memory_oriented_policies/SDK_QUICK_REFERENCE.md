@@ -14,7 +14,7 @@ This guide shows how to define schema-level constraints using the Python SDK, fr
 
 | Feature | Purpose | Decorator | Field | Example |
 |---------|---------|-----------|-------|---------|
-| **Creation Policy** | Control if nodes can be created | `@link_only` / `@auto_create` | `create="never"` / `create="auto"` | Reference data vs dynamic entities |
+| **Resolution Policy** | Control if nodes can be created | `@lookup` / `@upsert` | `create="lookup"` / `create="upsert"` | Reference data vs dynamic entities |
 | **Search/Matching** | Define unique identifiers | `prop(search=...)` | `search.properties` | Match by email, semantic title |
 | **Conditional Logic** | Apply constraints conditionally | `@constraint(when=...)` | `when={...}` | Only for priority="high" |
 | **Property Values** | Set/override properties | `@constraint(set=...)` | `set={...}` | Auto-flag critical items |
@@ -23,13 +23,22 @@ This guide shows how to define schema-level constraints using the Python SDK, fr
 
 ## Feature Comparison
 
-### Creation Policy: `@link_only` vs `@auto_create`
+### Resolution Policy: `@lookup` vs `@upsert`
 
 | Decorator | Equivalent | Behavior | Use Case |
 |-----------|------------|----------|----------|
-| `@link_only` | `create="never"` | Only link to existing nodes | Pre-populated reference data (MITRE tactics, users from IdP) |
-| `@auto_create` | `create="auto"` | Create new if not found | Dynamic entities (conversations, actions, events) |
-| `@controlled_vocabulary` | `create="never"` | Alias for `@link_only` | Same as link_only, more descriptive name |
+| `@lookup` | `create="lookup"` | Only link to existing nodes | Pre-populated reference data (MITRE tactics, users from IdP) |
+| `@upsert` | `create="upsert"` | Create new if not found (default) | Dynamic entities (conversations, actions, events) |
+| `@resolve(on_miss="error")` | `on_miss="error"` | Fail if not found | Strict validation (required references) |
+
+**Migration from old API:**
+| Old | New |
+|-----|-----|
+| `@link_only` | `@lookup` |
+| `@auto_create` | `@upsert` |
+| `@controlled_vocabulary` | `@lookup` |
+| `create="never"` | `create="lookup"` |
+| `create="auto"` | `create="upsert"` |
 
 ### Search Modes
 
@@ -46,8 +55,9 @@ This guide shows how to define schema-level constraints using the Python SDK, fr
 | `when` | `Dict` | Conditional application | `{"priority": "high"}` |
 | `set` | `Dict` | Property values to apply | `{"flagged": True}` |
 | `search` | `SearchConfig` | How to find existing nodes | `properties=[exact("id")]` |
-| `create` | `"auto"` \| `"never"` | Creation policy | `"never"` for controlled vocab |
-| `link_only` | `bool` | Shorthand for `create="never"` | `True` |
+| `create` | `"upsert"` \| `"lookup"` | Resolution policy | `"lookup"` for controlled vocab |
+| `on_miss` | `"create"` \| `"ignore"` \| `"error"` | Explicit behavior when not found | `"error"` for strict mode |
+| `resolution_policy` | `"upsert"` \| `"lookup"` | Shorthand for `create` | `"lookup"` |
 
 ---
 
@@ -106,19 +116,19 @@ class ProjectSchema:
 
 ---
 
-### Level 3: Add Creation Policy (Controlled Vocabulary)
+### Level 3: Add Resolution Policy (Controlled Vocabulary)
 
 Control which node types can create new entries.
 
 ```python
 from papr.sdk import schema, node, prop, exact, semantic
-from papr.sdk import link_only, auto_create  # Creation policy decorators
+from papr.sdk import lookup, upsert  # Resolution policy decorators
 
 @schema("project_with_policies")
 class ProjectSchema:
 
     @node
-    @auto_create  # Can create new tasks
+    @upsert  # Can create new tasks (default)
     class Task:
         id: str = prop(search=exact())
         title: str = prop(required=True, search=semantic(0.85))
@@ -126,23 +136,23 @@ class ProjectSchema:
         priority: Optional[str] = prop()
 
     @node
-    @link_only  # NEVER create - only link to existing people
+    @lookup  # NEVER create - only link to existing people
     class Person:
         email: str = prop(search=exact())
         name: str = prop(required=True, search=semantic(0.90))
         role: Optional[str] = prop()
 
     @node
-    @link_only  # Pre-loaded categories
+    @lookup  # Pre-loaded categories
     class Category:
         id: str = prop(search=exact())
         name: str = prop(search=semantic(0.85))
 ```
 
 **Behavior:**
-- Task: Search, create if not found (`@auto_create`)
-- Person: Search, skip if not found (`@link_only`)
-- Category: Search, skip if not found (`@link_only`)
+- Task: Search, create if not found (`@upsert`)
+- Person: Search, skip if not found (`@lookup`)
+- Category: Search, skip if not found (`@lookup`)
 
 ---
 
@@ -152,14 +162,14 @@ Apply constraints only when conditions match.
 
 ```python
 from papr.sdk import schema, node, prop, exact, semantic, constraint
-from papr.sdk import link_only, auto_create
+from papr.sdk import lookup, upsert
 from papr.sdk import And, Or, Not  # Logical operators
 
 @schema("project_with_conditions")
 class ProjectSchema:
 
     @node
-    @auto_create
+    @upsert
     @constraint(
         when={"priority": "critical"}  # Only apply to critical tasks
     )
@@ -172,7 +182,7 @@ class ProjectSchema:
         sla_hours: Optional[int] = prop()
 
     @node
-    @link_only
+    @lookup
     @constraint(
         when={
             "_and": [
@@ -200,14 +210,14 @@ Automatically set property values when constraints apply.
 
 ```python
 from papr.sdk import schema, node, prop, exact, semantic, constraint
-from papr.sdk import link_only, auto_create
+from papr.sdk import lookup, upsert
 from papr.sdk import Auto  # For LLM extraction
 
 @schema("project_full_policies")
 class ProjectSchema:
 
     @node
-    @auto_create
+    @upsert
     @constraint(
         when={"priority": "critical"},
         set={
@@ -226,7 +236,7 @@ class ProjectSchema:
         reviewed_by: Optional[str] = prop()
 
     @node
-    @link_only
+    @lookup
     @constraint(
         when={"role": "engineer"},
         set={
@@ -255,7 +265,7 @@ Schema defines defaults. Memory requests can override per-call.
 ### Override Example
 
 ```python
-# Schema defines Person as link_only (never create)
+# Schema defines Person as lookup (never create)
 # But for this specific memory, we want to create if not found
 
 await client.add_memory(
@@ -265,7 +275,7 @@ await client.add_memory(
         node_constraints=[
             NodeConstraint(
                 node_type="Person",
-                create="auto",  # Override: allow creation for this memory
+                create="upsert",  # Override: allow creation for this memory
                 search=SearchConfig(properties=[
                     PropertyMatch(name="name", mode="semantic", threshold=0.95)
                 ]),
@@ -308,7 +318,7 @@ await client.add_memory(
 
 ```python
 from papr.sdk import schema, node, edge, prop, exact, semantic, constraint
-from papr.sdk import link_only, auto_create, Auto
+from papr.sdk import lookup, upsert, Auto
 from typing import Optional
 from datetime import datetime
 
@@ -321,7 +331,7 @@ class SecuritySchema:
     # ═══════════════════════════════════════════════════════════════
 
     @node
-    @link_only
+    @lookup
     class TacticDef:
         """MITRE ATT&CK tactics - pre-loaded reference data."""
         id: str = prop(search=exact())           # TA0001, TA0043
@@ -329,7 +339,7 @@ class SecuritySchema:
         severity: Optional[str] = prop()
 
     @node
-    @link_only
+    @lookup
     @constraint(
         when={"category": "access_control"},
         set={"priority": "high"}
@@ -346,7 +356,7 @@ class SecuritySchema:
     # ═══════════════════════════════════════════════════════════════
 
     @node
-    @auto_create
+    @upsert
     class Conversation:
         """Call session - created per transcript."""
         call_id: str = prop(required=True, search=exact())
@@ -354,7 +364,7 @@ class SecuritySchema:
         risk_level: Optional[str] = prop()
 
     @node
-    @auto_create
+    @upsert
     @constraint(
         when={"severity": "critical"},
         set={
@@ -380,14 +390,14 @@ class SecuritySchema:
     maps_to = edge(
         DetectedTactic >> TacticDef,
         search=(TacticDef.id.exact(), TacticDef.name.semantic(0.90)),
-        create="never"  # Only link to existing tactics
+        create="lookup"  # Only link to existing tactics
     )
 
     # SecurityBehavior mitigates TacticDef
     mitigates = edge(
         SecurityBehavior >> TacticDef,
         search=(TacticDef.id.exact(), TacticDef.name.semantic(0.90)),
-        create="never"
+        create="lookup"
     )
 ```
 
@@ -406,10 +416,10 @@ await client.add_memory(
     """,
     external_user_id="call_analyzer"
     # No policy needed! Schema defines:
-    # - TacticDef: link_only (matches "Defense Evasion")
-    # - SecurityBehavior: link_only (matches "Verify Identity")
-    # - Conversation: auto_create (new call session)
-    # - DetectedTactic: auto_create with flagging if critical
+    # - TacticDef: lookup (matches "Defense Evasion")
+    # - SecurityBehavior: lookup (matches "Verify Identity")
+    # - Conversation: upsert (new call session)
+    # - DetectedTactic: upsert with flagging if critical
 )
 ```
 
@@ -419,8 +429,9 @@ await client.add_memory(
 
 | Scenario | Solution |
 |----------|----------|
-| Pre-populated reference data (users, categories, tactics) | `@link_only` + `search=exact()` |
-| Dynamic entities created from content | `@auto_create` |
+| Pre-populated reference data (users, categories, tactics) | `@lookup` + `search=exact()` |
+| Dynamic entities created from content | `@upsert` |
+| Strict validation (must exist) | `@resolve(on_miss="error")` |
 | Deduplication by unique ID | `prop(search=exact())` |
 | Deduplication by similar name/title | `prop(search=semantic(0.85))` |
 | Different behavior for specific values | `@constraint(when={...})` |
@@ -432,10 +443,15 @@ await client.add_memory(
 ## Decorator Quick Reference
 
 ```python
-# Creation policy
-@link_only              # Never create (controlled vocabulary)
-@auto_create            # Create if not found (default)
-@controlled_vocabulary  # Alias for @link_only
+# Resolution policy
+@lookup                 # Never create (controlled vocabulary)
+@upsert                 # Create if not found (default)
+@resolve(on_miss="error")  # Fail if not found (strict validation)
+
+# Deprecated (still supported for backwards compatibility)
+@link_only              # Use @lookup instead
+@auto_create            # Use @upsert instead
+@controlled_vocabulary  # Use @lookup instead
 
 # Constraints with conditions and values
 @constraint(

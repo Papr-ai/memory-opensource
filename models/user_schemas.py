@@ -113,19 +113,30 @@ class UserNodeType(BaseModel):
         default=None,
         description="Default constraint for this node type. Defines: "
                    "1. search.properties - unique identifiers and how to match them "
-                   "2. create - 'auto' (create if not found) or 'never' (controlled vocabulary) "
+                   "2. create - 'upsert' (create if not found) or 'lookup' (controlled vocabulary) "
                    "3. when - conditional application with logical operators "
                    "4. set - default property values. "
                    "Note: node_type is implicit (taken from this UserNodeType.name)."
     )
 
-    # Link-only shorthand (equivalent to @link_only decorator)
+    # Resolution policy shorthand (equivalent to @upsert/@lookup decorator)
+    resolution_policy: Literal["upsert", "lookup"] = Field(
+        default="upsert",
+        description="Shorthand for constraint.create. "
+                   "'upsert': Create if not found (default). "
+                   "'lookup': Only link to existing nodes (controlled vocabulary). "
+                   "Equivalent to @upsert/@lookup decorators. If constraint is also provided, "
+                   "resolution_policy will set constraint.create accordingly."
+    )
+
+    # Link-only shorthand (DEPRECATED: Use resolution_policy='lookup' instead)
     link_only: bool = Field(
         default=False,
-        description="Shorthand for constraint with create='never'. "
+        description="DEPRECATED: Use resolution_policy='lookup' instead. "
+                   "Shorthand for constraint with create='lookup'. "
                    "When True, only links to existing nodes (controlled vocabulary). "
-                   "Equivalent to @link_only decorator. If constraint is also provided, "
-                   "link_only=True will override constraint.create to 'never'."
+                   "Equivalent to @lookup decorator. If constraint is also provided, "
+                   "link_only=True will override constraint.create to 'lookup'."
     )
 
     # Visual/UI properties
@@ -162,16 +173,22 @@ class UserNodeType(BaseModel):
         return v
 
     def model_post_init(self, __context):
-        """Apply link_only to constraint after initialization."""
+        """Apply resolution_policy and link_only to constraint after initialization."""
+        # Import here to avoid circular dependency issues
+        from models.shared_types import NodeConstraint
+
+        # Handle deprecated link_only (takes precedence for backwards compatibility)
         if self.link_only:
-            # Import here to avoid circular dependency issues
-            from models.shared_types import NodeConstraint
+            object.__setattr__(self, 'resolution_policy', 'lookup')
+
+        # Apply resolution_policy to constraint
+        if self.resolution_policy == "lookup":
             if self.constraint is None:
-                # Create a new constraint with create='never'
-                object.__setattr__(self, 'constraint', NodeConstraint(create="never"))
+                # Create a new constraint with create='lookup'
+                object.__setattr__(self, 'constraint', NodeConstraint(create="lookup"))
             else:
                 # Override the existing constraint's create field
-                object.__setattr__(self.constraint, 'create', 'never')
+                object.__setattr__(self.constraint, 'create', 'lookup')
 
 
 class UserRelationshipType(BaseModel):
@@ -216,19 +233,30 @@ class UserRelationshipType(BaseModel):
         default=None,
         description="Default constraint for this relationship type. Defines: "
                    "1. search.properties - how to find existing target nodes "
-                   "2. create - 'auto' (create if not found) or 'never' (controlled vocabulary) "
+                   "2. create - 'upsert' (create if not found) or 'lookup' (controlled vocabulary) "
                    "3. when - conditional application with logical operators "
                    "4. set - default edge property values. "
                    "Note: edge_type is implicit (taken from this UserRelationshipType.name)."
     )
 
-    # Link-only shorthand (equivalent to @link_only decorator)
+    # Resolution policy shorthand (equivalent to @upsert/@lookup decorator)
+    resolution_policy: Literal["upsert", "lookup"] = Field(
+        default="upsert",
+        description="Shorthand for constraint.create. "
+                   "'upsert': Create target if not found (default). "
+                   "'lookup': Only link to existing targets (controlled vocabulary). "
+                   "Equivalent to @upsert/@lookup decorators. If constraint is also provided, "
+                   "resolution_policy will set constraint.create accordingly."
+    )
+
+    # Link-only shorthand (DEPRECATED: Use resolution_policy='lookup' instead)
     link_only: bool = Field(
         default=False,
-        description="Shorthand for constraint with create='never'. "
+        description="DEPRECATED: Use resolution_policy='lookup' instead. "
+                   "Shorthand for constraint with create='lookup'. "
                    "When True, only links to existing target nodes (controlled vocabulary). "
-                   "Equivalent to @link_only decorator. If constraint is also provided, "
-                   "link_only=True will override constraint.create to 'never'."
+                   "Equivalent to @lookup decorator. If constraint is also provided, "
+                   "link_only=True will override constraint.create to 'lookup'."
     )
 
     # Visual/UI properties
@@ -237,16 +265,22 @@ class UserRelationshipType(BaseModel):
     model_config = ConfigDict(extra='forbid')
 
     def model_post_init(self, __context):
-        """Apply link_only to constraint after initialization."""
+        """Apply resolution_policy and link_only to constraint after initialization."""
+        # Import here to avoid circular dependency issues
+        from models.shared_types import EdgeConstraint
+
+        # Handle deprecated link_only (takes precedence for backwards compatibility)
         if self.link_only:
-            # Import here to avoid circular dependency issues
-            from models.shared_types import EdgeConstraint
+            object.__setattr__(self, 'resolution_policy', 'lookup')
+
+        # Apply resolution_policy to constraint
+        if self.resolution_policy == "lookup":
             if self.constraint is None:
-                # Create a new constraint with create='never'
-                object.__setattr__(self, 'constraint', EdgeConstraint(create="never"))
+                # Create a new constraint with create='lookup'
+                object.__setattr__(self, 'constraint', EdgeConstraint(create="lookup"))
             else:
                 # Override the existing constraint's create field
-                object.__setattr__(self.constraint, 'create', 'never')
+                object.__setattr__(self.constraint, 'create', 'lookup')
 
 
 class SchemaStatus(str, Enum):

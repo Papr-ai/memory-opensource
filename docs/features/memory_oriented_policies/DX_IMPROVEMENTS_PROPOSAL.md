@@ -33,12 +33,12 @@ Developers have **two distinct needs**:
 | `"Task:title~auth bug"` | `...PropertyMatch(name="title", mode="semantic", value="auth bug")...` |
 | `{"Task:title": {"set": {...}}}` | `NodeConstraint(..., set={...})` |
 | `{"Task:title": {"when": {...}}}` | `NodeConstraint(..., when={...})` |
-| `{"Task:title": {"create": "never"}}` | `NodeConstraint(..., create="never")` |
-| `{"Task:title": {"link_only": true}}` | `NodeConstraint(..., link_only=True)` ≡ `create="never"` |
+| `{"Task:title": {"create": "never"}}` | `NodeConstraint(..., create="lookup")` |
+| `{"Task:title": {"link_only": true}}` | `NodeConstraint(..., link_only=True)` ≡ `create="lookup"` |
 
 ### Shorthand: `link_only` Field
 
-The `link_only` field is a shorthand for `create="never"`:
+The `link_only` field is a shorthand for `create="lookup"`:
 
 ```python
 # These are equivalent:
@@ -50,11 +50,11 @@ UserNodeType(name="Person", link_only=True, ...)  # Shorthand field on UserNodeT
 
 # At schema level (class-based decorators):
 @node
-@link_only  # Decorator equivalent
+@lookup  # Decorator equivalent
 class Person: ...
 
 @node
-@controlled_vocabulary  # Alias for @link_only
+@lookup  # Alias for @lookup
 class Person: ...
 ```
 
@@ -79,7 +79,7 @@ schema = UserGraphSchema(
         "SecurityPolicy": UserNodeType(
             name="SecurityPolicy",
             properties={"name": PropertyDefinition(type="string")},
-            link_only=True,  # Shorthand for create="never" - controlled vocabulary
+            link_only=True,  # Shorthand for create="lookup" - controlled vocabulary
             constraint=NodeConstraint(
                 search=SearchConfig(properties=[
                     PropertyMatch.semantic("name", 0.85)
@@ -89,7 +89,7 @@ schema = UserGraphSchema(
         "User": UserNodeType(
             name="User",
             properties={"username": PropertyDefinition(type="string")},
-            constraint=NodeConstraint(create="auto")  # Can create new users
+            constraint=NodeConstraint(create="upsert")  # Can create new users
         )
     }
 )
@@ -109,8 +109,8 @@ await client.add_memory(
 1. LLM reads content, sees schema has SecurityPolicy and User
 2. LLM extracts: `SecurityPolicy(name="WAF policy")`, `User(username="john_doe")`
 3. System applies schema constraints:
-   - SecurityPolicy: `create="never"` → search for existing, link if found, skip if not
-   - User: `create="auto"` → search for existing, create if not found
+   - SecurityPolicy: `create="lookup"` → search for existing, link if found, skip if not
+   - User: `create="upsert"` → search for existing, create if not found
 4. Memory is linked to matched/created entities
 
 **Developer doesn't need to specify anything about extraction or policies!**
@@ -168,7 +168,7 @@ schema = UserGraphSchema(
                     PropertyMatch(name="id", mode="exact"),
                     PropertyMatch(name="title", mode="semantic", threshold=0.85)
                 ]),
-                create="auto"
+                create="upsert"
             )
         ),
         "Person": UserNodeType(
@@ -177,7 +177,7 @@ schema = UserGraphSchema(
                 "email": PropertyDefinition(type="string"),
                 "name": PropertyDefinition(type="string", required=True)
             },
-            link_only=True,  # Shorthand for create="never" - controlled vocabulary
+            link_only=True,  # Shorthand for create="lookup" - controlled vocabulary
             constraint=NodeConstraint(
                 search=SearchConfig(properties=[
                     PropertyMatch(name="email", mode="exact"),
@@ -209,11 +209,11 @@ await client.add_memory(
             ),
             NodeConstraint(
                 node_type="Person",
-                link_only=True,  # Shorthand for create="never"
+                link_only=True,  # Shorthand for create="lookup"
                 search=SearchConfig(
                     properties=[PropertyMatch(name="name", mode="semantic")]
                 ),
-                create="never"
+                create="lookup"
             )
         ]
     )
@@ -285,7 +285,7 @@ memory_policy=MemoryPolicy(
         NodeConstraint(
             node_type="Person",
             search=SearchConfig(properties=[PropertyMatch(name="email", mode="exact")]),
-            create="never"
+            create="lookup"
         )
     ]
 )
@@ -512,7 +512,7 @@ schema = UserGraphSchema(
                 "category": PropertyDefinition(type="string")
             },
             constraint=NodeConstraint(
-                create="never",  # Controlled vocabulary
+                create="lookup",  # Controlled vocabulary
                 search=SearchConfig(properties=[
                     PropertyMatch.semantic("name", 0.85)
                 ])
@@ -525,7 +525,7 @@ schema = UserGraphSchema(
                 "role": PropertyDefinition(type="string")
             },
             constraint=NodeConstraint(
-                create="auto",
+                create="upsert",
                 search=SearchConfig(properties=[
                     PropertyMatch.exact("username")
                 ])
@@ -538,7 +538,7 @@ schema = UserGraphSchema(
                 "severity": PropertyDefinition(type="string"),
                 "timestamp": PropertyDefinition(type="datetime")
             },
-            constraint=NodeConstraint(create="auto")
+            constraint=NodeConstraint(create="upsert")
         )
     }
 )
@@ -560,9 +560,9 @@ await client.add_memory(
 # - Violation(type="SQL injection")
 
 # Schema applies:
-# - User: create="auto" → creates if not exists
-# - SecurityPolicy: create="never" → searches, links if found, skips if not
-# - Violation: create="auto" → creates new violation record
+# - User: create="upsert" → creates if not exists
+# - SecurityPolicy: create="lookup" → searches, links if found, skips if not
+# - Violation: create="upsert" → creates new violation record
 ```
 
 ### With Policy Override (Update Severity)
@@ -634,16 +634,16 @@ await client.add_memory(
 │ link_to={"SecurityPolicy:name": {"create": "never"}}             │
 │ Expands to: NodeConstraint(node_type="SecurityPolicy",            │
 │   search=SearchConfig(properties=[PropertyMatch("name", "semantic")]),
-│   create="never")                                                 │
+│   create="lookup")                                                 │
 └──────────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌──────────────────────────────────────────────────────────────────┐
 │ STEP 3: Merge with Schema Constraints                             │
 │                                                                   │
-│ Schema: SecurityPolicy.create="never"                             │
-│ Request: SecurityPolicy.create="never" (confirms)                │
-│ Result: SecurityPolicy.create="never"                             │
+│ Schema: SecurityPolicy.create="lookup"                             │
+│ Request: SecurityPolicy.create="lookup" (confirms)                │
+│ Result: SecurityPolicy.create="lookup"                             │
 └──────────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -664,17 +664,17 @@ await client.add_memory(
 │ STEP 5: Apply Policies Per Entity                                 │
 │                                                                   │
 │ User:                                                             │
-│   - Policy: create="auto", search.exact("username")              │
+│   - Policy: create="upsert", search.exact("username")              │
 │   - Action: Search for username="john_doe"                        │
 │   - Result: Not found → CREATE new User node                      │
 │                                                                   │
 │ SecurityPolicy:                                                   │
-│   - Policy: create="never", search.semantic("name", 0.85)        │
+│   - Policy: create="lookup", search.semantic("name", 0.85)        │
 │   - Action: Semantic search for "WAF"                             │
 │   - Result: Found "WAF Policy" (0.91) → LINK to existing         │
 │                                                                   │
 │ Violation:                                                        │
-│   - Policy: create="auto"                                        │
+│   - Policy: create="upsert"                                        │
 │   - Action: CREATE new Violation node                             │
 └──────────────────────────────────────────────────────────────────┘
                               │
@@ -1233,7 +1233,7 @@ class ProjectManagementSchema:
         belongs_to = edge(to="Project")
 
     @node
-    @controlled_vocabulary  # create="never" (or use @link_only - they're equivalent)
+    @lookup  # create="lookup" (or use @lookup - they're equivalent)
     class Person:
         """Person entity - controlled vocabulary."""
         email: str = prop(search=exact())
@@ -1316,7 +1316,7 @@ schema = Schema(
                 Property("assignee", type="string"),
             ],
             constraint=Constraint(
-                create="auto",
+                create="upsert",
                 search=Search([
                     Match.exact("id"),              # Try exact ID first
                     Match.semantic("title", 0.85)   # Then semantic title
@@ -1333,7 +1333,7 @@ schema = Schema(
                 Property("role", type="string"),
             ],
             constraint=Constraint(
-                create="never",  # Controlled vocabulary
+                create="lookup",  # Controlled vocabulary
                 search=Search([
                     Match.exact("email"),           # Try exact email first
                     Match.semantic("name", 0.90)    # Then semantic name (high threshold)
@@ -1350,7 +1350,7 @@ schema = Schema(
                 Property("status", type="string"),
             ],
             constraint=Constraint(
-                create="auto",
+                create="upsert",
                 search=Search([Match.semantic("name", 0.85)])
             )
         ),
@@ -1373,7 +1373,7 @@ await client.add_memory(
 # What happens:
 # 1. LLM extracts: Task(title="authentication bug fix"), Person(name="John")
 # 2. Task: search by title (semantic 0.85) → found → link
-# 3. Person: search by name (semantic 0.90) → found → link (create="never" prevents new)
+# 3. Person: search by name (semantic 0.90) → found → link (create="lookup" prevents new)
 ```
 
 #### Step 3: Memory-Level Override with `link` (Type-Safe)
@@ -1463,7 +1463,7 @@ security_schema = Schema(
                 Property("severity", type="string", enum=["low", "medium", "high", "critical"]),
             ],
             constraint=Constraint(
-                create="never",  # NEVER create - these are pre-defined compliance rules
+                create="lookup",  # NEVER create - these are pre-defined compliance rules
                 search=Search([
                     Match.exact("id"),
                     Match.semantic("name", 0.85),
@@ -1481,7 +1481,7 @@ security_schema = Schema(
                 Property("department", type="string"),
             ],
             constraint=Constraint(
-                create="auto",
+                create="upsert",
                 search=Search([Match.exact("username")])
             )
         ),
@@ -1496,7 +1496,7 @@ security_schema = Schema(
                 Property("resolved", type="boolean"),
             ],
             constraint=Constraint(
-                create="auto",
+                create="upsert",
                 search=Search([])  # No search - always create new
             )
         ),
@@ -1510,7 +1510,7 @@ security_schema = Schema(
                 Property("agent_id", type="string"),
                 Property("timestamp", type="datetime"),
             ],
-            constraint=Constraint(create="auto")
+            constraint=Constraint(create="upsert")
         ),
     ]
 )
@@ -1531,8 +1531,8 @@ await client.add_memory(
 
 # What happens:
 # 1. LLM extracts: SecurityBehavior(name="data protection protocol"), User(...)
-# 2. SecurityBehavior: create="never" → searches existing rules → links if found
-# 3. User: create="auto" → creates if new
+# 2. SecurityBehavior: create="lookup" → searches existing rules → links if found
+# 3. User: create="upsert" → creates if new
 ```
 
 **Memory-Level Override - Force Values:**
@@ -1650,7 +1650,7 @@ await client.add_memory(
 | Capability | Schema Level | Memory Level Override |
 |------------|--------------|----------------------|
 | Search strategy | `search=Search([Match...])` | `link={Task.title: {...}}` |
-| Create policy | `create="auto"` or `"never"` | `{"create": "never"}` |
+| Create policy | `create="upsert"` or `"never"` | `{"create": "never"}` |
 | Set properties | Not available | `{"set": {"status": "done"}}` |
 | Conditional | Not available | `{"when": {"priority": "high"}}` |
 
@@ -1679,7 +1679,7 @@ schema = Schema(
             name="Task",  # ← This becomes the implicit node_type
             constraint=Constraint(
                 # node_type NOT needed here - implicit from parent
-                create="auto"
+                create="upsert"
             )
         )
     ]
@@ -1716,14 +1716,14 @@ from papr import Constraint
 NodeType(
     name="Task",
     constraint=Constraint(
-        create="auto"  # Create new node if no match found (default)
+        create="upsert"  # Create new node if no match found (default)
     )
 )
 
 NodeType(
     name="Person",
     constraint=Constraint(
-        create="never"  # Only link to existing - controlled vocabulary
+        create="lookup"  # Only link to existing - controlled vocabulary
     )
 )
 
@@ -1761,7 +1761,7 @@ NodeType(
     name="Task",
     constraint=Constraint(
         when={"priority": "high"},  # Only apply to high-priority tasks
-        create="never"
+        create="lookup"
     )
 )
 
@@ -1775,7 +1775,7 @@ NodeType(
                 {"status": "active"}
             ]
         },
-        create="never"
+        create="lookup"
     )
 )
 
@@ -1789,7 +1789,7 @@ NodeType(
                 {"status": "pending"}
             ]
         },
-        create="auto"
+        create="upsert"
     )
 )
 
@@ -1800,7 +1800,7 @@ NodeType(
         when={
             "_not": {"status": "completed"}
         },
-        create="auto"
+        create="upsert"
     )
 )
 
@@ -1819,7 +1819,7 @@ NodeType(
                 }
             ]
         },
-        create="never"
+        create="lookup"
     )
 )
 
@@ -2111,7 +2111,7 @@ constraint = Constraint.for_controlled_vocabulary(
 )
 # Equivalent to:
 constraint = Constraint(
-    create="never",
+    create="lookup",
     search=Search([
         Match.exact("email"),
         Match.semantic("name", 0.9)
@@ -2173,7 +2173,7 @@ schema = Schema(
                 Property("notes", type="string"),
             ],
             constraint=Constraint(
-                create="auto",
+                create="upsert",
                 search=Search([
                     Match.exact("id"),
                     Match.semantic("title", 0.85)
@@ -2191,7 +2191,7 @@ schema = Schema(
                 Property("department", type="string"),
             ],
             constraint=Constraint(
-                create="never",  # Controlled vocabulary
+                create="lookup",  # Controlled vocabulary
                 search=Search([
                     Match.exact("email"),
                     Match.semantic("name", 0.90)
@@ -2209,7 +2209,7 @@ schema = Schema(
                 Property("deadline", type="datetime"),
             ],
             constraint=Constraint(
-                create="auto",
+                create="upsert",
                 search=Search([
                     Match.exact("id"),
                     Match.semantic("name", 0.85)
@@ -2367,7 +2367,7 @@ compliance_schema = Schema(
                 Property("regulation", type="string"),  # GDPR, HIPAA, SOC2, etc.
             ],
             constraint=Constraint(
-                create="never",  # CRITICAL: Never create - these are pre-defined
+                create="lookup",  # CRITICAL: Never create - these are pre-defined
                 search=Search([
                     Match.exact("id"),
                     Match.semantic("name", 0.85),
@@ -2390,7 +2390,7 @@ compliance_schema = Schema(
                 Property("agent_id", type="string"),
             ],
             constraint=Constraint(
-                create="auto",
+                create="upsert",
                 search=Search([])  # Empty = always create new
             )
         ),
@@ -2405,7 +2405,7 @@ compliance_schema = Schema(
                 Property("compliance_score", type="float"),
             ],
             constraint=Constraint(
-                create="auto",
+                create="upsert",
                 search=Search([Match.exact("id")])
             )
         ),
@@ -2421,7 +2421,7 @@ compliance_schema = Schema(
                 Property("compliance_status", type="string"),
             ],
             constraint=Constraint(
-                create="auto",
+                create="upsert",
                 search=Search([Match.exact("id")])
             )
         ),
@@ -2548,7 +2548,7 @@ await client.add_memory(
 | Control | Schema Level | Memory Level Override |
 |---------|--------------|----------------------|
 | **node_type** | Implicit from `NodeType.name` | `Task.title` (SDK) or `"node_type": "Task"` |
-| **create** | `Constraint(create="auto"\|"never")` | `{"create": "never"}` |
+| **create** | `Constraint(create="upsert"\|"never")` | `{"create": "never"}` |
 | **search** | `Search([Match...])` | `Task.title.semantic(...)` or full config |
 | **set** | `Constraint(set={...})` (rare) | `{"set": {"status": "done"}}` |
 | **when** | `Constraint(when={...})` | `{"when": {"priority": "high"}}` |
@@ -2991,7 +2991,7 @@ await client.add_memory(
                         PropertyMatch(name="name", mode="semantic", threshold=0.90)
                     ]
                 ),
-                create="never"  # Only link to existing team members
+                create="lookup"  # Only link to existing team members
             )
         ]
     )
@@ -3635,33 +3635,28 @@ await client.add_memory(
 
 | SDK Syntax | Meaning | Use Case |
 |------------|---------|----------|
-| **Link - Default (LLM extracts)** | | |
-| `Task.title` | Semantic match, LLM extracts from content | 80% of cases |
-| `Task.id.exact()` | Exact match, LLM extracts ID from content | When content has ID |
-| `Person.name.fuzzy()` | Fuzzy match, LLM extracts (typo-tolerant) | Names with typos |
-| **Link - Context Reference** | | |
-| `Task.id.exact(This.metadata.customMetadata.task_id)` | Use value from metadata | Dev passes value in metadata |
-| `Project.name.semantic(This.metadata.customMetadata.project)` | Semantic search using metadata | Search by known project |
-| **Link - Custom Threshold** | | |
-| `Task.title.semantic(threshold=0.95)` | Strict semantic match | High precision needed |
-| `Task.title.semantic(threshold=0.75)` | Loose semantic match | Broad matching |
-| **Link - Advanced (explicit value)** | | |
-| `Task.id.exact("TASK-123")` | Exact match with hardcoded value | User selected from UI |
-| **Set Variations** | |
-| `Task.status: "done"` | Exact value |
-| `Task.status: Auto()` | LLM extracts (replace mode) |
-| `Task.notes: Auto.append()` | LLM extracts, append to existing |
-| `Task.summary: Auto.merge()` | LLM extracts, merge with existing |
-| **When Variations** | |
-| `{Task.priority: "high"}` | Simple match |
-| `And(a, b)` | All must match |
-| `Or(a, b)` | Any must match |
-| `Not(a)` | Negation |
-| `And(a, Or(b, c))` | Complex nesting |
-| **Create** | |
-| `"create": "auto"` | Create if not found (default) |
-| `"create": "never"` | Only link to existing |
-| `.controlled_vocabulary()` | Shorthand for create="never" |
+| **Search (PropertyRef)** | | |
+| `Task.title.semantic(0.85)` | Semantic match with threshold | 80% of cases |
+| `Task.id.exact()` | Exact match | When content has ID |
+| `Task.id.exact("TASK-123")` | Exact match with value | User selected from UI |
+| `Person.name.fuzzy(0.80)` | Fuzzy match (typo-tolerant) | Names with typos |
+| **Set (Fluent)** | | |
+| `.set({Task.status: "done"})` | Exact value | |
+| `.set({Task.status: Auto()})` | LLM extracts (replace mode) | |
+| `.set({Task.notes: Auto.append()})` | LLM extracts, append to existing | |
+| `.set({Task.summary: Auto.merge()})` | LLM extracts, merge with existing | |
+| **When (Fluent)** | | |
+| `.when(Task.priority == "high")` | Simple match | |
+| `.when(And(a, b))` | All must match | |
+| `.when(Or(a, b))` | Any must match | |
+| `.when(Not(a))` | Negation | |
+| `.when(And(a, Or(b, c)))` | Complex nesting | |
+| **Create (Fluent)** | | |
+| `.create("auto")` | Create if not found (default) | |
+| `.create("never")` | Only link to existing | |
+| `.controlled_vocabulary()` | Shorthand for create="lookup" | |
+| **Full Chain** | | |
+| `Task.title.semantic(0.85).when(...).set({...}).create("never")` | Complete fluent chain | |
 
 ---
 
@@ -3904,7 +3899,7 @@ await client.add_memory(
         node_constraints=[
             NodeConstraint(
                 node_type="Task",
-                create="never",
+                create="lookup",
                 search=SearchConfig(
                     properties=[
                         PropertyMatch(name="title", mode="semantic", value="authentication bug")
@@ -3959,7 +3954,7 @@ await client.add_memory(
                 search=SearchConfig(
                     properties=[PropertyMatch(name="name", mode="semantic")]
                 ),
-                create="never"
+                create="lookup"
             )
         ]
     )
@@ -4072,7 +4067,7 @@ Should developers give AI agents control over `memory_policy` and `node_constrai
 │                                                                  │
 │  UserNodeType("Task", constraint=NodeConstraint(                │
 │      search=SearchConfig(properties=["id", "title"]),           │
-│      create="auto"                                               │
+│      create="upsert"                                               │
 │  ))                                                              │
 └─────────────────────────────────────────────────────────────────┘
                               │
@@ -4140,7 +4135,7 @@ schema = UserGraphSchema(
                     PropertyMatch.exact("id"),
                     PropertyMatch.semantic("title", 0.85)
                 ]),
-                create="auto"  # Agent CAN create Tasks
+                create="upsert"  # Agent CAN create Tasks
             )
         ),
         "Person": UserNodeType(
@@ -4150,7 +4145,7 @@ schema = UserGraphSchema(
                     PropertyMatch.exact("email"),
                     PropertyMatch.semantic("name", 0.9)
                 ]),
-                create="never"  # Agent CANNOT create People (controlled vocab)
+                create="lookup"  # Agent CANNOT create People (controlled vocab)
             )
         )
     }
@@ -4239,6 +4234,552 @@ tools = [
 | **Property values** | Agent | Dynamic updates |
 
 **Bottom Line:** Developers define the "HOW" (schema + tools), agents provide the "WHAT" (values).
+
+---
+
+## Part 8: Graph Traversal Search (`via_relationship`)
+
+### The Problem: Matching Through Relationships
+
+Sometimes the entity you want to link to isn't directly extractable from content - you need to **traverse the graph** to find it.
+
+**Example: DeepTrust Security Call Analysis**
+
+- Transcript describes **attacker tactics**: "urgency", "claimed lost phone" (Defense Evasion)
+- You want to link to **SecurityBehavior** nodes (SB080: "Verify Identity")
+- But these are semantically different concepts: attack vs. defense
+
+Semantic match on SecurityBehavior.name alone fails because:
+- Content says: "claimed lost phone" (Defense Evasion tactic)
+- SecurityBehavior SB080 says: "Verify Identity"
+- These don't match semantically - one is attack, one is defense
+
+**The relationship is the key:**
+```
+CallerTactic → TacticDef ←[MITIGATES]← SecurityBehavior
+```
+
+### Solution: `via_relationship` Search
+
+Add relationship-aware search to `SearchConfig`:
+
+```python
+from papr import Constraint, Search, Match, Via
+
+# Schema level: SecurityBehavior can be found via its MITIGATES relationship
+NodeType(
+    name="SecurityBehavior",
+    properties=[
+        Property("id", type="string"),
+        Property("name", type="string", required=True),
+        Property("trigger_context", type="string"),  # e.g., "Defense Evasion"
+    ],
+    constraint=Constraint(
+        create="lookup",
+        search=Search([
+            Match.exact("id"),
+            Match.semantic("name", 0.85),
+            Match.semantic("trigger_context", 0.90),  # Match tactic → behavior
+            Via("MITIGATES", "TacticDef", [          # NEW: Graph traversal
+                Match.exact("id"),
+                Match.semantic("name", 0.90)
+            ])
+        ])
+    )
+)
+```
+
+### `Via` (RelationshipMatch) Specification
+
+```python
+class RelationshipMatch:
+    """Search for nodes via their relationships."""
+
+    edge_type: str                    # "MITIGATES", "BELONGS_TO", etc.
+    target_type: str                  # Node type to traverse to
+    target_search: List[PropertyMatch]  # How to match the target
+    direction: Literal["outgoing", "incoming"] = "outgoing"
+```
+
+**How it works:**
+1. LLM extracts `CallerTactic(name="Defense Evasion")` from content
+2. System matches to `TacticDef(id="TA0005")` (controlled vocabulary)
+3. System traverses: `SecurityBehavior -[MITIGATES]-> TacticDef:TA0005`
+4. Returns all SecurityBehaviors that mitigate TA0005 (e.g., SB001, SB080)
+
+### Three Ways to Use Graph Traversal
+
+#### Option 1: Full API (memory_policy)
+
+```python
+await client.add_memory(
+    content=transcript,
+    external_user_id="call_analyzer",
+    memory_policy=MemoryPolicy(
+        node_constraints=[
+            NodeConstraint(
+                node_type="SecurityBehavior",
+                search=SearchConfig(
+                    properties=[
+                        PropertyMatch(name="name", mode="semantic", threshold=0.85)
+                    ],
+                    via_relationship=[
+                        RelationshipMatch(
+                            edge_type="MITIGATES",
+                            target_type="TacticDef",
+                            target_search=SearchConfig(
+                                properties=[
+                                    PropertyMatch(name="name", mode="semantic", threshold=0.90)
+                                ]
+                            ),
+                            direction="outgoing"
+                        )
+                    ]
+                ),
+                create="lookup"
+            )
+        ]
+    )
+)
+```
+
+#### Option 2: String DSL (link_to) - Arrow Syntax
+
+```python
+# Arrow syntax - intuitive graph traversal
+await client.add_memory(
+    content=transcript,
+    external_user_id="call_analyzer",
+    link_to={
+        "SecurityBehavior->MITIGATES->TacticDef:name": {
+            "create": "never"
+        }
+    }
+)
+
+# Or with implicit target type (schema knows MITIGATES → TacticDef):
+await client.add_memory(
+    content=transcript,
+    external_user_id="call_analyzer",
+    link_to={
+        "SecurityBehavior->MITIGATES:name": {"create": "never"}
+    }
+)
+```
+
+**DSL Grammar Extension:**
+```
+entity_ref  = type_name ":" prop_name [ operator value ]
+            | type_name "->" edge_type "->" target_type ":" target_prop  # Arrow syntax
+            | type_name "->" edge_type ":" target_prop                   # Implicit target
+
+# Examples:
+"SecurityBehavior->MITIGATES->TacticDef:name"       # Full arrow syntax
+"SecurityBehavior->MITIGATES:name"                   # Implicit target (from schema)
+"SecurityBehavior->MITIGATES->TacticDef:id=TA0005"  # With exact value
+"Task->BELONGS_TO->Project:name~Mobile App"          # With semantic value
+```
+
+#### Option 3: Python SDK (Full Relationship Introspection)
+
+Relationships defined in `edge_types` generate methods on the source type - **no magic strings!**
+
+**Consistent PropertyRef Pattern**: The same `Type.property.mode(threshold)` syntax works everywhere.
+
+```python
+from papr.schemas.deeptrust import SecurityBehavior, TacticDef
+
+# .mitigates() is auto-generated from edge_types - full IDE autocomplete!
+# Uses varargs for multiple search properties
+await client.add_memory(
+    content=transcript,
+    external_user_id="call_analyzer",
+    link={
+        SecurityBehavior.mitigates(
+            TacticDef.id.exact(),           # Try exact ID first
+            TacticDef.name.semantic(0.90)   # Then semantic name match
+        ): {
+            "create": "never"
+        }
+    }
+)
+
+# Alternative fluent syntax
+await client.add_memory(
+    content=transcript,
+    external_user_id="call_analyzer",
+    link={
+        SecurityBehavior.mitigates(
+            TacticDef.id.exact(),
+            TacticDef.name.semantic(0.90)
+        ).controlled_vocabulary()
+    }
+)
+
+# IDE Experience:
+# SecurityBehavior.  → shows: id, name, trigger_context, mitigates()
+# SecurityBehavior.mitigates(  → shows: *targets: PropertyRef (varargs)
+# TacticDef.id.  → shows: exact(), semantic(threshold), fuzzy()
+# TacticDef.name.  → shows: exact(), semantic(threshold), fuzzy()
+```
+
+### Edges as First-Class Citizens: Schema Definition
+
+**Key Design Principle:** Edges (relationships) are first-class with full policy (search, when, create). Nodes only define properties.
+
+```python
+@schema("deeptrust_security")
+class DeepTrustSchema:
+    # ═══════════════════════════════════════════════════════════════
+    # NODES - Properties only (no relationships here)
+    # ═══════════════════════════════════════════════════════════════
+
+    @node
+    @lookup
+    class SecurityBehavior:
+        id: str = prop(search=exact())
+        name: str = prop(search=semantic(0.85))
+        trigger_context: str = prop(search=semantic(0.90))
+
+    @node
+    @lookup
+    class TacticDef:
+        id: str = prop(search=exact())
+        name: str = prop(search=semantic(0.90))
+        severity: str = prop()
+
+    @node
+    @auto_create
+    class CallerTactic:
+        tactic_name: str = prop(search=semantic(0.85))
+        severity: str = prop()
+
+    # ═══════════════════════════════════════════════════════════════
+    # EDGES - First-class with full policy
+    # ═══════════════════════════════════════════════════════════════
+
+    # SecurityBehavior -[MITIGATES]-> TacticDef
+    mitigates = edge(
+        SecurityBehavior >> TacticDef,
+        search=(
+            TacticDef.id.exact(),
+            TacticDef.name.semantic(0.90)
+        ),
+        create="lookup",
+        when=TacticDef.severity.exists()
+    )
+
+    # CallerTactic -[IS_INSTANCE]-> TacticDef
+    is_instance = edge(
+        CallerTactic >> TacticDef,
+        search=(TacticDef.id.exact(), TacticDef.name.semantic(0.90)),
+        create="upsert"
+    )
+```
+
+**Why Edges as First-Class?**
+
+| Aspect | Old (edge_types array) | New (edge as first-class) |
+|--------|------------------------|---------------------------|
+| Structure | `{"name": "MITIGATES", "from": "SecurityBehavior", "to": "TacticDef"}` | `edge(SecurityBehavior >> TacticDef, ...)` |
+| Search config | In node constraint | In edge definition |
+| Create policy | In node constraint | In edge definition |
+| When condition | In node constraint | In edge definition |
+| Reverse traversal | Manual | Auto-generated |
+
+### SDK Generation from Edges
+
+From the edge definitions, the SDK generates methods on **both sides**:
+
+```python
+# Auto-generated: papr/schemas/deeptrust.py
+
+class PropertyRef:
+    """Property reference with configurable match mode."""
+    def exact(self) -> "PropertyRef": ...
+    def semantic(self, threshold: float = 0.80) -> "PropertyRef": ...
+    def fuzzy(self, threshold: float = 0.70) -> "PropertyRef": ...
+
+
+class SecurityBehavior(NodeType):
+    # Properties
+    id = PropertyRef("SecurityBehavior", "id", default_mode="exact")
+    name = PropertyRef("SecurityBehavior", "name", default_mode="semantic", threshold=0.85)
+
+    # Edge method - generated from: mitigates = edge(SecurityBehavior >> TacticDef, ...)
+    @classmethod
+    def mitigates(cls, *targets: PropertyRef) -> EdgeRef:
+        """Traverse MITIGATES to TacticDef.
+
+        Default search: TacticDef.id.exact(), TacticDef.name.semantic(0.90)
+        Default policy: create="lookup", when=TacticDef.severity.exists()
+
+        Args:
+            *targets: Override search properties (optional)
+        """
+        return EdgeRef("mitigates", list(targets) or DEFAULT_SEARCH)
+
+
+class TacticDef(NodeType):
+    id = PropertyRef("TacticDef", "id", default_mode="exact")
+    name = PropertyRef("TacticDef", "name", default_mode="semantic", threshold=0.90)
+
+    # Reverse edge method - auto-generated
+    @classmethod
+    def mitigated_by(cls, *targets: PropertyRef) -> EdgeRef:
+        """Reverse traverse MITIGATES from SecurityBehavior."""
+        return EdgeRef("mitigates", list(targets), reverse=True)
+
+
+class CallerTactic(NodeType):
+    tactic_name = PropertyRef("CallerTactic", "tactic_name")
+    severity = PropertyRef("CallerTactic", "severity", default_mode="exact")
+
+    @classmethod
+    def is_instance_of(cls, *targets: PropertyRef) -> EdgeRef:
+        """Traverse IS_INSTANCE to TacticDef."""
+        return EdgeRef("is_instance", list(targets) or DEFAULT_SEARCH)
+```
+
+### Memory Level: Fluent API
+
+With edges as first-class, you get powerful fluent APIs at memory level:
+
+```python
+from papr.schemas.deeptrust import SecurityBehavior, TacticDef, Impact
+from papr import This, Auto, And, Or, Not
+
+# ═══════════════════════════════════════════════════════════════
+# Use edge's default search & policy (from schema)
+# ═══════════════════════════════════════════════════════════════
+link={
+    SecurityBehavior.mitigates()  # Uses schema defaults
+}
+
+# ═══════════════════════════════════════════════════════════════
+# Override search (keep schema policy)
+# ═══════════════════════════════════════════════════════════════
+link={
+    SecurityBehavior.mitigates(TacticDef.name.semantic(0.95))
+}
+
+# ═══════════════════════════════════════════════════════════════
+# Override policy
+# ═══════════════════════════════════════════════════════════════
+link={
+    SecurityBehavior.mitigates(TacticDef.name.semantic(0.90))
+        .create("auto")  # Override schema's "never"
+}
+
+# ═══════════════════════════════════════════════════════════════
+# Reverse traversal (auto-generated)
+# ═══════════════════════════════════════════════════════════════
+link={
+    TacticDef.mitigated_by(SecurityBehavior.name.semantic(0.85))
+}
+
+# ═══════════════════════════════════════════════════════════════
+# Chain across multiple edges
+# ═══════════════════════════════════════════════════════════════
+link={
+    SecurityBehavior.mitigates(TacticDef.id.exact())
+        .leads_to(Impact.name.semantic(0.85))
+        .set({Impact.flagged: Auto()})
+}
+
+# ═══════════════════════════════════════════════════════════════
+# Generic with This
+# ═══════════════════════════════════════════════════════════════
+link={
+    This.mitigates(TacticDef.id.exact())
+        .when(This.type == "SecurityBehavior")
+        .create("never")
+}
+
+# ═══════════════════════════════════════════════════════════════
+# Full fluent chain with when/set
+# ═══════════════════════════════════════════════════════════════
+link={
+    SecurityBehavior.mitigates(TacticDef.id.exact())
+        .leads_to(Impact.name.semantic(0.85))
+        .when(
+            And(
+                TacticDef.severity == "critical",
+                Not(Impact.mitigated == True)
+            )
+        )
+        .set({
+            SecurityBehavior.priority: "high",
+            SecurityBehavior.reviewed: Auto()
+        })
+        .create("never")
+}
+```
+
+### API Comparison: Relationship Syntax
+
+| Syntax | Magic Strings | IDE Autocomplete | Type Safety | Fluent API |
+|--------|---------------|------------------|-------------|------------|
+| `RelationshipMatch(edge_type="MITIGATES", ...)` | Yes | No | No | No |
+| `"SecurityBehavior->MITIGATES->TacticDef:name"` | Yes | No | No | No |
+| `SecurityBehavior.mitigates()` | **None** | **Full** | **Full** | **Yes** |
+| `SecurityBehavior.mitigates().leads_to().when().set()` | **None** | **Full** | **Full** | **Yes** |
+| `TacticDef.mitigated_by()` (reverse) | **None** | **Full** | **Full** | **Yes** |
+| `This.mitigates()` (generic) | **None** | **Full** | **Full** | **Yes** |
+
+### Key Insights
+
+1. **Schema level**: `edge(SecurityBehavior >> TacticDef, search=..., create=..., when=...)`
+2. **Memory level**: `SecurityBehavior.mitigates().when(...).set(...).create(...)`
+3. **Same pattern everywhere**: `Type.property.mode(threshold)` works at both levels
+4. **Edges are first-class**: Full policy (search, when, create) defined at edge, not node
+
+### Complete DeepTrust Example: Edges as First-Class
+
+```python
+from papr.sdk import schema, node, prop, edge
+from papr.sdk import exact, semantic, controlled_vocabulary, auto_create
+from papr import And, Not
+
+@schema("deeptrust_security")
+class DeepTrustSchema:
+    # ═══════════════════════════════════════════════════════════════
+    # NODES - Properties only
+    # ═══════════════════════════════════════════════════════════════
+
+    @node
+    @lookup
+    class TacticDef:
+        """MITRE ATT&CK tactics (controlled vocabulary)"""
+        id: str = prop(search=exact())       # TA0001, TA0005
+        name: str = prop(search=semantic(0.90))
+        severity: str = prop()
+
+    @node
+    @lookup
+    class SecurityBehavior:
+        """What agents SHOULD do (controlled vocabulary)"""
+        id: str = prop(search=exact())
+        name: str = prop(required=True, search=semantic(0.85))
+        trigger_context: str = prop(search=semantic(0.90))
+        priority: str = prop()
+
+    @node
+    @auto_create
+    class CallerTactic:
+        """Tactics detected in call (dynamic)"""
+        tactic_name: str = prop(search=semantic(0.85))
+        context: str = prop()
+        severity: str = prop()
+
+    # ═══════════════════════════════════════════════════════════════
+    # EDGES - First-class with full policy
+    # ═══════════════════════════════════════════════════════════════
+
+    # SecurityBehavior -[MITIGATES]-> TacticDef
+    mitigates = edge(
+        SecurityBehavior >> TacticDef,
+        search=(
+            TacticDef.id.exact(),
+            TacticDef.name.semantic(0.90)
+        ),
+        create="lookup",
+        when=TacticDef.severity.exists()
+    )
+
+    # CallerTactic -[IS_INSTANCE]-> TacticDef
+    is_instance = edge(
+        CallerTactic >> TacticDef,
+        search=(TacticDef.id.exact(), TacticDef.name.semantic(0.90)),
+        create="upsert"
+    )
+```
+
+**Usage with Fluent API:**
+
+```python
+from papr.schemas.deeptrust_security import SecurityBehavior, TacticDef, CallerTactic
+from papr import Auto, And, Not
+
+# Analyze transcript - uses edge's schema-defined policy
+await client.add_memory(
+    content="""
+    Caller claimed lost phone to bypass MFA verification.
+    Agent proceeded without proper identity verification.
+    """,
+    external_user_id="call_analyzer",
+    link={
+        # Use schema defaults
+        SecurityBehavior.mitigates(),
+
+        # Override search with custom threshold
+        SecurityBehavior.mitigates(TacticDef.name.semantic(0.95)),
+
+        # Full fluent chain
+        SecurityBehavior.mitigates(TacticDef.id.exact())
+            .when(
+                And(
+                    TacticDef.severity == "critical",
+                    Not(SecurityBehavior.priority == "handled")
+                )
+            )
+            .set({
+                SecurityBehavior.priority: "high"
+            })
+    }
+)
+
+# What happens:
+# 1. LLM extracts: CallerTactic(tactic_name="Defense Evasion", context="MFA Bypass")
+# 2. CallerTactic links to TacticDef:TA0005 via is_instance edge (create="upsert")
+# 3. Graph traversal via mitigates edge: SecurityBehavior -[MITIGATES]-> TacticDef:TA0005
+# 4. Edge policy: create="lookup" (only link to existing)
+# 5. Finds: SB080 (Verify Identity), SB001 (Authenticate with MFA)
+```
+
+### When to Use Graph Traversal
+
+| Scenario | Direct Match | Graph Traversal |
+|----------|--------------|-----------------|
+| Content directly mentions entity | ✅ | Not needed |
+| Content mentions related concept | ❌ | ✅ |
+| Finding defenses for detected attacks | ❌ | ✅ |
+| Finding tasks for a project | Either | ✅ |
+| Hierarchical relationships | ❌ | ✅ |
+
+### Summary: Edges as First-Class Citizens
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ SCHEMA LEVEL: Edges with full policy                                │
+├─────────────────────────────────────────────────────────────────────┤
+│ mitigates = edge(                                                   │
+│     SecurityBehavior >> TacticDef,                                  │
+│     search=(TacticDef.id.exact(), TacticDef.name.semantic(0.90)),   │
+│     create="lookup",                                                 │
+│     when=TacticDef.severity.exists()                                │
+│ )                                                                   │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│ MEMORY LEVEL: Fluent API                                            │
+├─────────────────────────────────────────────────────────────────────┤
+│ SecurityBehavior.mitigates()                    # Use schema defaults│
+│ SecurityBehavior.mitigates(TacticDef.name.semantic(0.95))  # Override│
+│ TacticDef.mitigated_by()                        # Reverse traversal  │
+│ This.mitigates()                                # Generic            │
+│ .mitigates().leads_to().when().set().create()   # Full chain         │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**Key Principles:**
+1. **Nodes** = properties only
+2. **Edges** = relationships with full policy (search, when, create)
+3. **Schema level** = `edge(Source >> Target, search=..., create=..., when=...)`
+4. **Memory level** = `Source.relationship().when().set().create()`
+5. **Same pattern everywhere** = `Type.property.mode(threshold)`
+
+This enables powerful knowledge graph queries at memory ingestion time, allowing the system to find related entities even when content describes a different but connected concept.
 
 ---
 

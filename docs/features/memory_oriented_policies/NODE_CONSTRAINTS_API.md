@@ -93,9 +93,12 @@ class NodeConstraint(BaseModel):
     # === WHEN (with logical operators) ===
     when: Optional[Dict[str, Any]]  # Conditional with _and, _or, _not support
 
-    # === CREATION ===
-    create: Literal["auto", "never"] = "auto"
-    link_only: bool = False  # Shorthand for create="never" (controlled vocabulary)
+    # === RESOLUTION POLICY ===
+    create: Literal["upsert", "lookup"] = "upsert"  # Backwards compatible: "auto"/"never" still work
+    on_miss: Optional[Literal["create", "ignore", "error"]] = None  # Explicit behavior when not found
+
+    # === DEPRECATED (use create="lookup" instead) ===
+    link_only: bool = False  # DEPRECATED: Shorthand for create="lookup"
 
     # === SELECTION (property-based matching) ===
     search: Optional[SearchConfig]  # Uses PropertyMatch list or string shorthand
@@ -104,8 +107,10 @@ class NodeConstraint(BaseModel):
     set: Optional[Dict[str, SetValue]]
 ```
 
-> **Note:** When `link_only=True`, the `create` field is automatically set to `"never"`.
-> This is equivalent to the `@link_only` decorator in schema definitions.
+> **Note:** When `link_only=True`, the `create` field is automatically set to `"lookup"`.
+> This is equivalent to the `@lookup` decorator in schema definitions.
+>
+> **Migration:** `create="auto"` maps to `"upsert"`, `create="never"` maps to `"lookup"` for backwards compatibility.
 
 ### SearchConfig (Property-Based Matching)
 
@@ -295,50 +300,81 @@ NodeConstraint(node_type="Task", ...)
 
 ### `create`
 
-**Type:** `Literal["auto", "never"]`
-**Default:** `"auto"`
+**Type:** `Literal["upsert", "lookup"]` (backwards compatible with `"auto"`, `"never"`)
+**Default:** `"upsert"`
 
 | Value | Description |
 |-------|-------------|
-| `"auto"` | Create new node if no match found (default) |
-| `"never"` | Only link to existing nodes (controlled vocabulary) |
+| `"upsert"` | Create new node if no match found (default) |
+| `"lookup"` | Only link to existing nodes (controlled vocabulary) |
+
+**Deprecated values (still work for backwards compatibility):**
+| Old Value | Maps To | Description |
+|-----------|---------|-------------|
+| `"auto"` | `"upsert"` | Create new node if no match found |
+| `"never"` | `"lookup"` | Only link to existing nodes |
 
 ---
 
-### `link_only` (Shorthand for Controlled Vocabulary)
+### `on_miss` (Explicit Resolution Behavior)
+
+**Type:** `Optional[Literal["create", "ignore", "error"]]`
+**Default:** `None`
+**Description:** Explicit behavior when no match is found. Overrides `create` if specified.
+
+| Value | Behavior |
+|-------|----------|
+| `"create"` | Create new node (same as `create="upsert"`) |
+| `"ignore"` | Skip node creation (same as `create="lookup"`) |
+| `"error"` | Raise error if node not found (strict validation) |
+
+**Example:**
+```python
+# Strict mode - fail if node doesn't exist
+NodeConstraint(
+    node_type="TacticDef",
+    create="lookup",
+    on_miss="error",  # Will raise ValueError if not found
+    search=SearchConfig(properties=[PropertyMatch.exact("id")])
+)
+```
+
+---
+
+### `link_only` (DEPRECATED - Use `create="lookup"` instead)
 
 **Type:** `bool`
 **Default:** `False`
-**Description:** Shorthand for `create="never"`. When `True`, only links to existing nodes (controlled vocabulary).
+**Description:** DEPRECATED. Shorthand for `create="lookup"`. When `True`, only links to existing nodes (controlled vocabulary).
 
-This is equivalent to the `@link_only` decorator in schema definitions.
+This is equivalent to the `@lookup` decorator in schema definitions.
 
 ```python
 # These are equivalent:
-NodeConstraint(link_only=True)
-NodeConstraint(create="never")
+NodeConstraint(link_only=True)  # DEPRECATED
+NodeConstraint(create="lookup")  # PREFERRED
 
 # At schema level with decorator:
 @node
-@link_only
+@lookup  # Preferred over @link_only
 class TacticDef:
     id: str = prop(search=exact())
     name: str = prop(search=semantic(0.90))
 ```
 
-**When to use `link_only`:**
+**When to use `create="lookup"`:**
 - Pre-populated reference data (MITRE tactics, categories, status codes)
 - External systems of record (users from IdP, products from catalog)
 - Controlled vocabularies where you never want to create new entries
 
 **Example:**
 ```python
-# Using link_only shorthand
+# Using resolution_policy shorthand (preferred)
 UserNodeType(
     name="TacticDef",
     label="Tactic Definition",
     properties={...},
-    link_only=True,  # Shorthand - creates constraint with create="never"
+    resolution_policy="lookup",  # Preferred over link_only=True
     constraint=NodeConstraint(
         search=SearchConfig(properties=[
             PropertyMatch(name="id", mode="exact"),
@@ -350,7 +386,7 @@ UserNodeType(
 # Or directly on constraint
 NodeConstraint(
     node_type="Person",
-    link_only=True,  # Equivalent to create="never"
+    create="lookup",  # Preferred over link_only=True
     search=SearchConfig(properties=[
         PropertyMatch(name="email", mode="exact")
     ])
@@ -451,7 +487,7 @@ UserNodeType(
 ### Example 2: Schema Level - Controlled Vocabulary (Never Create)
 
 ```python
-# Option 1: Using create="never"
+# Option 1: Using create="lookup" (preferred)
 UserNodeType(
     name="Person",
     label="Person",
@@ -466,11 +502,11 @@ UserNodeType(
                 PropertyMatch(name="name", mode="semantic", threshold=0.90)
             ]
         ),
-        create="never"  # Controlled vocabulary
+        create="lookup"  # Controlled vocabulary
     )
 )
 
-# Option 2: Using link_only shorthand (equivalent to above)
+# Option 2: Using resolution_policy shorthand (equivalent)
 UserNodeType(
     name="Person",
     label="Person",
@@ -478,7 +514,7 @@ UserNodeType(
         "email": PropertyDefinition(type="string"),
         "name": PropertyDefinition(type="string", required=True)
     },
-    link_only=True,  # Shorthand - auto-creates constraint with create="never"
+    resolution_policy="lookup",  # Shorthand - auto-creates constraint with create="lookup"
     constraint=NodeConstraint(
         search=SearchConfig(
             properties=[
@@ -544,7 +580,7 @@ NodeConstraint(
             {"_not": {"status": "completed"}}
         ]
     },
-    create="never",
+    create="lookup",
     set={"urgent": True}
 )
 ```
@@ -569,7 +605,7 @@ UserNodeType(
                 PropertyMatch(name="name", mode="semantic", threshold=0.90)
             ]
         ),
-        create="auto"
+        create="upsert"
     )
 )
 
@@ -593,6 +629,315 @@ MemoryPolicy(
     ]
 )
 ```
+
+---
+
+### Example 7: Graph Traversal - Find Nodes via Relationships
+
+**Goal:** Find SecurityBehaviors that MITIGATE a detected TacticDef.
+
+**Use case:** Transcript mentions "Defense Evasion tactic" but you want to link to the SecurityBehaviors that defend against it.
+
+#### Schema Level Definition: Edges as First-Class Citizens
+
+**Key Design Principle:** Edges have full policy (search, when, create). Nodes only define properties.
+
+```python
+from papr.sdk import schema, node, prop, edge
+from papr.sdk import exact, semantic, controlled_vocabulary, auto_create
+
+@schema("deeptrust_security")
+class DeepTrustSchema:
+    # ═══════════════════════════════════════════════════════════════
+    # NODES - Properties only
+    # ═══════════════════════════════════════════════════════════════
+
+    @node
+    @lookup
+    class TacticDef:
+        id: str = prop(search=exact())
+        name: str = prop(search=semantic(0.90))
+        severity: str = prop()
+
+    @node
+    @lookup
+    class SecurityBehavior:
+        id: str = prop(search=exact())
+        name: str = prop(required=True, search=semantic(0.85))
+        trigger_context: str = prop(search=semantic(0.90))
+
+    # ═══════════════════════════════════════════════════════════════
+    # EDGES - First-class with full policy
+    # ═══════════════════════════════════════════════════════════════
+
+    # SecurityBehavior -[MITIGATES]-> TacticDef
+    mitigates = edge(
+        SecurityBehavior >> TacticDef,
+        search=(
+            TacticDef.id.exact(),
+            TacticDef.name.semantic(0.90)
+        ),
+        create="lookup",  # Only link to existing
+        when=TacticDef.severity.exists()
+    )
+```
+
+**Why Edges as First-Class?**
+
+| Aspect | Old (node-centric) | New (edge-centric) |
+|--------|-------------------|-------------------|
+| Search config | In node's `via_relationship` | In edge definition |
+| Create policy | In node constraint | In edge definition |
+| When condition | In node constraint | In edge definition |
+| Reverse traversal | Manual | Auto-generated |
+| Visibility | Split across node + edge_types | All in one place |
+
+**What this enables:**
+- Content: "Caller used Defense Evasion tactic"
+- System matches TacticDef with name "Defense Evasion" (TA0005)
+- System traverses via `mitigates` edge: SecurityBehavior -[MITIGATES]-> TacticDef:TA0005
+- Edge policy `create="never"` ensures only existing SecurityBehaviors are linked
+- Returns: SB080 (Verify Identity), SB001 (Authenticate with MFA)
+
+---
+
+### Example 8: Memory Level - Graph Traversal (Three API Approaches)
+
+**Goal:** Link transcript to SecurityBehaviors that mitigate detected tactics.
+
+#### Option 1: Full API (memory_policy / node_constraints)
+
+```python
+await client.add_memory(
+    content="Caller claimed lost phone to bypass MFA verification",
+    external_user_id="call_analyzer",
+    memory_policy=MemoryPolicy(
+        node_constraints=[
+            NodeConstraint(
+                node_type="SecurityBehavior",
+                search=SearchConfig(
+                    properties=[
+                        PropertyMatch(name="name", mode="semantic", threshold=0.85)
+                    ],
+                    via_relationship=[
+                        RelationshipMatch(
+                            edge_type="MITIGATES",
+                            target_type="TacticDef",
+                            target_search=SearchConfig(
+                                properties=[
+                                    PropertyMatch(name="name", mode="semantic", threshold=0.90)
+                                ]
+                            ),
+                            direction="outgoing"
+                        )
+                    ]
+                ),
+                create="lookup"
+            )
+        ]
+    )
+)
+# Lines: 25+ | Concepts: 7 (MemoryPolicy, NodeConstraint, SearchConfig, PropertyMatch, RelationshipMatch, etc.)
+```
+
+#### Option 2: String DSL (Arrow Syntax)
+
+```python
+# Arrow syntax - intuitive graph traversal
+await client.add_memory(
+    content="Caller claimed lost phone to bypass MFA verification",
+    external_user_id="call_analyzer",
+    link_to={
+        "SecurityBehavior->MITIGATES->TacticDef:name": {
+            "create": "lookup"
+        }
+    }
+)
+# Lines: 8 | Concepts: 1 (arrow syntax)
+
+# Or with implicit target type (schema knows MITIGATES → TacticDef):
+await client.add_memory(
+    content="Caller claimed lost phone to bypass MFA verification",
+    external_user_id="call_analyzer",
+    link_to={
+        "SecurityBehavior->MITIGATES:name": {"create": "lookup"}
+    }
+)
+```
+
+**DSL Syntax for Graph Traversal:**
+```
+Type->EDGE_TYPE->TargetType:target_property           # Full arrow syntax
+Type->EDGE_TYPE:target_property                        # Implicit target (from schema)
+Type->EDGE_TYPE->TargetType:target_property=value     # With exact value
+Type->EDGE_TYPE->TargetType:target_property~semantic  # With semantic value
+```
+
+#### Option 3: Python SDK (Fluent API with Edges as First-Class)
+
+Edge methods are auto-generated from schema edge definitions - **full IDE introspection!**
+
+```python
+from papr.schemas.deeptrust import SecurityBehavior, TacticDef, Impact
+from papr import This, Auto, And, Or, Not
+
+# ═══════════════════════════════════════════════════════════════
+# Use edge's default search & policy (from schema)
+# ═══════════════════════════════════════════════════════════════
+await client.add_memory(
+    content="Caller claimed lost phone to bypass MFA verification",
+    external_user_id="call_analyzer",
+    link={
+        SecurityBehavior.mitigates()  # Uses schema defaults
+    }
+)
+
+# ═══════════════════════════════════════════════════════════════
+# Override search (keep schema policy)
+# ═══════════════════════════════════════════════════════════════
+await client.add_memory(
+    content="Caller claimed lost phone to bypass MFA verification",
+    external_user_id="call_analyzer",
+    link={
+        SecurityBehavior.mitigates(TacticDef.name.semantic(0.95))
+    }
+)
+
+# ═══════════════════════════════════════════════════════════════
+# Override policy
+# ═══════════════════════════════════════════════════════════════
+await client.add_memory(
+    content="Caller claimed lost phone to bypass MFA verification",
+    external_user_id="call_analyzer",
+    link={
+        SecurityBehavior.mitigates(TacticDef.name.semantic(0.90))
+            .create("upsert")  # Override schema's "lookup"
+    }
+)
+
+# ═══════════════════════════════════════════════════════════════
+# Reverse traversal (auto-generated from edge definition)
+# ═══════════════════════════════════════════════════════════════
+await client.add_memory(
+    content="Defense Evasion tactic detected",
+    external_user_id="call_analyzer",
+    link={
+        TacticDef.mitigated_by(SecurityBehavior.name.semantic(0.85))
+    }
+)
+
+# ═══════════════════════════════════════════════════════════════
+# Chain across multiple edges
+# ═══════════════════════════════════════════════════════════════
+await client.add_memory(
+    content="Critical tactic that could lead to system compromise",
+    external_user_id="call_analyzer",
+    link={
+        SecurityBehavior.mitigates(TacticDef.id.exact())
+            .leads_to(Impact.name.semantic(0.85))
+            .set({Impact.flagged: Auto()})
+    }
+)
+
+# ═══════════════════════════════════════════════════════════════
+# Generic with This
+# ═══════════════════════════════════════════════════════════════
+await client.add_memory(
+    content="Caller claimed lost phone to bypass MFA verification",
+    external_user_id="call_analyzer",
+    link={
+        This.mitigates(TacticDef.id.exact())
+            .when(This.type == "SecurityBehavior")
+            .create("lookup")
+    }
+)
+
+# ═══════════════════════════════════════════════════════════════
+# Full fluent chain with when/set
+# ═══════════════════════════════════════════════════════════════
+await client.add_memory(
+    content="Critical tactic detected - Defense Evasion via lost phone claim",
+    external_user_id="call_analyzer",
+    link={
+        SecurityBehavior.mitigates(TacticDef.id.exact())
+            .leads_to(Impact.name.semantic(0.85))
+            .when(
+                And(
+                    TacticDef.severity == "critical",
+                    Not(Impact.mitigated == True)
+                )
+            )
+            .set({
+                SecurityBehavior.priority: "high",
+                SecurityBehavior.reviewed: Auto()
+            })
+            .create("lookup")
+    }
+)
+
+# IDE Experience:
+# SecurityBehavior.  → shows: id, name, trigger_context, mitigates()
+# SecurityBehavior.mitigates(  → shows: *targets: PropertyRef (optional)
+# SecurityBehavior.mitigates().  → shows: leads_to(), when(), set(), create()
+# TacticDef.  → shows: id, name, mitigated_by() (reverse)
+```
+
+#### Generated Edge Methods
+
+From the schema edge definition:
+```python
+# Schema: mitigates = edge(SecurityBehavior >> TacticDef, search=..., create="never", when=...)
+```
+
+The SDK generates methods on **both sides**:
+```python
+class SecurityBehavior(NodeType):
+    # Properties
+    id = PropertyRef("SecurityBehavior", "id", default_mode="exact")
+    name = PropertyRef("SecurityBehavior", "name", default_mode="semantic")
+
+    # Edge method - generated from schema
+    @classmethod
+    def mitigates(cls, *targets: PropertyRef) -> EdgeRef:
+        """Traverse MITIGATES to TacticDef.
+
+        Default search: TacticDef.id.exact(), TacticDef.name.semantic(0.90)
+        Default policy: create="never", when=TacticDef.severity.exists()
+        """
+        return EdgeRef("mitigates", list(targets) or DEFAULT_SEARCH)
+
+
+class TacticDef(NodeType):
+    id = PropertyRef("TacticDef", "id", default_mode="exact")
+    name = PropertyRef("TacticDef", "name", default_mode="semantic")
+
+    # Reverse edge method - auto-generated
+    @classmethod
+    def mitigated_by(cls, *targets: PropertyRef) -> EdgeRef:
+        """Reverse traverse MITIGATES from SecurityBehavior."""
+        return EdgeRef("mitigates", list(targets), reverse=True)
+```
+
+#### Comparison Summary
+
+| Approach | Lines | IDE Support | Type Safety | Fluent API | Edge Defaults |
+|----------|-------|-------------|-------------|------------|---------------|
+| Full API | 25+ | No | No | No | No |
+| String DSL | 8 | No | No | No | No |
+| Python SDK | 3-15 | **Full** | **Full** | **Yes** | **Yes** |
+
+| Feature | Syntax |
+|---------|--------|
+| Use schema defaults | `SecurityBehavior.mitigates()` |
+| Override search | `SecurityBehavior.mitigates(TacticDef.name.semantic(0.95))` |
+| Override policy | `.create("upsert")` |
+| Reverse traversal | `TacticDef.mitigated_by()` |
+| Chain edges | `.mitigates().leads_to()` |
+| Conditions | `.when(And(...))` |
+| Set values | `.set({...})` |
+| Generic | `This.mitigates()` |
+
+**Key Insight**: Schema defines edge defaults, memory level uses/overrides them via fluent API.
 
 ---
 
