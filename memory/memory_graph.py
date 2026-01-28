@@ -5935,9 +5935,9 @@ class MemoryGraph:
                 
                 # Run main search first; fallback only if main returns no results
                 qdrant_embeddings_results = await self.get_qdrant_related_memories_async(
-                    query_qdrant_embedding,
-                    final_filter,
-                    top_k=vector_top_k  # Increased for chunking
+                        query_qdrant_embedding,
+                        final_filter,
+                        top_k=vector_top_k  # Increased for chunking
                 )
                 if qdrant_embeddings_results.get('matches'):
                     qdrant_fallback_results = {"matches": []}
@@ -5946,7 +5946,7 @@ class MemoryGraph:
                     qdrant_fallback_results = await self.get_qdrant_related_memories_async_fallback(
                         final_filter,
                         top_k=vector_top_k  # Increased for chunking
-                    )
+                )
                 
                 # Log raw results from both Qdrant searches
                 qdrant_main_count = len(qdrant_embeddings_results.get('matches', []))
@@ -7209,7 +7209,7 @@ class MemoryGraph:
         """
         
         fetch_source = env.get("MEMORY_FETCH_SOURCE", "mongo").lower()
-
+        
         # Process memory IDs to handle both legacy and chunked formats
         base_memory_ids = set()  # Use set to avoid duplicates
         chunk_id_mapping = {}  # Map to track original chunked IDs
@@ -7313,10 +7313,10 @@ class MemoryGraph:
         """Internal helper to fetch memory items from Parse and normalize."""
         memory_class: str = "Memory"
         parse_response = await self.fetch_parse_server_async(
-            session_token,
-            all_memory_ids,
-            processed_memory_ids,
-            memory_class,
+            session_token, 
+            all_memory_ids, 
+            processed_memory_ids, 
+            memory_class, 
             api_key=api_key
         )
 
@@ -7334,8 +7334,8 @@ class MemoryGraph:
         for item in memory_items_parse:
             if item.memoryChunkIds:
                 matching_chunks = [
-                    chunk_id for chunk_id in item.memoryChunkIds
-                    if chunk_id in all_memory_ids
+                    chunk_id for chunk_id in item.memoryChunkIds 
+                if chunk_id in all_memory_ids
                 ]
                 if matching_chunks:
                     updated_item = item.model_copy()
@@ -7347,14 +7347,14 @@ class MemoryGraph:
         logger.info(f'Final Memory Items Count: {len(final_memory_items)}')
 
         items_without_content = [
-            item.memoryId for item in final_memory_items
+            item.memoryId for item in final_memory_items 
             if not item.content
         ]
         if items_without_content:
             logger.error(f"Final memory items missing content: {items_without_content}")
 
         return final_memory_items
-
+        
     async def fetch_memory_items_from_sources_mongo(
         self,
         memory_item_ids: List[str],
@@ -7427,6 +7427,10 @@ class MemoryGraph:
             "namespace_write_access": 1,
             "organization_read_access": 1,
             "organization_write_access": 1,
+            # Relevance scores (stored in DB)
+            "predicted_importance": 1,
+            "behavioral_score": 1,
+            "relevance_score": 1,  # Deprecated, kept for backward compatibility
         }
 
         def _fetch_docs():
@@ -7542,6 +7546,10 @@ class MemoryGraph:
                 "namespace_write_access": doc.get("namespace_write_access") or [],
                 "organization_read_access": doc.get("organization_read_access") or [],
                 "organization_write_access": doc.get("organization_write_access") or [],
+                # Relevance scores (stored in DB)
+                "predicted_importance": doc.get("predicted_importance"),
+                "behavioral_score": doc.get("behavioral_score"),
+                "relevance_score": doc.get("relevance_score"),  # Deprecated
             }
             try:
                 results.append(ParseStoredMemory.from_dict(data))

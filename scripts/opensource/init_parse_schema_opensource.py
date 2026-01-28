@@ -840,7 +840,11 @@ def main():
                                 'user_write_access': {'required': False, 'type': 'Array'},
                                 'workspace': {'required': False, 'targetClass': 'WorkSpace', 'type': 'Pointer'},
                                 'workspace_read_access': {'required': False, 'type': 'Array'},
-                                'workspace_write_access': {'required': False, 'type': 'Array'}}},
+                                'workspace_write_access': {'required': False, 'type': 'Array'},
+                                # Relevance scores for predictive memory retrieval
+                                'relevance_score': {'required': False, 'type': 'Number'},
+                                'predicted_importance': {'required': False, 'type': 'Number'},
+                                'behavioral_score': {'required': False, 'type': 'Number'}}},
     'MemoryCollection': {   'classLevelPermissions': {   'count': {'*': True},
                                                          'create': {'*': True},
                                                          'delete': {'*': True},

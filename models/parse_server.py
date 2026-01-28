@@ -713,6 +713,50 @@ class ParseStoredMemory(BaseModel):
     organization_read_access: Optional[List[str]] = Field(default_factory=list)
     organization_write_access: Optional[List[str]] = Field(default_factory=list)
 
+    # =============================================================================
+    # RELEVANCE SCORES - Research-backed scoring system
+    # =============================================================================
+    # References:
+    #   - BM25/IR: log1p() normalization for frequency (prevents popularity bias)
+    #   - RRF (Cormack et al. 2009): score = Σ 1/(k + rank_i) for rank fusion
+    #   - Time decay: exp(-λ * age) with configurable half-life
+    #   - Multi-signal fusion outperforms single signals (LTR research)
+    # =============================================================================
+
+    # COMPUTED AT SEARCH TIME - Base signals:
+    similarity_score: Optional[float] = Field(
+        default=None,
+        description="Cosine similarity from vector search (0-1). Measures semantic relevance to query."
+    )
+    popularity_score: Optional[float] = Field(
+        default=None,
+        description="Popularity signal (0-1): 0.5*cacheConfidenceWeighted30d + 0.5*citationConfidenceWeighted30d. Uses stored EMA fields."
+    )
+    recency_score: Optional[float] = Field(
+        default=None,
+        description="Recency signal (0-1): exp(-0.05 * days_since_last_access). Half-life ~14 days."
+    )
+
+    # ONLY when rank_results=True - Reranker signals:
+    reranker_score: Optional[float] = Field(
+        default=None,
+        description="Reranker relevance (0-1). From cross-encoder (Cohere/Qwen3/BGE) or LLM (GPT-5-nano)."
+    )
+    reranker_confidence: Optional[float] = Field(
+        default=None,
+        description="Reranker confidence (0-1). Meaningful for LLM reranking; equals reranker_score for cross-encoders."
+    )
+    reranker_type: Optional[str] = Field(
+        default=None,
+        description="Reranker type: 'cross_encoder' (Cohere/Qwen3/BGE) or 'llm' (GPT-5-nano/GPT-4o-mini)."
+    )
+
+    # FINAL COMBINED SCORE:
+    relevance_score: Optional[float] = Field(
+        default=None,
+        description="Final relevance (0-1). rank_results=False: 0.6*sim + 0.25*pop + 0.15*recency. rank_results=True: RRF-based fusion."
+    )
+
     model_config = ConfigDict(
         from_attributes=True,  # Allows conversion from ORM objects
         validate_assignment=True,  # Validate during assignment
@@ -779,6 +823,14 @@ class ParseStoredMemory(BaseModel):
         if data.get('type') is None or data.get('type') == '':
             data['type'] = 'TextMemoryItem'
             logger.info(f"ParseStoredMemory.from_dict - Missing type field, defaulting to 'TextMemoryItem'")
+
+        # SCORE ALIASING: Map legacy relevance_score to predicted_importance
+        # In MongoDB/Parse, this field was called relevance_score but we renamed it to predicted_importance
+        # for clearer semantics. This ensures existing stored values are used.
+        if data.get('predicted_importance') is None and data.get('relevance_score') is not None:
+            data['predicted_importance'] = data['relevance_score']
+            logger.debug(f"ParseStoredMemory.from_dict - Aliased relevance_score ({data['relevance_score']}) to predicted_importance")
+
         logger.info(f"ParseStoredMemory.from_dict - Final data after conversion: {data}")
         instance = cls(**data)
         logger.info(f"ParseStoredMemory.from_dict - Created instance with memoryChunkIds: {instance.memoryChunkIds}")
@@ -938,11 +990,49 @@ class Memory(BaseModel):
         default=None,
         description="Quantized INT8 embedding vector (values -128 to 127). 4x smaller than float32. Default format for efficiency."
     )
-    
-    # Relevance score from server ranking (optional, populated by predictive builders or ranking algorithms)
+
+    # =============================================================================
+    # RELEVANCE SCORES - Research-backed scoring system
+    # =============================================================================
+    # References:
+    #   - BM25/IR: log1p() normalization for frequency (prevents popularity bias)
+    #   - RRF (Cormack et al. 2009): score = Σ 1/(k + rank_i) for rank fusion
+    #   - Time decay: exp(-λ * age) with configurable half-life
+    #   - Multi-signal fusion outperforms single signals (LTR research)
+    # =============================================================================
+
+    # COMPUTED AT SEARCH TIME - Base signals:
+    similarity_score: Optional[float] = Field(
+        default=None,
+        description="Cosine similarity from vector search (0-1). Measures semantic relevance to query."
+    )
+    popularity_score: Optional[float] = Field(
+        default=None,
+        description="Popularity signal (0-1): 0.5*cacheConfidenceWeighted30d + 0.5*citationConfidenceWeighted30d. Uses stored EMA fields."
+    )
+    recency_score: Optional[float] = Field(
+        default=None,
+        description="Recency signal (0-1): exp(-0.05 * days_since_last_access). Half-life ~14 days."
+    )
+
+    # ONLY when rank_results=True - Reranker signals:
+    reranker_score: Optional[float] = Field(
+        default=None,
+        description="Reranker relevance (0-1). From cross-encoder (Cohere/Qwen3/BGE) or LLM (GPT-5-nano)."
+    )
+    reranker_confidence: Optional[float] = Field(
+        default=None,
+        description="Reranker confidence (0-1). Meaningful for LLM reranking; equals reranker_score for cross-encoders."
+    )
+    reranker_type: Optional[str] = Field(
+        default=None,
+        description="Reranker type: 'cross_encoder' (Cohere/Qwen3/BGE) or 'llm' (GPT-5-nano/GPT-4o-mini)."
+    )
+
+    # FINAL COMBINED SCORE:
     relevance_score: Optional[float] = Field(
         default=None,
-        description="Relevance score from server-side ranking algorithm. Higher scores indicate more relevant memories. Computed as: 60% vector similarity + 30% transition probability + 20% access frequency."
+        description="Final relevance (0-1). rank_results=False: 0.6*sim + 0.25*pop + 0.15*recency. rank_results=True: RRF-based fusion."
     )
 
     model_config = ConfigDict(
@@ -953,21 +1043,8 @@ class Memory(BaseModel):
         extra='allow'
     )
     
-    @field_serializer('relevance_score', when_used='json')
-    def serialize_relevance_score(self, v):
-        """Ensure relevance_score is never None in JSON output - calculate estimate if missing"""
-        if v is not None:
-            return float(v)
-        # If no relevance_score provided, estimate based on content quality
-        # This provides a reasonable default for memories without server-side ranking
-        if not self.content or len(self.content.strip()) < 10:
-            return 0.05  # Very short/empty content = low relevance
-        elif len(self.content) < 50:
-            return 0.15  # Short content = low-medium relevance
-        elif len(self.content) < 200:
-            return 0.40  # Medium content = medium relevance
-        else:
-            return 0.65  # Rich content = high relevance (assumes it's meaningful)
+    # Note: Removed serialize_relevance_score fallback - scores should be None if not computed
+    # The new scoring fields (predicted_importance, behavioral_score, etc.) provide clear semantics
 
     def model_dump(self, *args, **kwargs):
         def convert_dt(obj):
@@ -1069,7 +1146,13 @@ class Memory(BaseModel):
             # Role and category fields
             'role': getattr(parse_memory, 'role', None),
             'category': getattr(parse_memory, 'category', None),
-            # Relevance score from server ranking
+            # Relevance scores - Research-backed scoring system
+            'similarity_score': getattr(parse_memory, 'similarity_score', None),
+            'popularity_score': getattr(parse_memory, 'popularity_score', None),
+            'recency_score': getattr(parse_memory, 'recency_score', None),
+            'reranker_score': getattr(parse_memory, 'reranker_score', None),
+            'reranker_confidence': getattr(parse_memory, 'reranker_confidence', None),
+            'reranker_type': getattr(parse_memory, 'reranker_type', None),
             'relevance_score': getattr(parse_memory, 'relevance_score', None),
         }
 

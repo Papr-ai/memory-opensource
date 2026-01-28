@@ -535,9 +535,15 @@ class MemorySourceInfo(BaseModel):
 
 
 class RerankingProvider(str, Enum):
-    """Reranking provider options"""
-    OPENAI = "openai"      # OpenAI GPT models (better quality, slower)
-    COHERE = "cohere"      # Cohere rerank API (faster, optimized for reranking)
+    """Reranking provider options for memory search results.
+
+    OPENAI: LLM-based reranking using GPT models. Returns score + confidence.
+            Models: gpt-5-nano (fast), gpt-5-mini (better quality), gpt-4o-mini
+    COHERE: Cross-encoder reranking. Faster, optimized for relevance ranking.
+            Models: rerank-v3.5 (latest), rerank-english-v3.0, rerank-multilingual-v3.0
+    """
+    OPENAI = "openai"      # LLM-based (gpt-5-nano default, gpt-5-mini for quality)
+    COHERE = "cohere"      # Cross-encoder (rerank-v3.5 default)
 
 
 class RerankingConfig(BaseModel):
@@ -552,16 +558,28 @@ class RerankingConfig(BaseModel):
     )
     reranking_model: str = Field(
         default="gpt-5-nano",
-        description="Model to use for reranking. For OpenAI: 'gpt-5-nano', 'gpt-4o-mini', 'gpt-4.1-nano', etc. For Cohere: 'rerank-v3.5' (default, latest), 'rerank-english-v3.0', 'rerank-multilingual-v3.0'"
+        description="Model to use for reranking. OpenAI (LLM): 'gpt-5-nano' (fast, default), 'gpt-5-mini' (better quality, more expensive), 'gpt-4o-mini'. Cohere (cross-encoder): 'rerank-v3.5' (latest), 'rerank-english-v3.0', 'rerank-multilingual-v3.0'"
     )
-    
+
     model_config = ConfigDict(
         json_schema_extra={
-            "example": {
-                "reranking_enabled": True,
-                "reranking_provider": "openai",
-                "reranking_model": "gpt-5-nano"
-            }
+            "examples": [
+                {
+                    "reranking_enabled": True,
+                    "reranking_provider": "openai",
+                    "reranking_model": "gpt-5-nano"
+                },
+                {
+                    "reranking_enabled": True,
+                    "reranking_provider": "openai",
+                    "reranking_model": "gpt-5-mini"
+                },
+                {
+                    "reranking_enabled": True,
+                    "reranking_provider": "cohere",
+                    "reranking_model": "rerank-v3.5"
+                }
+            ]
         }
     )
 

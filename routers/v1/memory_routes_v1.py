@@ -5,6 +5,7 @@ from typing import Optional, Dict, Any, List, Union
 import json
 import httpx
 import os
+import re
 from os import environ as env
 from toon import encode as toon_encode
 from models.memory_models import SearchResponse, SearchRequest, MemoryMetadata, SearchResult, RelationshipItem, NeoNode, ResponseFormat
@@ -2821,39 +2822,232 @@ async def search_v1(
         confidence_scores = relevant_items.confidence_scores or []
         has_rerank_scores = bool(confidence_scores) and len(confidence_scores) == len(memory_items_full)
 
+        # Debug logging for similarity score matching
+        logger.info(f"DEBUG: similarity_scores_by_id has {len(similarity_scores_by_id)} entries")
+        logger.info(f"DEBUG: similarity_scores_by_id keys (first 10): {list(similarity_scores_by_id.keys())[:10]}")
+        logger.info(f"DEBUG: similarity_scores_by_id values (first 10): {list(similarity_scores_by_id.values())[:10]}")
+        logger.info(f"DEBUG: memory_items_full has {len(memory_items_full)} items")
+        for i, mem in enumerate(memory_items_full[:5]):
+            mem_id = getattr(mem, "memoryId", None) or getattr(mem, "id", None) or getattr(mem, "objectId", None)
+            chunk_ids = getattr(mem, "memoryChunkIds", None) or []
+            logger.info(f"DEBUG: memory[{i}] memoryId={mem_id}, memoryChunkIds={chunk_ids[:3] if chunk_ids else []}")
+
         def _score_from_similarity(mem):
             mem_id = getattr(mem, "memoryId", None) or getattr(mem, "id", None) or getattr(mem, "objectId", None)
+            # Direct match on memory ID
             if mem_id and mem_id in similarity_scores_by_id:
                 return similarity_scores_by_id.get(mem_id)
+            # Check chunk IDs from the memory
             chunk_ids = getattr(mem, "memoryChunkIds", None) or []
             for chunk_id in chunk_ids:
                 if chunk_id in similarity_scores_by_id:
                     return similarity_scores_by_id.get(chunk_id)
+            # Check if any similarity score key starts with this memory ID (e.g., memoryId_0, memoryId_grouped_0)
+            if mem_id:
+                for score_key, score_val in similarity_scores_by_id.items():
+                    # Match pattern: memoryId_<number> or memoryId_grouped_<number>
+                    if score_key.startswith(mem_id + '_') or score_key.startswith(mem_id + '_grouped'):
+                        return score_val
+                # Also check if the score key (with suffixes stripped) matches the memory ID
+                for score_key, score_val in similarity_scores_by_id.items():
+                    # Strip _grouped and _<number> suffixes from score_key for comparison
+                    base_score_key = re.sub(r'(_grouped)?(_\d+)?$', '', score_key)
+                    if base_score_key == mem_id:
+                        return score_val
             return None
 
-        relevance_scores = []
-        if has_rerank_scores:
-            for mem, score in zip(memory_items_full, confidence_scores):
-                if score is not None:
-                    mem.relevance_score = float(score)
-                    relevance_scores.append(mem.relevance_score)
+        # =============================================================================
+        # RELEVANCE SCORING - Research-backed multi-signal fusion
+        # =============================================================================
+        # References:
+        #   - BM25/IR: log1p() normalization for frequency (prevents popularity bias)
+        #   - RRF (Cormack et al. 2009): score = Σ 1/(k + rank_i) for robust rank fusion
+        #   - Time decay: exp(-λ * age) with configurable half-life
+        #   - Multi-signal fusion outperforms single signals (LTR research)
+        #
+        # SCORES COMPUTED AT SEARCH TIME:
+        #   1. similarity_score: Cosine similarity from vector search (0-1)
+        #   2. popularity_score: 0.5*cacheConf + 0.5*citationConf (0-1)
+        #   3. recency_score: exp(-0.05 * days_since_access) (0-1, half-life ~14 days)
+        #   4. reranker_score: Cross-encoder or LLM relevance (0-1, only if rank_results=True)
+        #   5. relevance_score: Final combined score for ranking (0-1)
+        # =============================================================================
+        import math
+        from datetime import datetime, timezone
+
+        # Determine reranker type from config
+        reranking_config = getattr(search_request, 'reranking_config', None)
+        reranking_provider = None
+        if reranking_config and reranking_config.reranking_enabled:
+            reranking_provider = reranking_config.reranking_provider
+
+        # Helper: Determine if provider is LLM-based or cross-encoder
+        def _is_llm_reranker(provider) -> bool:
+            """OpenAI models are LLM-based; Cohere uses cross-encoder"""
+            if provider is None:
+                return False
+            from models.memory_models import RerankingProvider
+            return provider == RerankingProvider.OPENAI
+
+        # RRF constant (Cormack et al. 2009)
+        RRF_K = 60
+
+        # ---------------------------------------------------------------------
+        # Step 1: similarity_score - Cosine similarity from vector search
+        # ---------------------------------------------------------------------
+        sim_count = 0
+        for mem in memory_items_full:
+            sim_score = _score_from_similarity(mem)
+            if sim_score is not None:
+                mem.similarity_score = float(sim_score)
+                sim_count += 1
+        logger.info(f"SCORES: similarity_score assigned to {sim_count}/{len(memory_items_full)} memories")
+
+        # ---------------------------------------------------------------------
+        # Step 2: popularity_score - From stored cache/citation EMA fields
+        # Formula: 0.5 * cacheConfidenceWeighted30d + 0.5 * citationConfidenceWeighted30d
+        # Uses log1p normalization if raw counts, but confidence fields are already 0-1
+        # ---------------------------------------------------------------------
+        pop_count = 0
+        for mem in memory_items_full:
+            cache_conf = getattr(mem, 'cacheConfidenceWeighted30d', None) or 0.0
+            cite_conf = getattr(mem, 'citationConfidenceWeighted30d', None) or 0.0
+            # Both confidence fields are already in reasonable 0-1ish range
+            # Normalize to ensure 0-1 output (cap at 1.0)
+            popularity = 0.5 * min(float(cache_conf), 1.0) + 0.5 * min(float(cite_conf), 1.0)
+            mem.popularity_score = float(min(popularity, 1.0))
+            if cache_conf > 0 or cite_conf > 0:
+                pop_count += 1
+        logger.info(f"SCORES: popularity_score computed for {pop_count}/{len(memory_items_full)} memories with data")
+
+        # ---------------------------------------------------------------------
+        # Step 3: recency_score - Exponential time decay
+        # Formula: exp(-λ * days_since_last_access) where λ = 0.05 (half-life ~14 days)
+        # Half-life calculation: 0.5 = exp(-λ * t) => t = ln(2)/λ ≈ 13.9 days
+        # ---------------------------------------------------------------------
+        RECENCY_LAMBDA = 0.05  # Decay rate (half-life ~14 days)
+        now = datetime.now(timezone.utc)
+        rec_count = 0
+        for mem in memory_items_full:
+            last_accessed = getattr(mem, 'lastAccessedAt', None)
+            if last_accessed:
+                try:
+                    if isinstance(last_accessed, str):
+                        last_accessed = datetime.fromisoformat(last_accessed.replace('Z', '+00:00'))
+                    elif isinstance(last_accessed, dict) and 'iso' in last_accessed:
+                        last_accessed = datetime.fromisoformat(last_accessed['iso'].replace('Z', '+00:00'))
+
+                    if last_accessed.tzinfo is None:
+                        last_accessed = last_accessed.replace(tzinfo=timezone.utc)
+
+                    days_since = (now - last_accessed).total_seconds() / 86400.0
+                    recency = math.exp(-RECENCY_LAMBDA * max(days_since, 0))
+                    mem.recency_score = float(recency)
+                    rec_count += 1
+                except Exception as e:
+                    logger.debug(f"Failed to compute recency for memory: {e}")
+                    mem.recency_score = 0.5  # Default to mid-range
+            else:
+                mem.recency_score = 0.5  # Default for memories without lastAccessedAt
+        logger.info(f"SCORES: recency_score computed for {rec_count}/{len(memory_items_full)} memories with lastAccessedAt")
+
+        # ---------------------------------------------------------------------
+        # Step 4: reranker_score - Only when rank_results=True
+        # Cross-encoder (Cohere): relevance_score directly
+        # LLM (GPT-5-nano): score normalized from 1-10 to 0-1, plus confidence
+        # ---------------------------------------------------------------------
+        if rank_results and has_rerank_scores:
+            is_llm = _is_llm_reranker(reranking_provider)
+            reranker_type_str = "llm" if is_llm else "cross_encoder"
+
+            for i, mem in enumerate(memory_items_full):
+                if i < len(confidence_scores):
+                    raw_score = confidence_scores[i] or 0.0
+
+                    if is_llm:
+                        # LLM returns score 1-10, normalize to 0-1
+                        # confidence_scores contains the normalized confidence (0-1)
+                        mem.reranker_score = float(min(raw_score, 1.0))
+                        mem.reranker_confidence = float(min(raw_score, 1.0))
+                    else:
+                        # Cross-encoder returns 0-1 directly
+                        mem.reranker_score = float(min(raw_score, 1.0))
+                        mem.reranker_confidence = float(min(raw_score, 1.0))
+
+                    mem.reranker_type = reranker_type_str
+
+            logger.info(f"SCORES: reranker_score ({reranker_type_str}) assigned to {len(memory_items_full)} memories")
+
+        # ---------------------------------------------------------------------
+        # Step 5: relevance_score - Final combined score for ranking
+        # ---------------------------------------------------------------------
+        # rank_results=False:
+        #   relevance_score = 0.60 * similarity + 0.25 * popularity + 0.15 * recency
+        #
+        # rank_results=True:
+        #   Use RRF to combine similarity and reranker rankings, then boost
+        #   rrf_score = 1/(k + sim_rank) + 1/(k + reranker_rank)
+        #   relevance_score = normalize(rrf) * (1 + 0.1*popularity + 0.05*recency)
+        # ---------------------------------------------------------------------
+
+        if rank_results and has_rerank_scores:
+            # Build ranking lists for RRF
+            # Rank 1: Semantic similarity ranking
+            semantic_ranks = {}
+            sorted_by_sim = sorted(
+                [(i, getattr(mem, 'similarity_score', None) or 0.0) for i, mem in enumerate(memory_items_full)],
+                key=lambda x: x[1], reverse=True
+            )
+            for rank, (idx, _) in enumerate(sorted_by_sim, start=1):
+                semantic_ranks[idx] = rank
+
+            # Rank 2: Reranker score ranking
+            reranker_ranks = {}
+            sorted_by_rerank = sorted(
+                [(i, getattr(mem, 'reranker_score', None) or 0.0) for i, mem in enumerate(memory_items_full)],
+                key=lambda x: x[1], reverse=True
+            )
+            for rank, (idx, _) in enumerate(sorted_by_rerank, start=1):
+                reranker_ranks[idx] = rank
+
+            # Compute RRF-based relevance_score with behavioral boost
+            max_rrf = 2.0 / (RRF_K + 1)  # Max possible RRF with 2 lists
+
+            for i, mem in enumerate(memory_items_full):
+                sem_rank = semantic_ranks.get(i, len(memory_items_full))
+                rerank_rank = reranker_ranks.get(i, len(memory_items_full))
+
+                # RRF formula: sum of reciprocal ranks
+                rrf_score = (1.0 / (RRF_K + sem_rank)) + (1.0 / (RRF_K + rerank_rank))
+                normalized_rrf = rrf_score / max_rrf  # Normalize to 0-1
+
+                # Boost with popularity and recency signals
+                pop = getattr(mem, 'popularity_score', 0.0) or 0.0
+                rec = getattr(mem, 'recency_score', 0.5) or 0.5
+                boost = 1.0 + 0.1 * pop + 0.05 * rec
+
+                mem.relevance_score = float(min(normalized_rrf * boost, 1.0))
+
+            logger.info(f"SCORES: relevance_score (RRF + boost) computed for {len(memory_items_full)} memories")
         else:
-            if rank_results:
-                logger.warning("rank_results=True but no rerank scores available; using similarity scores for relevance")
+            # rank_results=False: Simple weighted combination
+            # relevance_score = 0.60 * similarity + 0.25 * popularity + 0.15 * recency
             for mem in memory_items_full:
-                score = _score_from_similarity(mem)
-                if score is not None:
-                    mem.relevance_score = float(score)
-                    relevance_scores.append(mem.relevance_score)
+                sim = getattr(mem, 'similarity_score', None) or 0.0
+                pop = getattr(mem, 'popularity_score', None) or 0.0
+                rec = getattr(mem, 'recency_score', None) or 0.5
 
-        if relevance_scores and len(set(relevance_scores)) <= 1 and rank_results:
-            logger.warning("rank_results=True but relevance_score values are identical; check reranker output")
+                relevance = 0.60 * sim + 0.25 * pop + 0.15 * rec
+                mem.relevance_score = float(min(relevance, 1.0))
 
+            logger.info(f"SCORES: relevance_score (weighted) computed for {len(memory_items_full)} memories")
+
+        # ---------------------------------------------------------------------
+        # Sort memories by relevance_score (final ranking)
+        # ---------------------------------------------------------------------
         if memory_items_full:
             def _sort_key(mem):
                 score = getattr(mem, "relevance_score", None)
-                if score is None:
-                    score = _score_from_similarity(mem)
                 return score if score is not None else -1.0
             memory_items_full = sorted(memory_items_full, key=_sort_key, reverse=True)
             relevant_items.memory_items = memory_items_full
@@ -3000,53 +3194,53 @@ async def search_v1(
                 try:
                     asyncio.create_task(
                         query_log_service.create_query_and_retrieval_logs_background(
-                            query=query,
-                            search_request=search_request,
-                            metadata=metadata,
-                            resolved_user_id=resolved_user_id,
-                            workspace_id=workspace_id,
-                            relevant_items=relevant_items,
-                            retrieval_latency_ms=retrieval_latency_ms,
-                            search_start_time=search_start_time,
-                            session_token=session_token,
-                            api_key=api_key,
-                            client_type=client_type,
-                            chat_gpt=chat_gpt,
-                            search_id=search_id  # Pass the generated search_id
-                        )
+                query=query,
+                search_request=search_request,
+                metadata=metadata,
+                resolved_user_id=resolved_user_id,
+                workspace_id=workspace_id,
+                relevant_items=relevant_items,
+                retrieval_latency_ms=retrieval_latency_ms,
+                search_start_time=search_start_time,
+                session_token=session_token,
+                api_key=api_key,
+                client_type=client_type,
+                chat_gpt=chat_gpt,
+                search_id=search_id  # Pass the generated search_id
+            )
                     )
                 except Exception as e:
                     logger.error(f"Error scheduling query log background task: {e}")
 
             # Add telemetry logging as fire-and-forget task (edition-aware)
-            # Uses TelemetryService which handles OSS (PostHog) vs Cloud (Amplitude) automatically
-            async def log_search_telemetry():
-                """Background task for telemetry"""
-                try:
-                    from core.services.telemetry import get_telemetry
-                    telemetry = get_telemetry()
-                    await telemetry.track(
-                        "search",
-                        {
-                            "client_type": client_type,
-                            "has_results": len(memory_items) > 0 if memory_items else False,
-                            "result_count": len(memory_items) if memory_items else 0,
-                            "neo_node_count": len(neo_nodes) if neo_nodes else 0,
-                            "retrieval_latency_ms": retrieval_latency_ms,
-                            "enable_agentic_graph": search_request.enable_agentic_graph,
-                            "api_key": api_key,  # Track which API key is used (anonymized in OSS)
-                        },
-                        user_id=resolved_user_id,  # End user
-                        developer_id=developer_id  # API key owner
-                    )
-                except Exception as e:
-                    logger.error(f"Error tracking search: {e}")
-
+        # Uses TelemetryService which handles OSS (PostHog) vs Cloud (Amplitude) automatically
+        async def log_search_telemetry():
+            """Background task for telemetry"""
+            try:
+                from core.services.telemetry import get_telemetry
+                telemetry = get_telemetry()
+                await telemetry.track(
+                    "search",
+                    {
+                        "client_type": client_type,
+                        "has_results": len(memory_items) > 0 if memory_items else False,
+                        "result_count": len(memory_items) if memory_items else 0,
+                        "neo_node_count": len(neo_nodes) if neo_nodes else 0,
+                        "retrieval_latency_ms": retrieval_latency_ms,
+                        "enable_agentic_graph": search_request.enable_agentic_graph,
+                        "api_key": api_key,  # Track which API key is used (anonymized in OSS)
+                    },
+                    user_id=resolved_user_id,  # End user
+                    developer_id=developer_id  # API key owner
+                )
+            except Exception as e:
+                logger.error(f"Error tracking search: {e}")
+        
             try:
                 asyncio.create_task(log_search_telemetry())
             except Exception as e:
                 logger.error(f"Error scheduling telemetry background task: {e}")
-
+        
         background_task_end_time = time.time()
         logger.warning(f"Background task setup timing: {(background_task_end_time - background_task_start_time) * 1000:.2f}ms")
 
