@@ -5445,8 +5445,8 @@ async def test_v1_search_performance_under_500ms(app, caplog):
                 second_scores = _get_relevance_scores(response_body)
                 _assert_sorted_desc(second_scores, "Second search (rank_results=false)")
 
-                # Third search (rank_results=True)
-                logger.info("Performing third search (rank_results=true)...")
+                # Third search (rank_results=True with OpenAI LLM reranking - default)
+                logger.info("Performing third search (rank_results=true, OpenAI LLM reranking)...")
                 third_records_start = len(caplog.records)
                 start_time = time.time()
                 search_request_ranked = SearchRequest(
@@ -5467,21 +5467,179 @@ async def test_v1_search_performance_under_500ms(app, caplog):
                 logger.info(f"Third search response status: {response.status_code}")
                 server_timing_header = response.headers.get("X-Server-Processing-Ms")
                 if server_timing_header:
-                    logger.info(f"Third search - X-Server-Processing-Ms: {server_timing_header}ms")
+                    logger.info(f"Third search (OpenAI) - X-Server-Processing-Ms: {server_timing_header}ms")
                 response_body = response.json()
                 validated_response = SearchResponse.model_validate(response_body)
                 assert validated_response.error is None, "Response should not have errors"
                 assert validated_response.code == 200, "Logical status code in the response body"
                 assert validated_response.data.memories is not None, "Response should have memories"
                 assert validated_response.data.nodes is not None, "Response should have nodes"
-                logger.info(f"Found {len(validated_response.data.memories)} memories in third search")
-                logger.info(f"Found {len(validated_response.data.nodes)} nodes in third search")
+                logger.info(f"Found {len(validated_response.data.memories)} memories in third search (OpenAI)")
+                logger.info(f"Found {len(validated_response.data.nodes)} nodes in third search (OpenAI)")
 
                 third_scores = _get_relevance_scores(response_body)
-                _assert_sorted_desc(third_scores, "Third search (rank_results=true)")
+                _assert_sorted_desc(third_scores, "Third search (rank_results=true, OpenAI)")
 
                 if second_scores == third_scores:
                     logger.warning("rank_results=true produced identical relevance_score ordering to rank_results=false")
+
+                # Fourth search (rank_results=True with Cohere cross-encoder reranking)
+                logger.info("Performing fourth search (rank_results=true, Cohere cross-encoder reranking)...")
+                fourth_records_start = len(caplog.records)
+                start_time = time.time()
+                search_request_cohere = SearchRequest(
+                    query="quarterly planning meeting",
+                    rank_results=True,
+                    user_id=performance_user_id,
+                    reranking_config=RerankingConfig(
+                        reranking_enabled=True,
+                        reranking_provider=RerankingProvider.COHERE,
+                        reranking_model="rerank-v3.5"
+                    )
+                )
+                with caplog.at_level("WARNING"):
+                    response = await async_client.post(
+                        "/v1/memory/search?max_memories=20&max_nodes=10",
+                        json=search_request_cohere.model_dump(),
+                        headers=headers
+                    )
+                end_time = time.time()
+                fourth_search_time = (end_time - start_time) * 1000
+                fourth_records = caplog.records[fourth_records_start:]
+
+                logger.info(f"Fourth search response status: {response.status_code}")
+                server_timing_header = response.headers.get("X-Server-Processing-Ms")
+                if server_timing_header:
+                    logger.info(f"Fourth search (Cohere) - X-Server-Processing-Ms: {server_timing_header}ms")
+                response_body = response.json()
+                validated_response = SearchResponse.model_validate(response_body)
+                assert validated_response.error is None, "Response should not have errors"
+                assert validated_response.code == 200, "Logical status code in the response body"
+                assert validated_response.data.memories is not None, "Response should have memories"
+                assert validated_response.data.nodes is not None, "Response should have nodes"
+                logger.info(f"Found {len(validated_response.data.memories)} memories in fourth search (Cohere)")
+                logger.info(f"Found {len(validated_response.data.nodes)} nodes in fourth search (Cohere)")
+
+                fourth_scores = _get_relevance_scores(response_body)
+                _assert_sorted_desc(fourth_scores, "Fourth search (rank_results=true, Cohere)")
+
+                # Log reranking performance comparison
+                logger.info(f"\n{'='*60}")
+                logger.info(f"RERANKING PERFORMANCE COMPARISON")
+                logger.info(f"{'='*60}")
+                logger.info(f"  OpenAI LLM (gpt-5-nano): {third_search_time:.2f}ms")
+                logger.info(f"  Cohere cross-encoder (rerank-v3.5): {fourth_search_time:.2f}ms")
+                if fourth_search_time < third_search_time:
+                    speedup = ((third_search_time - fourth_search_time) / third_search_time) * 100
+                    logger.info(f"  Cohere is {speedup:.1f}% FASTER than OpenAI LLM")
+                else:
+                    slowdown = ((fourth_search_time - third_search_time) / third_search_time) * 100
+                    logger.info(f"  Cohere is {slowdown:.1f}% SLOWER than OpenAI LLM")
+                logger.info(f"{'='*60}\n")
+
+                # Direct score quality comparison between OpenAI and Cohere
+                # Re-run both rerankers on same broader query for quality comparison
+                comparison_query = "important meeting notes quarterly planning customer feedback"
+
+                # OpenAI reranking
+                openai_req = SearchRequest(
+                    query=comparison_query,
+                    rank_results=True,
+                    user_id=performance_user_id,
+                    reranking_config=RerankingConfig(
+                        reranking_enabled=True,
+                        reranking_provider=RerankingProvider.OPENAI,
+                        reranking_model="gpt-5-nano"
+                    )
+                )
+                openai_resp = await async_client.post(
+                    "/v1/memory/search?max_memories=20&max_nodes=10",
+                    json=openai_req.model_dump(),
+                    headers=headers
+                )
+                openai_data = openai_resp.json()
+                openai_memories = openai_data.get("data", {}).get("memories", [])
+
+                # Cohere reranking
+                cohere_req = SearchRequest(
+                    query=comparison_query,
+                    rank_results=True,
+                    user_id=performance_user_id,
+                    reranking_config=RerankingConfig(
+                        reranking_enabled=True,
+                        reranking_provider=RerankingProvider.COHERE,
+                        reranking_model="rerank-v3.5"
+                    )
+                )
+                cohere_resp = await async_client.post(
+                    "/v1/memory/search?max_memories=20&max_nodes=10",
+                    json=cohere_req.model_dump(),
+                    headers=headers
+                )
+                cohere_data = cohere_resp.json()
+                cohere_memories = cohere_data.get("data", {}).get("memories", [])
+
+                # Log detailed score comparison
+                logger.info(f"\n{'='*70}")
+                logger.info(f"RERANKING QUALITY COMPARISON (query: '{comparison_query[:40]}...')")
+                logger.info(f"{'='*70}")
+                logger.info(f"\n--- OpenAI LLM (gpt-5-nano) ---")
+                for i, mem in enumerate(openai_memories[:5]):
+                    logger.info(f"  [{i+1}] content: {mem.get('content', 'N/A')[:50]}...")
+                    logger.info(f"      similarity_score: {mem.get('similarity_score')}")
+                    logger.info(f"      reranker_score: {mem.get('reranker_score')}")
+                    logger.info(f"      reranker_confidence: {mem.get('reranker_confidence')}")
+                    logger.info(f"      reranker_type: {mem.get('reranker_type')}")
+                    logger.info(f"      relevance_score (FINAL): {mem.get('relevance_score')}")
+
+                logger.info(f"\n--- Cohere Cross-Encoder (rerank-v3.5) ---")
+                for i, mem in enumerate(cohere_memories[:5]):
+                    logger.info(f"  [{i+1}] content: {mem.get('content', 'N/A')[:50]}...")
+                    logger.info(f"      similarity_score: {mem.get('similarity_score')}")
+                    logger.info(f"      reranker_score: {mem.get('reranker_score')}")
+                    logger.info(f"      reranker_confidence: {mem.get('reranker_confidence')}")
+                    logger.info(f"      reranker_type: {mem.get('reranker_type')}")
+                    logger.info(f"      relevance_score (FINAL): {mem.get('relevance_score')}")
+
+                # Compare rankings
+                openai_ids = [m.get('id') for m in openai_memories[:10]]
+                cohere_ids = [m.get('id') for m in cohere_memories[:10]]
+                rank_agreement = sum(1 for i, oid in enumerate(openai_ids) if i < len(cohere_ids) and oid == cohere_ids[i])
+
+                logger.info(f"\n--- Ranking Agreement ---")
+                logger.info(f"  Top-10 exact position matches: {rank_agreement}/10")
+                logger.info(f"  OpenAI top-5 IDs: {[id[:12]+'...' if id else 'N/A' for id in openai_ids[:5]]}")
+                logger.info(f"  Cohere top-5 IDs: {[id[:12]+'...' if id else 'N/A' for id in cohere_ids[:5]]}")
+                logger.info(f"{'='*70}\n")
+
+                # RERANKING VERIFICATION ASSERTIONS
+                # Verify OpenAI LLM reranking is working (scores should not be 0.0 or None)
+                if openai_memories:
+                    openai_mem = openai_memories[0]
+                    openai_reranker_score = openai_mem.get('reranker_score')
+                    openai_reranker_confidence = openai_mem.get('reranker_confidence')
+                    openai_reranker_type = openai_mem.get('reranker_type')
+
+                    assert openai_reranker_score is not None, "OpenAI reranker_score should not be None"
+                    assert openai_reranker_score > 0.0, f"OpenAI reranker_score should be > 0, got {openai_reranker_score}"
+                    assert openai_reranker_confidence is not None, "OpenAI reranker_confidence should not be None"
+                    assert openai_reranker_confidence > 0.0, f"OpenAI reranker_confidence should be > 0, got {openai_reranker_confidence}"
+                    assert openai_reranker_type == "llm", f"OpenAI reranker_type should be 'llm', got {openai_reranker_type}"
+                    logger.info(f"✅ OpenAI LLM reranking verified: score={openai_reranker_score}, confidence={openai_reranker_confidence}")
+
+                # Verify Cohere cross-encoder reranking is working
+                if cohere_memories:
+                    cohere_mem = cohere_memories[0]
+                    cohere_reranker_score = cohere_mem.get('reranker_score')
+                    cohere_reranker_confidence = cohere_mem.get('reranker_confidence')
+                    cohere_reranker_type = cohere_mem.get('reranker_type')
+
+                    assert cohere_reranker_score is not None, "Cohere reranker_score should not be None"
+                    assert cohere_reranker_score > 0.0, f"Cohere reranker_score should be > 0, got {cohere_reranker_score}"
+                    assert cohere_reranker_confidence is not None, "Cohere reranker_confidence should not be None"
+                    assert cohere_reranker_confidence > 0.0, f"Cohere reranker_confidence should be > 0, got {cohere_reranker_confidence}"
+                    assert cohere_reranker_type == "cross_encoder", f"Cohere reranker_type should be 'cross_encoder', got {cohere_reranker_type}"
+                    logger.info(f"✅ Cohere cross-encoder reranking verified: score={cohere_reranker_score}, confidence={cohere_reranker_confidence}")
 
                 # Fourth & fifth searches (no user_id/external_user_id filters)
                 ranking_query = "Top customers willing to buy papr memory api platform"
@@ -5520,7 +5678,8 @@ async def test_v1_search_performance_under_500ms(app, caplog):
                 logger.info("Performance test results:")
                 logger.info(f"  First search (end-to-end): {first_search_time:.2f}ms")
                 logger.info(f"  Second search (end-to-end): {second_search_time:.2f}ms")
-                logger.info(f"  Third search (end-to-end): {third_search_time:.2f}ms")
+                logger.info(f"  Third search (OpenAI rerank, end-to-end): {third_search_time:.2f}ms")
+                logger.info(f"  Fourth search (Cohere rerank, end-to-end): {fourth_search_time:.2f}ms")
                 logger.info(
                     f"  First search (server-only): {server_total_time_first_ms:.2f}ms"
                 )

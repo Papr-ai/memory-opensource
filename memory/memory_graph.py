@@ -6709,39 +6709,73 @@ class MemoryGraph:
                     async def score_one(item):
                         async with sem:
                             # Use fallback wrapper with backoff to survive 429s/quota
-                            resp = await chat_gpt._create_completion_with_fallback_async(
-                                model=reranking_config.reranking_model,
-                                messages=build_msg(query, item.content),
-                                max_tokens=int(env.get("RERANK_COMPLETION_TOKENS", "20")),
-                                temperature=0,
-                                response_format={"type":"json_object"}, 
-                            )
-                            content = resp.choices[0].message.content                            
+                            model_name = reranking_config.reranking_model
+                            messages = build_msg(query, item.content)
+                            is_gpt5 = model_name.startswith("gpt-5")
+
+                            # GPT-5 reasoning models need much larger token budget (2000+)
+                            # because reasoning tokens consume most of the budget
+                            if is_gpt5:
+                                token_budget = int(env.get("RERANK_GPT5_COMPLETION_TOKENS", "2000"))
+                            else:
+                                token_budget = int(env.get("RERANK_COMPLETION_TOKENS", "100"))
+
+                            logger.debug(f"LLM rerank calling model={model_name}, is_gpt5={is_gpt5}, token_budget={token_budget}")
+                            try:
+                                api_kwargs = {
+                                    "model": model_name,
+                                    "messages": messages,
+                                    "response_format": {"type": "json_object"},
+                                }
+
+                                if is_gpt5:
+                                    # For gpt-5 reasoning models: use max_completion_tokens + reasoning_effort
+                                    api_kwargs["max_completion_tokens"] = token_budget
+                                    api_kwargs["reasoning_effort"] = "low"  # low effort for simple scoring task
+                                else:
+                                    api_kwargs["max_tokens"] = token_budget
+                                    api_kwargs["temperature"] = 0
+
+                                resp = await chat_gpt._create_completion_with_fallback_async(**api_kwargs)
+                                content = resp.choices[0].message.content
+                                logger.debug(f"LLM rerank response (model={model_name}): '{content}' finish_reason={resp.choices[0].finish_reason}")
+                            except Exception as api_err:
+                                logger.error(f"LLM rerank API error: {api_err}")
+                                return 5, 0.5, item  # Return neutral score on API error
                             try:
                                 # Try JSON first - now expecting both score and confidence
                                 parsed = json.loads(content)
                                 score = float(parsed.get("score", 0))
                                 confidence = float(parsed.get("confidence", 0.5))  # Default confidence if not provided
-                            except Exception:
+                                logger.debug(f"LLM parsed score={score}, confidence={confidence}")
+                            except Exception as e:
+                                logger.warning(f"LLM JSON parse failed: {e}, content: {content}")
                                 # Fallback: extract numbers with regex
-                                matches = re.findall(r"(\d+(\.\d+)?)", content)
-                                score = float(matches[0]) if matches else 0
-                                confidence = float(matches[1]) if len(matches) > 1 else 0.5
+                                matches = re.findall(r"(\d+(?:\.\d+)?)", content)
+                                score = float(matches[0][0]) if matches else 0
+                                confidence = float(matches[1][0]) if len(matches) > 1 else 0.5
+                                logger.debug(f"LLM regex fallback score={score}, confidence={confidence}")
                             return score, confidence, item
                     start_rerank_sem = time.perf_counter()
                     scores = await asyncio.gather(*(score_one(m) for m in result.memory_items))
                     time_rerank_sem = time.perf_counter() - start_rerank_sem
                     logger.warning(f"Reranking with semaphore took {time_rerank_sem:.2f}s")
                     
-                    # Sort by score and extract confidence scores
+                    # Sort by score and extract both scores and confidences
                     sorted_results = sorted(scores, key=lambda x: x[0], reverse=True)
                     result.memory_items = [item for _, _, item in sorted_results]
-                    confidence_scores = [confidence for _, confidence, _ in sorted_results]
-                    
-                    # Store confidence scores in the result for later use
-                    result.confidence_scores = confidence_scores
-                    
-                    logger.info("Successfully reranked memory items using OpenAI")
+
+                    # Normalize LLM scores (1-10) to 0-1 range for consistency with Cohere
+                    # Store normalized scores in confidence_scores for downstream use as reranker_score
+                    normalized_scores = [(score / 10.0) for score, _, _ in sorted_results]
+                    confidence_values = [confidence for _, confidence, _ in sorted_results]
+
+                    # Use normalized relevance scores as the primary signal (what we call confidence_scores for legacy reasons)
+                    result.confidence_scores = normalized_scores
+                    # Also store raw confidence for potential future use
+                    result.llm_confidence_scores = confidence_values
+
+                    logger.info(f"Successfully reranked memory items using OpenAI - scores: {normalized_scores[:3]}, confidences: {confidence_values[:3]}")
             except Exception as e:
                 logger.error(f"Error during reranking: {e}", exc_info=True)
                 # Keep original order if reranking fails

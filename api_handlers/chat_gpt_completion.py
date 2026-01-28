@@ -189,6 +189,7 @@ class ChatGPTCompletion:
             else:
                 out.pop("max_tokens", None)
 
+        logger.debug(f"_normalize_chat_kwargs: model={model_name}, is_gpt5={is_gpt5}, max_completion_tokens={out.get('max_completion_tokens')}, reasoning_effort={out.get('reasoning_effort')}")
         return out
     
     async def _call_gemini_structured_async(self, messages: List[Dict[str, str]], response_model: BaseModel) -> BaseModel:

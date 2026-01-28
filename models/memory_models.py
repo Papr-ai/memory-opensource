@@ -558,7 +558,7 @@ class RerankingConfig(BaseModel):
     )
     reranking_model: str = Field(
         default="gpt-5-nano",
-        description="Model to use for reranking. OpenAI (LLM): 'gpt-5-nano' (fast, default), 'gpt-5-mini' (better quality, more expensive), 'gpt-4o-mini'. Cohere (cross-encoder): 'rerank-v3.5' (latest), 'rerank-english-v3.0', 'rerank-multilingual-v3.0'"
+        description="Model to use for reranking. OpenAI (LLM): 'gpt-5-nano' (fast reasoning, default), 'gpt-5-mini' (better quality reasoning). Cohere (cross-encoder): 'rerank-v3.5' (latest), 'rerank-english-v3.0', 'rerank-multilingual-v3.0'"
     )
 
     model_config = ConfigDict(
@@ -591,7 +591,8 @@ class RelatedMemoryResult(BaseModel):
     neo_context: Optional[str] = None
     neo_query: Optional[str] = None
     memory_source_info: Optional[MemorySourceInfo] = None
-    confidence_scores: Optional[List[float]] = Field(default_factory=list, description="Confidence scores for memory items (parallel to memory_items)")
+    confidence_scores: Optional[List[float]] = Field(default_factory=list, description="Reranker scores for memory items (parallel to memory_items). For LLM: normalized 1-10 score to 0-1. For cross-encoder: raw relevance score.")
+    llm_confidence_scores: Optional[List[float]] = Field(default_factory=list, description="LLM confidence scores (0-1) for LLM reranking only. Represents LLM's confidence in its relevance judgment.")
     similarity_scores_by_id: Optional[Dict[str, float]] = Field(default_factory=dict, description="Cosine similarity scores for each memory id")
     bigbird_memory_info: Optional[Any] = None
 

@@ -2819,7 +2819,8 @@ async def search_v1(
         rank_results = getattr(search_request, 'rank_results', False)
         memory_items_full = list(relevant_items.memory_items or [])
         similarity_scores_by_id = relevant_items.similarity_scores_by_id or {}
-        confidence_scores = relevant_items.confidence_scores or []
+        confidence_scores = relevant_items.confidence_scores or []  # Normalized reranker scores (0-1)
+        llm_confidence_scores = getattr(relevant_items, 'llm_confidence_scores', None) or []  # LLM confidence values
         has_rerank_scores = bool(confidence_scores) and len(confidence_scores) == len(memory_items_full)
 
         # Debug logging for similarity score matching
@@ -2965,18 +2966,22 @@ async def search_v1(
                     raw_score = confidence_scores[i] or 0.0
 
                     if is_llm:
-                        # LLM returns score 1-10, normalize to 0-1
-                        # confidence_scores contains the normalized confidence (0-1)
+                        # LLM: confidence_scores now contains normalized relevance (score/10)
+                        # llm_confidence_scores contains actual LLM confidence in its judgment
                         mem.reranker_score = float(min(raw_score, 1.0))
-                        mem.reranker_confidence = float(min(raw_score, 1.0))
+                        # Use LLM's confidence if available, otherwise fall back to score
+                        if llm_confidence_scores and i < len(llm_confidence_scores):
+                            mem.reranker_confidence = float(min(llm_confidence_scores[i] or 0.5, 1.0))
+                        else:
+                            mem.reranker_confidence = float(min(raw_score, 1.0))
                     else:
-                        # Cross-encoder returns 0-1 directly
+                        # Cross-encoder returns 0-1 directly (score == confidence for cross-encoders)
                         mem.reranker_score = float(min(raw_score, 1.0))
                         mem.reranker_confidence = float(min(raw_score, 1.0))
 
                     mem.reranker_type = reranker_type_str
 
-            logger.info(f"SCORES: reranker_score ({reranker_type_str}) assigned to {len(memory_items_full)} memories")
+            logger.info(f"SCORES: reranker_score ({reranker_type_str}) assigned to {len(memory_items_full)} memories - first 3: {[getattr(m, 'reranker_score', None) for m in memory_items_full[:3]]}")
 
         # ---------------------------------------------------------------------
         # Step 5: relevance_score - Final combined score for ranking
