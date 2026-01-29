@@ -13,6 +13,7 @@
 | Scenario | Total Latency | Status | Frequency |
 |----------|---------------|--------|-----------|
 | **Cold Start** | 2,447ms | ❌ 5x over SLA | Every new instance |
+| **Warm + Cache Expiry + Vertex AI Cold** | 2,137ms | ❌ 4x over SLA | After ~2 min idle |
 | **Warm + Cache Expiry** | 761ms | ❌ 1.5x over SLA | Every ~2 min/user |
 | **Warm + Slow Qdrant** | 529ms | ❌ Over SLA | ~17% of requests |
 | **Warm + All Caches HIT** | 240-340ms | ✅ Within SLA | ~70% of requests |
@@ -29,6 +30,16 @@ User experiences cold start when:
 - **Instance crash/restart** - Health check failure or OOM triggers replacement
 
 **Impact**: Less frequent than scale-from-zero, but still affects ~1-5% of requests during deployments and traffic spikes.
+
+#### Warm + Cache Expiry + Vertex AI Cold (2,137ms)
+User experiences this worst-case warm scenario when:
+- **All caches expire together** - Auth, embedding, workspace, customer tier all MISS
+- **Vertex AI endpoint is cold** - First embedding call after idle takes 568ms (vs normal 100-140ms)
+- **Stripe API call required** - Customer tier cache MISS triggers Stripe lookup (+180ms)
+
+**Impact**: Occurs after ~2+ minutes of user inactivity. Feels like cold start but container is running. Same instance handles request.
+
+**Evidence**: Log analysis showed 2,137ms request on warm instance with all 5 caches MISS and Vertex AI taking 568ms (4x normal).
 
 #### Warm + Cache Expiry (761ms)
 User experiences cache expiry when:
@@ -59,6 +70,7 @@ User experiences optimal latency when:
 | Issue | Observed Impact | Root Cause | Analysis Reference |
 |-------|-----------------|------------|-------------------|
 | Cold start | +2,200ms | MongoDB warm-up, all caches empty | [First Request Analysis](#first-request-timing-distribution-cold-start) |
+| **Vertex AI cold endpoint** | **+430ms** | First call after idle, endpoint not warm | [Vertex AI Cold Analysis](#vertex-ai-cold-endpoint-analysis) |
 | Auth cache expiry | +226ms | TTL=120s triggers V2 user resolution | [Cache Expiry Analysis](#cache-expiry-impact-analysis) |
 | Embedding cache miss | +136ms | New query triggers Vertex AI call | [Cache Expiry Analysis](#vertex-ai-call-behavior-cache-hit-vs-miss) |
 | Qdrant variance | +159ms | 2x latency variance (136-315ms) | [Multi-Request Analysis](#qdrant-latency-variance) |
@@ -78,10 +90,13 @@ Based on the analyses in this document, here are the recommended changes ordered
 |--------|------------------|--------|-----------|
 | **Add startup cache/connection warming** | -1,400ms (MongoDB warm-up) | 15 lines | [First Request Analysis](#first-request-timing-distribution-cold-start) |
 | **Enable CPU always-on** (if not set) | -50ms (CPU throttle) | Config only | [First Request Analysis](#first-request-timing-distribution-cold-start) |
-| **Pre-warm Vertex AI connection** | -250ms (first embedding) | 5 lines | [First Request Analysis](#first-request-timing-distribution-cold-start) |
+| **Pre-warm Vertex AI on startup** | -250ms (first embedding) | 5 lines | [First Request Analysis](#first-request-timing-distribution-cold-start) |
+| **Keep Vertex AI warm periodically** | -430ms (prevents cold endpoint) | 10 lines | [Vertex AI Cold Analysis](#vertex-ai-cold-endpoint-analysis) |
 
 ```python
-# main.py - Add startup event
+# main.py - Add startup event and background keep-warm
+import asyncio
+
 @app.on_event("startup")
 async def warm_on_startup():
     # 1. Warm MongoDB connection pool
@@ -93,8 +108,21 @@ async def warm_on_startup():
     except:
         pass  # Ignore errors, just warming connection
     
-    # 3. Log startup complete
+    # 3. Start background task to keep Vertex AI warm
+    asyncio.create_task(keep_vertex_ai_warm())
+    
+    # 4. Log startup complete
     logger.info("Startup warming complete")
+
+async def keep_vertex_ai_warm():
+    """Background task to prevent Vertex AI endpoint from going cold"""
+    while True:
+        await asyncio.sleep(60)  # Every 60 seconds
+        try:
+            await embedding_model.embed_query("keepalive")
+            logger.debug("Vertex AI keep-warm ping successful")
+        except Exception as e:
+            logger.warning(f"Vertex AI keep-warm failed: {e}")
 ```
 
 ```yaml
@@ -102,7 +130,10 @@ async def warm_on_startup():
 run.googleapis.com/cpu-throttling: "false"
 ```
 
-**Evidence**: Cold start breakdown shows MongoDB warm-up (1,411ms) and Vertex AI cold call (310ms) are main contributors. Startup warming moves this cost to deployment time instead of first user request.
+**Evidence**: 
+- Cold start breakdown shows MongoDB warm-up (1,411ms) and Vertex AI cold call (310ms) are main contributors
+- Vertex AI Cold Analysis showed 568ms embedding time (vs normal 100-140ms) after idle period
+- Startup warming + periodic keep-warm prevents both container cold start and Vertex AI cold endpoint
 
 ---
 
@@ -578,6 +609,79 @@ Average (warm): 406ms | Request #1 delta: +355ms
 3. **Proactive cache refresh** at 80% TTL (before expiry)
 
 4. **Monitor cache expiry correlation** - Alert when multiple caches expire simultaneously
+
+---
+
+## Vertex AI Cold Endpoint Analysis
+
+**Date**: January 29, 2026  
+**Scenario**: Warm instance with all caches expired + Vertex AI cold endpoint  
+**Query**: `"find my latest memories related to VC notes"`
+
+### Request Comparison
+
+| Metric | Request #1 (Cold Caches) | Request #2 (Warm) |
+|--------|-------------------------|-------------------|
+| **HTTP Latency** | **2,137ms** ❌ | 421ms ✅ |
+| Pre-search overhead | 251ms | 3ms |
+| V2 user resolution | 166ms | 0ms (cached) |
+| **Vertex AI inference** | **568ms** | 0ms (cached) |
+| Memory search | 1,034ms | 368ms |
+| Total processing | 1,294ms | 379ms |
+
+### Key Finding: Vertex AI Cold Endpoint
+
+| Condition | Vertex AI Latency | Notes |
+|-----------|-------------------|-------|
+| Normal (warm endpoint) | 100-140ms | Typical production |
+| **Cold endpoint** | **568ms** | **4x slower** |
+| Cached embedding | 0.2ms | No Vertex AI call |
+
+**Root Cause**: Vertex AI endpoints go "cold" after periods of inactivity (~2-5 minutes). The first request after idle triggers endpoint warm-up.
+
+### All Caches MISS on Request #1
+
+| Cache | Status | Impact |
+|-------|--------|--------|
+| `auth_optimized_cache` | **MISS** | +166ms (V2 user resolution) |
+| `api_key_cache` | **MISS** | +40ms (org lookup) |
+| `workspace_subscription_cache` | **MISS** | +67ms (MongoDB lookup) |
+| `search_embedding_cache` | **MISS** | **+568ms** (Vertex AI cold) |
+| `customer_tier_cache` | **MISS** | +180ms (Stripe API call) |
+
+### Timeline Evidence
+
+```
+18:42:26 - Request #1: All caches MISS, Vertex AI 568ms → 2,137ms total
+18:42:41 - Request #2: All caches HIT (age: ~15s) → 421ms total
+           ↑ 15 seconds later, all caches populated
+```
+
+### This is NOT a Container Cold Start
+
+Same instance ID handled both requests:
+```
+instanceId: "005eb6974c4587a219393a67cb7b0de3dfe8005de6..."
+```
+
+The container was running, but:
+1. All in-memory caches had expired (TTL reached)
+2. Vertex AI endpoint was cold (no recent calls)
+3. Result: 2,137ms latency that *feels* like cold start
+
+### Recommendations
+
+1. **Periodic Vertex AI keep-warm** (see Priority 1):
+   ```python
+   async def keep_vertex_ai_warm():
+       while True:
+           await asyncio.sleep(60)
+           await embedding_model.embed_query("keepalive")
+   ```
+
+2. **Extend cache TTLs** to reduce simultaneous expiry frequency
+
+3. **Add "warming" indicator** to logs to distinguish from true cold start
 
 ---
 
