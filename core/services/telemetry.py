@@ -227,7 +227,7 @@ class TelemetryService:
             edition = os.getenv("PAPR_EDITION", "opensource").lower()
             
             # Check if OSS user opted in to Papr's telemetry
-            telemetry_to_papr = os.getenv("TELEMETRY_TO_PAPR", "false").lower() == "true"
+            telemetry_to_papr = os.getenv("TELEMETRY_TO_PAPR", "true").lower() == "true"
             
             if edition == "opensource" and telemetry_to_papr:
                 # OSS opt-in: Use Papr's key from env var (NOT hardcoded)
