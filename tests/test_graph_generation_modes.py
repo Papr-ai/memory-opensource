@@ -26,6 +26,7 @@ from services.logger_singleton import LoggerSingleton
 from os import environ as env
 from dotenv import load_dotenv, find_dotenv
 from typing import Dict, Any, List
+from services.auth_utils import get_user_from_token_optimized
 
 # Create logger
 logger = LoggerSingleton.get_logger(__name__)
@@ -46,6 +47,19 @@ GRAPH_TEST_CONTENT = """Sarah Johnson, the CTO at Acme Corp, is leading the new 
 She works closely with John Smith, the VP of Engineering, on the machine learning platform project.
 The project is set to launch in Q2 2024 and has a budget of $2.5M."""
 
+async def resolve_user_id(app, api_key: str) -> str:
+    """Resolve the developer user_id from API key auth."""
+    memory_graph = app.state.memory_graph
+    async with httpx.AsyncClient() as httpx_client:
+        auth_response = await get_user_from_token_optimized(
+            f"APIKey {api_key}",
+            "papr_plugin",
+            memory_graph,
+            search_request=None,
+            memory_request=None,
+            httpx_client=httpx_client,
+        )
+    return auth_response.developer_id
 
 def get_project_management_schema() -> Dict[str, Any]:
     """Schema for testing - defines Project, Person, Company, Task nodes"""
@@ -425,16 +439,16 @@ async def test_auto_mode_with_property_overrides(app):
             logger.info("🔍 Verifying property overrides in Neo4j...")
             memory_graph = app.state.memory_graph
             
-            # The TEST_X_USER_API_KEY corresponds to user_id 'lU9LeWO3r7' in the test environment
-            actual_user_id = 'lU9LeWO3r7'
+            actual_user_id = await resolve_user_id(app, TEST_X_USER_API_KEY)
             logger.info(f"🔍 Using user_id for test verification: {actual_user_id}")
             
             async with memory_graph.async_neo_conn.get_session() as session:
                 # First, check what Person nodes exist for this user
                 all_persons_result = await session.run("""
                     MATCH (p:Person {user_id: $user_id})
+                    WHERE p._omo_source_memory_id = $memory_id
                     RETURN p.name as name, p.email as email, p.role as role
-                """, user_id=actual_user_id)
+                """, user_id=actual_user_id, memory_id=memory_id)
                 
                 all_persons = await all_persons_result.values()
                 logger.info(f"📋 Found {len(all_persons)} Person nodes: {all_persons}")
@@ -442,9 +456,10 @@ async def test_auto_mode_with_property_overrides(app):
                 # Verify Sarah's overridden properties (should exist)
                 sarah_result = await session.run("""
                     MATCH (p:Person {user_id: $user_id})
-                    WHERE p.name CONTAINS 'Sarah' OR p.name CONTAINS 'Johnson'
+                    WHERE p._omo_source_memory_id = $memory_id
+                      AND (p.name CONTAINS 'Sarah' OR p.name CONTAINS 'Johnson')
                     RETURN p.name as name, p.email as email, p.role as role
-                """, user_id=actual_user_id)
+                """, user_id=actual_user_id, memory_id=memory_id)
                 
                 sarah_record = await sarah_result.single()
                 assert sarah_record is not None, "Sarah Johnson node not found in Neo4j"
@@ -457,8 +472,9 @@ async def test_auto_mode_with_property_overrides(app):
                 # Verify John Smith node does NOT exist (no email provided, so null unique identifier)
                 john_result = await session.run("""
                     MATCH (p:Person {name: $name, user_id: $user_id})
+                    WHERE p._omo_source_memory_id = $memory_id
                     RETURN p
-                """, name="John Smith", user_id=actual_user_id)
+                """, name="John Smith", user_id=actual_user_id, memory_id=memory_id)
                 
                 john_record = await john_result.single()
                 if john_record:
@@ -469,8 +485,9 @@ async def test_auto_mode_with_property_overrides(app):
                 # Verify Acme Corp's overridden properties
                 company_result = await session.run("""
                     MATCH (c:Company {name: $name, user_id: $user_id})
+                    WHERE c._omo_source_memory_id = $memory_id
                     RETURN c.domain as domain, c.industry as industry
-                """, name="Acme Corp", user_id=actual_user_id)
+                """, name="Acme Corp", user_id=actual_user_id, memory_id=memory_id)
                 
                 company_record = await company_result.single()
                 assert company_record is not None, "Acme Corp node not found in Neo4j"
@@ -483,9 +500,10 @@ async def test_auto_mode_with_property_overrides(app):
                 project_result = await session.run("""
                     MATCH (proj:Project)
                     WHERE proj.user_id = $user_id
+                      AND proj._omo_source_memory_id = $memory_id
                       AND (proj.name CONTAINS 'machine learning' OR proj.name CONTAINS 'ML')
                     RETURN proj.name as name, proj.status as status, proj.budget as budget, proj.launch_date as launch_date
-                """, user_id=actual_user_id)
+                """, user_id=actual_user_id, memory_id=memory_id)
                 
                 project_record = await project_result.single()
                 if project_record:

@@ -35,6 +35,8 @@ from tests.test_add_memory_fastapi import (
     test_v1_add_memory_with_external_user_id_only,
     test_v1_add_memory_with_external_user_id_and_acl,
     test_v1_add_memory_with_user_id_from_created_user,
+    test_v1_add_memory_with_org_namespace_top_level,
+    test_v1_add_memory_with_deprecated_org_namespace,
     
     # Batch Add Memory Tests
     test_v1_add_memory_batch_1,
@@ -86,6 +88,19 @@ from tests.test_add_memory_fastapi import (
     test_memory_models_multi_tenant_fields,
     test_batch_memory_multi_tenant_scoping,
     test_backward_compatibility,
+)
+from tests.test_memory_policy_end_to_end import (
+    TestLinkToDSLEndToEnd,
+    TestFullMemoryPolicyEndToEnd,
+    TestSchemaLevelPolicyInheritance,
+    TestMemoryLevelPolicyOverride,
+    TestPolicyMerging,
+    TestControlledVocabulary,
+    TestEdgeConstraintsEndToEnd,
+    TestGraphQLValidation,
+    TestErrorHandling,
+    unique_id as memory_policy_unique_id,
+    api_headers as memory_policy_api_headers,
 )
 
 # Import delete all memories tests
@@ -147,10 +162,21 @@ from tests.test_query_log_integration import (
     test_sync_tiers_returns_ranked_tier1,
 )
 
+# Import security schema tests
+from tests.test_security_schema_v1 import (
+    test_v1_create_security_schema,
+    test_v1_add_memory_with_schema_id,
+    test_v1_wait_for_memory_processing,
+    test_v1_search_verify_neo4j_nodes,
+    test_v1_search_with_agentic_graph,
+    test_v1_add_memory_with_graph_override,
+    test_v1_security_schema_full_workflow,
+)
+
 
 # Import graph generation mode tests
 from tests.test_graph_generation_modes import (
-    test_auto_mode_with_schema_id_only,
+    test_auto_mode_with_schema_id,
     test_auto_mode_with_property_overrides,
     test_manual_mode_with_explicit_graph,
 )
@@ -249,10 +275,12 @@ class V1EndpointTester:
             result["duration"] = time.time() - start_time
             result["details"] = str(e)
             logger.info(f"⏭️ Test skipped: {test_name} - {str(e)}")
-        except Exception as e:
+        except BaseException as e:
             # Handle pytest failures and regular exceptions
-            # pytest.fail() raises pytest.outcomes.Failed, which is a subclass of Exception (or AssertionError in some versions)
-            # We catch all exceptions here to ensure tests continue running and don't crash the test suite
+            # pytest.fail() raises pytest.outcomes.Failed (BaseException), so catch BaseException
+            # but allow KeyboardInterrupt/SystemExit to halt the run.
+            if isinstance(e, (KeyboardInterrupt, SystemExit)):
+                raise
             result["status"] = "failed"
             result["duration"] = time.time() - start_time
             result["error"] = str(e)
@@ -276,6 +304,8 @@ class V1EndpointTester:
             ("Add Memory - External User ID Only", test_v1_add_memory_with_external_user_id_only),
             ("Add Memory - External User ID + ACL", test_v1_add_memory_with_external_user_id_and_acl),
             ("Add Memory - User ID from Created User", test_v1_add_memory_with_user_id_from_created_user),
+            ("Add Memory - Top-Level Org/Namespace", test_v1_add_memory_with_org_namespace_top_level),
+            ("Add Memory - Deprecated Org/Namespace", test_v1_add_memory_with_deprecated_org_namespace),
         ]
         
         for test_name, test_func in add_memory_tests:
@@ -356,6 +386,36 @@ class V1EndpointTester:
         ]
         
         for test_name, test_func in search_tests:
+            result = await self.run_test(test_name, test_func, app_instance)
+            self.results.append(result)
+
+    async def run_memory_policy_tests(self, app_instance):
+        """Run memory policy end-to-end tests."""
+        logger.info("🧪 Running Memory Policy End-to-End Tests...")
+
+        memory_policy_tests = [
+            ("Memory Policy - link_to String", test_memory_policy_link_to_string_form_wrapper),
+            ("Memory Policy - link_to List", test_memory_policy_link_to_list_form_wrapper),
+            ("Memory Policy - link_to Dict create=never", test_memory_policy_link_to_dict_form_wrapper),
+            ("Memory Policy - link_to Exact Match", test_memory_policy_link_to_exact_match_wrapper),
+            ("Memory Policy - link_to Semantic Threshold", test_memory_policy_link_to_semantic_threshold_wrapper),
+            ("Memory Policy - Auto Mode", test_memory_policy_auto_mode_wrapper),
+            ("Memory Policy - Manual Mode", test_memory_policy_manual_mode_wrapper),
+            ("Memory Policy - OMO Safety", test_memory_policy_omo_safety_wrapper),
+            ("Memory Policy - Schema Inheritance", test_memory_policy_schema_inheritance_wrapper),
+            ("Memory Policy - Override Schema", test_memory_policy_override_schema_wrapper),
+            ("Memory Policy - link_to + policy", test_memory_policy_link_to_with_policy_wrapper),
+            ("Memory Policy - link_to merge constraints", test_memory_policy_link_to_merge_constraints_wrapper),
+            ("Memory Policy - create never blocks", test_memory_policy_create_never_blocks_wrapper),
+            ("Memory Policy - mixed create policies", test_memory_policy_mixed_create_wrapper),
+            ("Memory Policy - edge arrow syntax", test_memory_policy_edge_arrow_wrapper),
+            ("Memory Policy - edge create never", test_memory_policy_edge_create_never_wrapper),
+            ("Memory Policy - GraphQL validation", test_memory_policy_graphql_validation_wrapper),
+            ("Memory Policy - invalid link_to syntax", test_memory_policy_invalid_link_to_wrapper),
+            ("Memory Policy - invalid policy mode", test_memory_policy_invalid_mode_wrapper),
+        ]
+
+        for test_name, test_func in memory_policy_tests:
             result = await self.run_test(test_name, test_func, app_instance)
             self.results.append(result)
     
@@ -547,7 +607,7 @@ class V1EndpointTester:
         logger.info("🧪 Running Graph Generation Mode Tests...")
 
         graph_generation_tests = [
-            ("Graph Generation - Auto Mode with Schema ID Only", test_auto_mode_with_schema_id_only),
+            ("Graph Generation - Auto Mode with Schema ID", test_auto_mode_with_schema_id),
             ("Graph Generation - Auto Mode with Property Overrides", test_auto_mode_with_property_overrides),
             ("Graph Generation - Manual Mode with Explicit Graph", test_manual_mode_with_explicit_graph),
         ]
@@ -585,6 +645,7 @@ class V1EndpointTester:
             await self.run_update_memory_tests(app_instance)
             await self.run_get_memory_tests(app_instance)
             await self.run_search_memory_tests(app_instance)
+            await self.run_memory_policy_tests(app_instance)
             await self.run_delete_memory_tests(app_instance)
             await self.run_upload_document_tests(app_instance)
             
@@ -907,6 +968,86 @@ async def test_v1_search_fixed_user_cache_test_wrapper(app_instance):
     """Wrapper for test_v1_search_fixed_user_cache_test to work with sequential test runner."""
     dummy_caplog = DummyCaplog()
     await test_v1_search_fixed_user_cache_test(app_instance, dummy_caplog)
+
+# Memory policy end-to-end test wrappers
+def _memory_policy_fixtures():
+    return memory_policy_unique_id(), memory_policy_api_headers()
+
+async def test_memory_policy_link_to_string_form_wrapper(app_instance):
+    unique_id, headers = _memory_policy_fixtures()
+    await TestLinkToDSLEndToEnd().test_link_to_string_form(unique_id, headers)
+
+async def test_memory_policy_link_to_list_form_wrapper(app_instance):
+    unique_id, headers = _memory_policy_fixtures()
+    await TestLinkToDSLEndToEnd().test_link_to_list_form(unique_id, headers)
+
+async def test_memory_policy_link_to_dict_form_wrapper(app_instance):
+    unique_id, headers = _memory_policy_fixtures()
+    await TestLinkToDSLEndToEnd().test_link_to_dict_form_with_create_never(unique_id, headers)
+
+async def test_memory_policy_link_to_exact_match_wrapper(app_instance):
+    unique_id, headers = _memory_policy_fixtures()
+    await TestLinkToDSLEndToEnd().test_link_to_with_exact_match(unique_id, headers)
+
+async def test_memory_policy_link_to_semantic_threshold_wrapper(app_instance):
+    unique_id, headers = _memory_policy_fixtures()
+    await TestLinkToDSLEndToEnd().test_link_to_with_semantic_threshold(unique_id, headers)
+
+async def test_memory_policy_auto_mode_wrapper(app_instance):
+    unique_id, headers = _memory_policy_fixtures()
+    await TestFullMemoryPolicyEndToEnd().test_memory_policy_auto_mode_creates_nodes(unique_id, headers)
+
+async def test_memory_policy_manual_mode_wrapper(app_instance):
+    unique_id, headers = _memory_policy_fixtures()
+    await TestFullMemoryPolicyEndToEnd().test_memory_policy_manual_mode_exact_nodes(unique_id, headers)
+
+async def test_memory_policy_omo_safety_wrapper(app_instance):
+    unique_id, headers = _memory_policy_fixtures()
+    await TestFullMemoryPolicyEndToEnd().test_memory_policy_with_omo_safety(unique_id, headers)
+
+async def test_memory_policy_schema_inheritance_wrapper(app_instance):
+    unique_id, headers = _memory_policy_fixtures()
+    await TestSchemaLevelPolicyInheritance().test_schema_policy_inheritance(unique_id, headers)
+
+async def test_memory_policy_override_schema_wrapper(app_instance):
+    unique_id, headers = _memory_policy_fixtures()
+    await TestMemoryLevelPolicyOverride().test_memory_policy_overrides_schema(unique_id, headers)
+
+async def test_memory_policy_link_to_with_policy_wrapper(app_instance):
+    unique_id, headers = _memory_policy_fixtures()
+    await TestPolicyMerging().test_link_to_with_memory_policy(unique_id, headers)
+
+async def test_memory_policy_link_to_merge_constraints_wrapper(app_instance):
+    unique_id, headers = _memory_policy_fixtures()
+    await TestPolicyMerging().test_link_to_constraints_merge_with_memory_policy(unique_id, headers)
+
+async def test_memory_policy_create_never_blocks_wrapper(app_instance):
+    unique_id, headers = _memory_policy_fixtures()
+    await TestControlledVocabulary().test_create_never_blocks_new_nodes(unique_id, headers)
+
+async def test_memory_policy_mixed_create_wrapper(app_instance):
+    unique_id, headers = _memory_policy_fixtures()
+    await TestControlledVocabulary().test_mixed_create_policies(unique_id, headers)
+
+async def test_memory_policy_edge_arrow_wrapper(app_instance):
+    unique_id, headers = _memory_policy_fixtures()
+    await TestEdgeConstraintsEndToEnd().test_edge_arrow_syntax(unique_id, headers)
+
+async def test_memory_policy_edge_create_never_wrapper(app_instance):
+    unique_id, headers = _memory_policy_fixtures()
+    await TestEdgeConstraintsEndToEnd().test_edge_with_create_never(unique_id, headers)
+
+async def test_memory_policy_graphql_validation_wrapper(app_instance):
+    unique_id, headers = _memory_policy_fixtures()
+    await TestGraphQLValidation().test_validate_nodes_via_graphql(unique_id, headers)
+
+async def test_memory_policy_invalid_link_to_wrapper(app_instance):
+    unique_id, headers = _memory_policy_fixtures()
+    await TestErrorHandling().test_invalid_link_to_syntax_returns_error(unique_id, headers)
+
+async def test_memory_policy_invalid_mode_wrapper(app_instance):
+    unique_id, headers = _memory_policy_fixtures()
+    await TestErrorHandling().test_invalid_memory_policy_mode_returns_error(unique_id, headers)
 
 # Multi-tenant test wrappers (these don't need app parameter)
 async def test_multi_tenant_auth_models_wrapper(app_instance):

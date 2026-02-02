@@ -784,9 +784,39 @@ class ParseStoredMemory(BaseModel):
 
     def without_metadata(self) -> 'ParseStoredMemory':
         """Create a copy of the memory item without metadata field."""
-        return ParseStoredMemory.model_validate(
-            self.model_dump(exclude={'metadata'})
-        )
+        data = self.model_dump(exclude={'metadata'})
+
+        # Preserve org/namespace IDs if they only exist in metadata.
+        metadata = self.metadata
+        if isinstance(metadata, str):
+            try:
+                metadata = json.loads(metadata)
+            except json.JSONDecodeError:
+                metadata = {}
+        if isinstance(metadata, dict):
+            if not data.get('organization_id'):
+                data['organization_id'] = metadata.get('organization_id')
+            if not data.get('namespace_id'):
+                data['namespace_id'] = metadata.get('namespace_id')
+
+        # Preserve org/namespace IDs if only pointer fields are present.
+        def _normalize_pointer_id(value):
+            if value is None:
+                return None
+            if isinstance(value, str):
+                return value or None
+            if isinstance(value, dict):
+                if not value:
+                    return None
+                return value.get('objectId') or value.get('id')
+            return getattr(value, 'objectId', None) or getattr(value, 'id', None)
+
+        if not data.get('organization_id'):
+            data['organization_id'] = _normalize_pointer_id(getattr(self, 'organization', None))
+        if not data.get('namespace_id'):
+            data['namespace_id'] = _normalize_pointer_id(getattr(self, 'namespace', None))
+
+        return ParseStoredMemory.model_validate(data)
 
     @classmethod
     def from_dict(cls, data: dict) -> 'ParseStoredMemory':
@@ -874,6 +904,42 @@ class ParseStoredMemory(BaseModel):
     def from_parse_response(cls, response_data: Dict[str, Any]) -> 'ParseStoredMemory':
         """Create ParseStoredMemory from Parse Server response"""
         # Extract base fields
+        # Resolve org/namespace IDs with pointer fallbacks (legacy fields may be None)
+        def _normalize_pointer_id(value):
+            if value is None:
+                return None
+            if isinstance(value, str):
+                return value or None
+            if isinstance(value, dict):
+                if not value:
+                    return None
+                return value.get('objectId') or value.get('id')
+            return getattr(value, 'objectId', None) or getattr(value, 'id', None)
+
+        organization_id = _normalize_pointer_id(response_data.get('organization_id'))
+        if not organization_id:
+            organization_id = _normalize_pointer_id(response_data.get('organization'))
+        if not organization_id:
+            organization_id = _normalize_pointer_id(
+                (response_data.get('customMetadata') or {}).get('organization_id')
+            )
+        if not organization_id:
+            organization_id = _normalize_pointer_id(
+                (response_data.get('metadata') or {}).get('organization_id')
+            )
+
+        namespace_id = _normalize_pointer_id(response_data.get('namespace_id'))
+        if not namespace_id:
+            namespace_id = _normalize_pointer_id(response_data.get('namespace'))
+        if not namespace_id:
+            namespace_id = _normalize_pointer_id(
+                (response_data.get('customMetadata') or {}).get('namespace_id')
+            )
+        if not namespace_id:
+            namespace_id = _normalize_pointer_id(
+                (response_data.get('metadata') or {}).get('namespace_id')
+            )
+
         base_data = {
             'objectId': response_data['objectId'],
             'createdAt': response_data['createdAt'],
@@ -892,6 +958,10 @@ class ParseStoredMemory(BaseModel):
             'memoryChunkIds': response_data.get('memoryChunkIds', []),
             'user': response_data.get('user'),
             'developerUser': response_data.get('developerUser'),
+            'organization': response_data.get('organization'),
+            'namespace': response_data.get('namespace'),
+            'organization_id': organization_id,
+            'namespace_id': namespace_id,
             # Always extract ACL fields from top-level only
             'external_user_read_access': response_data.get('external_user_read_access', []) or [],
             'external_user_write_access': response_data.get('external_user_write_access', []) or [],
@@ -1100,6 +1170,56 @@ class Memory(BaseModel):
             acl_list = getattr(parse_memory, 'external_user_read_access', [])
             if isinstance(acl_list, list) and len(acl_list) == 1:
                 external_user_id = acl_list[0]
+        # Resolve org/namespace IDs with pointer fallbacks (legacy fields may be None)
+        def _normalize_pointer_id(value):
+            if value is None:
+                return None
+            if isinstance(value, str):
+                return value or None
+            if isinstance(value, dict):
+                if not value:
+                    return None
+                return value.get('objectId') or value.get('id')
+            return getattr(value, 'objectId', None) or getattr(value, 'id', None)
+
+        organization_id = _normalize_pointer_id(getattr(parse_memory, 'organization_id', None))
+        if not organization_id and getattr(parse_memory, 'organization', None):
+            organization_id = _normalize_pointer_id(parse_memory.organization)
+        if not organization_id:
+            organization_id = _normalize_pointer_id(
+                getattr(parse_memory, 'customMetadata', None) and (parse_memory.customMetadata or {}).get('organization_id')
+            )
+        if not organization_id:
+            organization_id = _normalize_pointer_id(
+                getattr(parse_memory, 'metadata', None) and (parse_memory.metadata or {}).get('organization_id')
+            )
+
+        namespace_id = _normalize_pointer_id(getattr(parse_memory, 'namespace_id', None))
+        if not namespace_id and getattr(parse_memory, 'namespace', None):
+            namespace_id = _normalize_pointer_id(parse_memory.namespace)
+        if not namespace_id:
+            namespace_id = _normalize_pointer_id(
+                getattr(parse_memory, 'customMetadata', None) and (parse_memory.customMetadata or {}).get('namespace_id')
+            )
+        if not namespace_id:
+            namespace_id = _normalize_pointer_id(
+                getattr(parse_memory, 'metadata', None) and (parse_memory.metadata or {}).get('namespace_id')
+            )
+        # Normalize ACL keys for API response (r/w -> read/write)
+        acl = parse_memory.ACL or {}
+        if isinstance(acl, dict):
+            normalized_acl = {}
+            for principal, perms in acl.items():
+                if isinstance(perms, dict):
+                    normalized_perms = dict(perms)
+                    if 'r' in normalized_perms and 'read' not in normalized_perms:
+                        normalized_perms['read'] = normalized_perms['r']
+                    if 'w' in normalized_perms and 'write' not in normalized_perms:
+                        normalized_perms['write'] = normalized_perms['w']
+                    normalized_acl[principal] = normalized_perms
+                else:
+                    normalized_acl[principal] = perms
+            acl = normalized_acl
         base_data = {
             'id': parse_memory.memoryId,
             'content': parse_memory.content,
@@ -1122,11 +1242,11 @@ class Memory(BaseModel):
             'created_at': parse_memory.createdAt,
             'updated_at': parse_memory.updatedAt,
             # Access control and ownership
-            'acl': parse_memory.ACL,
+            'acl': acl,
             'workspace_id': parse_memory.workspace.objectId if parse_memory.workspace else None,
             # Multi-tenant fields (NEW)
-            'organization_id': getattr(parse_memory, 'organization_id', None),
-            'namespace_id': getattr(parse_memory, 'namespace_id', None),
+            'organization_id': organization_id,
+            'namespace_id': namespace_id,
             # Source context with renamed fields
             'source_document_id': parse_memory.post.objectId if parse_memory.post else None,
             'source_message_id': parse_memory.postMessage.objectId if parse_memory.postMessage else None,

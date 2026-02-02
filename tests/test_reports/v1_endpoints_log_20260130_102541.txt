@@ -1,0 +1,139 @@
+V1 ENDPOINTS SEQUENTIAL TEST REPORT
+==================================================
+
+Timestamp: 2026-01-30T10:25:41.847855
+Total Tests: 58
+Passed: 51
+Failed: 6
+Skipped: 1
+Success Rate: 87.9%
+Total Duration: 7491.20s
+
+DETAILED RESULTS:
+------------------------------
+✅ Add Memory - Basic (429.43s)
+
+✅ Add Memory - API Key (271.30s)
+
+✅ Add Memory - External User ID + Custom Metadata (195.24s)
+
+✅ Add Memory - External User ID Only (226.35s)
+
+✅ Add Memory - External User ID + ACL (187.23s)
+
+✅ Add Memory - User ID from Created User (185.72s)
+
+✅ Batch Add Memory - Basic (267.53s)
+
+✅ Batch Add Memory - User ID (475.43s)
+
+✅ Batch Add Memory - External User ID (612.00s)
+
+✅ Batch Add Memory - Webhook Success (378.00s)
+
+✅ Batch Add Memory - Webhook Partial Success (144.40s)
+
+✅ Batch Add Memory - Webhook No URL (186.92s)
+
+✅ Batch Add Memory - Webhook Azure Fallback (152.71s)
+
+✅ Batch Add Memory - Webhook Payload Structure (183.85s)
+
+✅ Batch Add Memory - Webhook Immediate (skip_background=True) (38.08s)
+
+✅ Batch Add Memory - Webhook With Background Processing (344.01s)
+
+✅ Update Memory - Basic (35.93s)
+
+✅ Update Memory - API Key (36.74s)
+
+✅ Update Memory - ACL with Real Users (25.60s)
+
+✅ Get Memory - Basic (210.15s)
+
+✅ Search Memory - Basic (17.74s)
+
+❌ Search Memory - User ID ACL (111.52s)
+    Error: user_id does not have read access in acl
+
+✅ Search Memory - External User ID ACL (201.02s)
+
+✅ Search Memory - New User Qwen Route (21.70s)
+
+✅ Search Memory - Custom Metadata Filter (Qwen Only) (231.08s)
+
+✅ Search Memory - Numeric Custom Metadata Filter (241.51s)
+
+✅ Search Memory - List Custom Metadata Filter (203.34s)
+
+✅ Search Memory - Boolean Custom Metadata Filter (223.00s)
+
+✅ Search Memory - Mixed Custom Metadata Types (129.34s)
+
+✅ Search Memory - Organization and Namespace Filter (377.38s)
+
+✅ Search Memory - Agentic Graph (307.49s)
+
+✅ Search Memory - Predicted Grouping Logging (35.42s)
+
+❌ Search Memory - Fixed User Cache Test (21.14s)
+    Error: Expected 2 timings, got 0: []
+
+✅ Search Memory - Low-similarity Performance (12.37s)
+
+✅ Auth/Dev Marking - APIKey Sets Developer (11.26s)
+
+⏭️ Auth/Dev Marking - Bearer Only Does Not Set Developer (10.83s)
+    Skipped: No valid Bearer token available for testing
+
+✅ Auth/Dev Marking - Anon End-User Not Marked Developer When Dev API Key Used (195.16s)
+
+❌ Delete Memory - Basic (19.36s)
+    Error: Failed to add memory: {"code":404,"status":"error","data":null,"error":"There was an error adding the memory item","details":null}
+
+✅ Delete Memory - API Key (16.04s)
+
+✅ Delete All Memories - Complete Workflow (31.26s)
+
+✅ Delete All Memories - External User ID (21.32s)
+
+❌ Delete All Memories - No Memories Found (14.34s)
+    Error: Failed to create user: {"code":500,"status":"error","user_id":null,"email":null,"external_id":null,"metadata":null,"created_at":null,"updated_at":null,"error":"[Errno 8] nodename nor servname provided, or not known","details":null}
+
+✅ Upload Document V2 - API Key (3.11s)
+
+✅ Upload Document V2 - Session Token (0.60s)
+
+❌ Upload Document V2 - Real PDF File (54.76s)
+    Error: No Post created for this upload_id
+
+❌ Upload Document V2 - Real PDF with Custom Schema (0.00s)
+    Error: 1 validation error for UploadDocumentRequest
+simple_schema_mode
+  Extra inputs are not permitted [type=extra_forbidden, input_value=False, input_type=bool]
+    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden
+
+✅ Upload Document V2 - Invalid File Type (0.16s)
+
+✅ Upload Document V2 - Malicious Content (0.02s)
+
+✅ Upload Document V2 - Large File (0.08s)
+
+✅ Upload Document V2 - With Webhook (0.32s)
+
+✅ Upload Document V2 - Multi-tenant (0.27s)
+
+✅ Upload Document V2 - Provider Preference (0.80s)
+
+✅ Upload Document V2 - Authentication Failure (0.67s)
+
+✅ Document Status Endpoint (0.06s)
+
+✅ Document Cancel Endpoint (0.06s)
+
+✅ Reducto Provider - Direct and Route (31.81s)
+
+✅ Reducto Provider - Simple Upload (50.47s)
+
+✅ Upload Document V2 - Gemini Provider (35.56s)
+

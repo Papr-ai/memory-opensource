@@ -23,3 +23,5 @@ keys/jwt-private.pem
 .env
 .env
 .env
+.env.mongodb_optimized
+.env

@@ -3099,6 +3099,11 @@ async def search_v1(
         # Create schema mapping for custom nodes using cached auth data (zero additional calls!)
         schema_mapping = {}
         user_schemas = getattr(auth_response, 'user_schemas', None) or []
+        if not user_schemas and isinstance(cached_schema, dict):
+            cached_user_schemas = cached_schema.get('user_schemas') or []
+            if cached_user_schemas:
+                user_schemas = cached_user_schemas
+                logger.info(f"🔗 SCHEMA MAPPING (CACHED): Using user_schemas from cached_schema ({len(user_schemas)})")
         
         if user_schemas:
             # Build mapping from node label to schema ID using already-fetched schemas

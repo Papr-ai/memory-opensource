@@ -4375,8 +4375,13 @@ class MemoryGraph:
                     properties['id'] = node_data['id']
                     properties['llmGenNodeId'] = node_data['id']  # Store manual ID for relationship matching
 
+                    # Support both 'label' and 'type' for node label (type is more intuitive for users)
+                    node_label = node_data.get('label') or node_data.get('type')
+                    if not node_label:
+                        raise ValueError(f"Node missing 'label' or 'type' field: {node_data}")
+
                     node = LLMGraphNode(
-                        label=node_data['label'],
+                        label=node_label,
                         properties=properties
                     )
                     nodes.append(node)
@@ -4386,20 +4391,42 @@ class MemoryGraph:
                 # Create relationships from graph_override
                 relationships = []
                 for rel_data in graph_override_dict.get('relationships', []):
+                    # Helper to get node label from either 'label' or 'type' field
+                    def get_node_label(node_id):
+                        for n in graph_override_dict['nodes']:
+                            if n.get('id') == node_id:
+                                return n.get('label') or n.get('type', 'Unknown')
+                        return 'Unknown'
+
+                    # Support both 'relationship_type' and 'type' for relationship type
+                    rel_type = rel_data.get('relationship_type') or rel_data.get('type')
+                    if not rel_type:
+                        raise ValueError(f"Relationship missing 'relationship_type' or 'type' field: {rel_data}")
+
+                    # Support both 'source_node_id' and 'source' for source node
+                    source_id = rel_data.get('source_node_id') or rel_data.get('source')
+                    if not source_id:
+                        raise ValueError(f"Relationship missing 'source_node_id' or 'source' field: {rel_data}")
+
+                    # Support both 'target_node_id' and 'target' for target node
+                    target_id = rel_data.get('target_node_id') or rel_data.get('target')
+                    if not target_id:
+                        raise ValueError(f"Relationship missing 'target_node_id' or 'target' field: {rel_data}")
+
                     relationship = LLMGraphRelationship(
-                        type=rel_data['relationship_type'],
+                        type=rel_type,
                         direction='->',
                         source=NodeReference(
-                            label=next((n['label'] for n in graph_override_dict['nodes'] if n.get('id') == rel_data['source_node_id']), 'Unknown'),
-                            id=rel_data['source_node_id']
+                            label=get_node_label(source_id),
+                            id=source_id
                         ),
                         target=NodeReference(
-                            label=next((n['label'] for n in graph_override_dict['nodes'] if n.get('id') == rel_data['target_node_id']), 'Unknown'),
-                            id=rel_data['target_node_id']
+                            label=get_node_label(target_id),
+                            id=target_id
                         )
                     )
                     relationships.append(relationship)
-                    logger.info(f"🎯 GRAPH OVERRIDE: Created {relationship.type} relationship: {rel_data['source_node_id']} -> {rel_data['target_node_id']}")
+                    logger.info(f"🎯 GRAPH OVERRIDE: Created {relationship.type} relationship: {source_id} -> {target_id}")
                 
                 # Store the graph override nodes and relationships directly
                 # For manual graphs, try to find registered schemas for node labels
@@ -5541,19 +5568,28 @@ class MemoryGraph:
             acl_conditions.append(qmodels.FieldCondition(key="organization_read_access", match=qmodels.MatchAny(any=user_organization_ids)))
         
         # Add namespace_read_access to ACL conditions (OR logic - user has access to these namespaces)
-        # NOTE: We do NOT add namespace_id as a MUST condition to allow legacy memories without namespace_id
-        # User access is determined by user_id OR user_read_access, regardless of namespace_id
+        # Namespace scoping uses MUST match when namespace_id is explicitly present.
         user_namespace_ids = []
         if search_request and getattr(search_request, 'namespace_id', None):
             ns_id = getattr(search_request, 'namespace_id')
             if isinstance(ns_id, str):
                 user_namespace_ids.append(ns_id)
-                # Add to ACL conditions (OR) but NOT as scoping condition (MUST)
-                # This allows memories with matching namespace_id OR legacy memories without namespace_id
-                logger.info(f"Including namespace_read_access filter for namespace_id={ns_id} (optional, includes legacy)")
+                logger.info(f"Including namespace_read_access filter for namespace_id={ns_id}")
         
         if user_namespace_ids and len(user_namespace_ids) <= 10:
             acl_conditions.append(qmodels.FieldCondition(key="namespace_read_access", match=qmodels.MatchAny(any=user_namespace_ids)))
+        
+        # Namespace scoping (AND logic) - enforce when namespace_id is set on request/metadata
+        scoped_namespace_id = None
+        if metadata and getattr(metadata, "namespace_id", None):
+            scoped_namespace_id = getattr(metadata, "namespace_id")
+        elif search_request and getattr(search_request, "namespace_id", None):
+            scoped_namespace_id = getattr(search_request, "namespace_id")
+        if isinstance(scoped_namespace_id, str):
+            scoping_conditions.append(
+                qmodels.FieldCondition(key="namespace_id", match=qmodels.MatchValue(value=scoped_namespace_id))
+            )
+            logger.info(f"Applying namespace scoping filter: namespace_id={scoped_namespace_id}")
         
         # Combine filters: ACL conditions with OR, scoping conditions with AND
         # Final filter structure: (acl_condition1 OR acl_condition2 OR ...) AND scoping_condition1 AND scoping_condition2 AND ...
@@ -6706,6 +6742,9 @@ class MemoryGraph:
                         return msgs
                     sem = asyncio.Semaphore(len(result.memory_items))      # tune to your key's RPM limit
                     
+                    # Track rerank errors to avoid log spam
+                    rerank_error_count = {"count": 0, "first_error": None}
+
                     async def score_one(item):
                         async with sem:
                             # Use fallback wrapper with backoff to survive 429s/quota
@@ -6740,7 +6779,11 @@ class MemoryGraph:
                                 content = resp.choices[0].message.content
                                 logger.debug(f"LLM rerank response (model={model_name}): '{content}' finish_reason={resp.choices[0].finish_reason}")
                             except Exception as api_err:
-                                logger.error(f"LLM rerank API error: {api_err}")
+                                # Track errors but only log the first one to avoid log spam
+                                rerank_error_count["count"] += 1
+                                if rerank_error_count["first_error"] is None:
+                                    rerank_error_count["first_error"] = str(api_err)
+                                    logger.warning(f"LLM rerank API error (will suppress duplicates): {api_err}")
                                 return 5, 0.5, item  # Return neutral score on API error
                             try:
                                 # Try JSON first - now expecting both score and confidence
@@ -6760,6 +6803,11 @@ class MemoryGraph:
                     scores = await asyncio.gather(*(score_one(m) for m in result.memory_items))
                     time_rerank_sem = time.perf_counter() - start_rerank_sem
                     logger.warning(f"Reranking with semaphore took {time_rerank_sem:.2f}s")
+
+                    # Log summary of rerank errors if any occurred
+                    if rerank_error_count["count"] > 0:
+                        logger.warning(f"LLM rerank: {rerank_error_count['count']} API calls failed with error: {rerank_error_count['first_error']}. "
+                                      f"Used neutral scores (0.5) for failed items.")
                     
                     # Sort by score and extract both scores and confidences
                     sorted_results = sorted(scores, key=lambda x: x[0], reverse=True)
@@ -10586,11 +10634,14 @@ class MemoryGraph:
                 namespace_id = props.get('namespace_id')
                 role_read_access = props.get('role_read_access', [])
                 
-                # CRITICAL: namespace_id and user_id are REQUIRED for multi-tenant isolation
-                if not namespace_id:
-                    raise ValueError(f"namespace_id is required for Qdrant search but was None. Node: {node_label}, uid_name: {uid_name}")
-                if not user_id:
-                    raise ValueError(f"user_id is required for Qdrant search but was None. Node: {node_label}, uid_name: {uid_name}")
+                # GRACEFUL FALLBACK: If namespace_id or user_id is None, skip Qdrant search
+                # This can happen with Session token auth where namespace context isn't available
+                # Fall back to Neo4j-only processing (which still enforces tenant isolation)
+                if not namespace_id or not user_id:
+                    logger.warning(f"🔄 SYNC STEP 2: Skipping Qdrant semantic search - namespace_id={namespace_id}, user_id={user_id}. "
+                                  f"Will use Neo4j MERGE with exact values for {node_label}.{uid_name}")
+                    # Return None to trigger fallback to Neo4j MERGE with exact values
+                    return None
                 
                 # Build must conditions: property_key AND namespace_id AND organization_id AND workspace_id (tenant scoping)
                 # NOTE: user_id is NOT in MUST - it's in SHOULD for write access check (consistent with Neo4j)
@@ -10760,7 +10811,9 @@ class MemoryGraph:
                     logger.info(f"🔄 SYNC STEP 3: ✅ {'Created' if was_created_in_neo4j else 'Updated'} {node_label} node: {result.get('id')} (Neo4j was_created={was_created_in_neo4j})")
                     return result
             
-            logger.error(f"🔄 SYNC STEP 3: MERGE operation failed")
+            # MERGE returned None - this happens when unique identifiers are all null
+            # This is expected behavior, not an error - the node will be handled by content-based fallback
+            logger.info(f"🔄 SYNC STEP 3: MERGE skipped (unique identifiers likely null) - will use content-based fallback for {node_label}")
             return None
             
         except Exception as e:
@@ -11144,11 +11197,14 @@ class MemoryGraph:
             # For content-based deduplication, focus on name, title, description, and content properties (in priority order)
             content_property_keys = [f"{node_label}.name", f"{node_label}.title", f"{node_label}.description", f"{node_label}.content"]
             
-            # CRITICAL: namespace_id and user_id are REQUIRED for multi-tenant isolation
-            if not namespace_id:
-                raise ValueError(f"namespace_id is required for Qdrant search but was None. Node: {node_label}, props keys: {list(props.keys())}")
-            if not user_id:
-                raise ValueError(f"user_id is required for Qdrant search but was None. Node: {node_label}, props keys: {list(props.keys())}")
+            # GRACEFUL FALLBACK: If namespace_id or user_id is None, skip Qdrant search
+            # This can happen with Session token auth where namespace context isn't available
+            # Fall back to traditional content-based Neo4j deduplication
+            if not namespace_id or not user_id:
+                logger.warning(f"🔍 Skipping Qdrant semantic search for content dedup - namespace_id={namespace_id}, user_id={user_id}. "
+                              f"Will use Neo4j content-based deduplication for {node_label}")
+                # Return None to trigger traditional Neo4j content-based deduplication
+                return None
             
             # Build must conditions: property_key AND namespace_id AND user_id (per-user isolation)
             must_conditions = [
@@ -11894,7 +11950,17 @@ class MemoryGraph:
 
             # ANTI-HALLUCINATION: Filter out null properties from LLM output
             props = self._filter_null_properties(props)
-            
+
+            # ANTI-HALLUCINATION: Skip nodes that have no meaningful properties
+            # (only system-generated IDs like 'id', 'llmGenNodeId' remain after filtering)
+            system_props = {'id', 'llmGenNodeId', 'llm_gen_node_id'}
+            meaningful_props = {k for k in props.keys() if k not in system_props}
+            if not meaningful_props:
+                node_label_str = node.label.value if hasattr(node.label, 'value') else str(node.label)
+                logger.warning(f"🚫 ANTI-HALLUCINATION: Skipping {node_label_str} node with no meaningful properties (only system IDs). "
+                             f"Props after filtering: {list(props.keys())}")
+                return None
+
             # SCHEMA VALIDATION: Check that required properties are present
             # Note: This happens BEFORE property overrides are applied (in generate_node_ids)
             # Property overrides can "rescue" nodes by providing missing required fields
@@ -13992,14 +14058,34 @@ class MemoryGraph:
             match = search_result[0]
             score = match.score
             matched_id = str(match.id)
-            logger.info(f"Found match with ID: {matched_id} and similarity score: {score}")
+            matched_chunk_id = None
+            if getattr(match, "payload", None):
+                matched_chunk_id = (
+                    match.payload.get("chunk_id")
+                    or match.payload.get("memoryId")
+                    or match.payload.get("memory_id")
+                )
+            resolved_id = matched_chunk_id or matched_id
+            logger.info(
+                "Found match with ID: %s (resolved_id=%s) and similarity score: %s",
+                matched_id,
+                resolved_id,
+                score,
+            )
 
             if score > 0.97:
                 logger.info(f"Score {score} > 0.97, using existing vector")
                 qdrant_metadata = MemoryGraph.pinecone_compatible_metadata(new_metadata)
                 parse_metadata = new_metadata
-                await self.update_memory_metadata(session_token, matched_id, neo_session, qdrant_metadata, parse_metadata, api_key=api_key)
-                return matched_id
+                await self.update_memory_metadata(
+                    session_token,
+                    resolved_id,
+                    neo_session,
+                    qdrant_metadata,
+                    parse_metadata,
+                    api_key=api_key,
+                )
+                return resolved_id
             else:
                 logger.info(f"Score {score} <= 0.97, will create new vector")
                 return None

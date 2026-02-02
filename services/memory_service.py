@@ -22,7 +22,7 @@ from urllib.parse import urlparse
 import uuid
 from models.memory_models import AddMemoryRequest
 import httpx
-from models.shared_types import MemoryMetadata
+from models.shared_types import MemoryMetadata, ACLConfig
 
 from services.logger_singleton import LoggerSingleton
 from services.memory_policy_resolver import (
@@ -580,11 +580,11 @@ async def handle_incoming_memory(
         if hasattr(memory_request, 'link_to') and memory_request.link_to:
             try:
                 logger.info(f"🔗 LINK_TO DSL: Expanding shorthand syntax")
-                # Get existing memory_policy dict if present
+                # Get existing memory_policy dict if present (exclude None values to prevent issues)
                 existing_policy = None
                 if hasattr(memory_request, 'memory_policy') and memory_request.memory_policy:
                     mp = memory_request.memory_policy
-                    existing_policy = mp.model_dump() if hasattr(mp, 'model_dump') else mp
+                    existing_policy = mp.model_dump(exclude_none=True) if hasattr(mp, 'model_dump') else mp
 
                 # Expand link_to and merge with existing policy
                 expanded_policy = expand_link_to_to_policy(
@@ -593,8 +593,8 @@ async def handle_incoming_memory(
                     schema=None  # TODO: Fetch schema for type inference if schema_id is known
                 )
                 memory_policy_dict = expanded_policy
-                logger.info(f"🔗 LINK_TO EXPANDED: node_constraints={len(expanded_policy.get('node_constraints', []))}, "
-                           f"edge_constraints={len(expanded_policy.get('edge_constraints', []))}")
+                logger.info(f"🔗 LINK_TO EXPANDED: node_constraints={len(expanded_policy.get('node_constraints') or [])}, "
+                           f"edge_constraints={len(expanded_policy.get('edge_constraints') or [])}")
             except ValueError as e:
                 logger.error(f"❌ LINK_TO ERROR: {e}")
                 return AddMemoryResponse.failure(error=f"Invalid link_to syntax: {e}", code=400)
@@ -603,8 +603,8 @@ async def handle_incoming_memory(
         # Skip if already populated by link_to expansion
         if memory_policy_dict is None and hasattr(memory_request, 'memory_policy') and memory_request.memory_policy:
             mp = memory_request.memory_policy
-            # Convert Pydantic model to dict if needed
-            memory_policy_dict = mp.model_dump() if hasattr(mp, 'model_dump') else mp
+            # Convert Pydantic model to dict if needed (exclude None to prevent issues)
+            memory_policy_dict = mp.model_dump(exclude_none=True) if hasattr(mp, 'model_dump') else mp
 
         # Process memory_policy_dict (from link_to expansion or direct memory_policy)
         if memory_policy_dict:
@@ -667,6 +667,22 @@ async def handle_incoming_memory(
                 metadata['risk'] = omo_fields.get('risk', 'none')
                 if omo_fields.get('acl'):
                     metadata['acl'] = omo_fields['acl']
+                    # Expand OMO ACL into granular access fields for storage/filtering
+                    try:
+                        acl_value = omo_fields['acl']
+                        if isinstance(acl_value, ACLConfig):
+                            granular_acl = acl_value.to_granular_acl()
+                        elif isinstance(acl_value, dict):
+                            granular_acl = ACLConfig(**acl_value).to_granular_acl()
+                        else:
+                            granular_acl = None
+                        if granular_acl:
+                            for field, values in granular_acl.items():
+                                if values:
+                                    existing = metadata.get(field) or []
+                                    metadata[field] = list(set(existing + values))
+                    except Exception as e:
+                        logger.warning(f"Failed to expand memory_policy.acl into granular fields: {e}")
 
                 # Extract node_constraints for graph processing
                 node_constraints = resolved_policy.get('node_constraints')

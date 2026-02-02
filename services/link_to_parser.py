@@ -73,7 +73,12 @@ link_to = {
 
 import re
 from typing import Any, Dict, List, Optional, Tuple, Union
+from pydantic import BaseModel, Field
 from services.logger_singleton import LoggerSingleton
+
+# Import Pydantic types for proper type safety
+# These are imported lazily to avoid circular imports
+# Use Dict[str, Any] for internal storage, but expose proper types in the API
 
 logger = LoggerSingleton.get_logger(__name__)
 
@@ -123,16 +128,42 @@ SPECIAL_REFS = {'$this', '$previous'}
 CONTEXT_REF_PATTERN = re.compile(r'^\$context:(\d+)$')
 
 
-class LinkToParseResult:
-    """Result of parsing link_to DSL."""
+class LinkToParseResult(BaseModel):
+    """
+    Result of parsing link_to DSL.
 
-    def __init__(self):
-        self.node_constraints: List[Dict[str, Any]] = []
-        self.edge_constraints: List[Dict[str, Any]] = []
-        self.special_refs: List[Dict[str, Any]] = []
-        self.errors: List[str] = []
+    Contains parsed node constraints, edge constraints, special references,
+    and any parsing errors encountered.
+
+    The constraints are stored as dicts internally for flexibility, but they
+    conform to the NodeConstraint and EdgeConstraint schemas from shared_types.py.
+
+    Example:
+        >>> result = parse_link_to("Task:title")
+        >>> result.has_errors()
+        False
+        >>> result.node_constraints[0]["node_type"]
+        'Task'
+    """
+    node_constraints: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Parsed node constraints (conform to NodeConstraint schema)"
+    )
+    edge_constraints: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Parsed edge constraints (conform to EdgeConstraint schema)"
+    )
+    special_refs: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Parsed special references ($this, $previous, $context:N)"
+    )
+    errors: List[str] = Field(
+        default_factory=list,
+        description="Parsing errors encountered"
+    )
 
     def has_errors(self) -> bool:
+        """Check if any parsing errors occurred."""
         return len(self.errors) > 0
 
     def to_dict(self) -> Dict[str, Any]:
@@ -529,15 +560,19 @@ def expand_link_to_to_policy(
     # Start with existing policy or empty
     policy = dict(existing_policy or {})
 
-    # Merge node_constraints
+    # Merge node_constraints (ensure never None)
+    existing_node = policy.get("node_constraints") or []
     if result.node_constraints:
-        existing_node = policy.get("node_constraints", [])
         policy["node_constraints"] = existing_node + result.node_constraints
+    elif not existing_node:
+        policy["node_constraints"] = []
 
-    # Merge edge_constraints
+    # Merge edge_constraints (ensure never None)
+    existing_edge = policy.get("edge_constraints") or []
     if result.edge_constraints:
-        existing_edge = policy.get("edge_constraints", [])
         policy["edge_constraints"] = existing_edge + result.edge_constraints
+    elif not existing_edge:
+        policy["edge_constraints"] = []
 
     # Handle special refs (convert to relationships)
     if result.special_refs:

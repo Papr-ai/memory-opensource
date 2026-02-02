@@ -639,11 +639,14 @@ class SearchResult(BaseModel):
                 # Get schema_id for this node if it's a custom node
                 node_label = node.label.value if hasattr(node.label, 'value') else str(node.label)
                 schema_id = schema_mapping.get(node_label) if schema_mapping else None
-                
+                if not schema_id:
+                    # Fall back to schema_id stored on the node itself
+                    schema_id = getattr(getattr(node, "properties", None), "schema_id", None)
+
                 # Create the public node
                 public_node = Node.from_internal(node, schema_id=schema_id)
                 nodes.append(public_node)
-                
+
                 # Track used schemas
                 if schema_id:
                     used_schemas.add(schema_id)
@@ -784,10 +787,14 @@ class SearchRequest(BaseModel):
     rank_results: bool = Field(
         default=False,
         description=(
+            "DEPRECATED: Use 'reranking_config' instead. "
             "Whether to enable additional ranking of search results. Default is false because results "
             "are already ranked when using an LLM for search (recommended approach). Only enable this "
-            "if you're not using an LLM in your search pipeline and need additional result ranking."
-        )
+            "if you're not using an LLM in your search pipeline and need additional result ranking. "
+            "Migration: Replace 'rank_results: true' with 'reranking_config: {reranking_enabled: true, "
+            "reranking_provider: \"cohere\", reranking_model: \"rerank-v3.5\"}'"
+        ),
+        json_schema_extra={"deprecated": True}
     )
     enable_agentic_graph: bool = Field(
         default=False,
@@ -846,6 +853,46 @@ class SearchRequest(BaseModel):
         description="Optional OMO (Open Memory Object) safety filter. Filter search results by consent level and/or risk level. "
                    "Use this to exclude memories without proper consent or flagged content from search results."
     )
+
+    @model_validator(mode='after')
+    def resolve_reranking_config(self) -> 'SearchRequest':
+        """
+        Resolve conflicts between deprecated rank_results and new reranking_config.
+
+        Precedence:
+        1. If only reranking_config is set → use it
+        2. If only rank_results is set → use it (with deprecation warning logged)
+        3. If both are set → reranking_config takes precedence
+        4. If both are set with conflicting values → log warning, use reranking_config
+        """
+        import warnings
+
+        # Check if rank_results was explicitly set (not default)
+        rank_results_set = self.rank_results is True
+        reranking_config_set = self.reranking_config is not None
+
+        if rank_results_set and not reranking_config_set:
+            # Case: Only rank_results is set - emit deprecation warning
+            warnings.warn(
+                "The 'rank_results' field is deprecated. "
+                "Use 'reranking_config' instead. Example: "
+                "reranking_config={'reranking_enabled': True, 'reranking_provider': 'cohere', 'reranking_model': 'rerank-v3.5'}",
+                DeprecationWarning,
+                stacklevel=2
+            )
+        elif rank_results_set and reranking_config_set:
+            # Case: Both are set - check for conflicts
+            reranking_enabled = self.reranking_config.reranking_enabled if self.reranking_config else False
+
+            if self.rank_results != reranking_enabled:
+                # Conflict: rank_results=True but reranking_config.reranking_enabled=False (or vice versa)
+                logger.warning(
+                    f"Conflict between deprecated 'rank_results' ({self.rank_results}) and "
+                    f"'reranking_config.reranking_enabled' ({reranking_enabled}). "
+                    f"Using 'reranking_config' value. Please remove 'rank_results' from your request."
+                )
+
+        return self
 
     @field_validator('query')
     @classmethod
@@ -1248,7 +1295,25 @@ class SchemaSpecificationMixin(BaseModel):
                    "Use mode='auto' (LLM extraction, constraints applied if provided) or 'manual' (exact nodes). "
                    "Includes consent, risk, and ACL settings. "
                    "If schema_id is set, schema's memory_policy is used as defaults. "
-                  
+
+    )
+
+    # SHORTHAND: link_to DSL for quick node/edge constraints
+    # Type alias: Union[str, List[str], Dict[str, Any]]
+    link_to: Optional[Union[str, List[str], Dict[str, Any]]] = Field(
+        default=None,
+        description="Shorthand DSL for node/edge constraints. "
+                   "Expands to memory_policy.node_constraints and edge_constraints. "
+                   "Formats: "
+                   "- String: 'Task:title' (semantic match on Task.title) "
+                   "- List: ['Task:title', 'Person:email'] (multiple constraints) "
+                   "- Dict: {'Task:title': {'set': {...}}} (with options) "
+                   "Syntax: "
+                   "- Node: 'Type:property', 'Type:prop=value' (exact), 'Type:prop~value' (semantic) "
+                   "- Edge: 'Source->EDGE->Target:property' (arrow syntax) "
+                   "- Via: 'Type.via(EDGE->Target:prop)' (relationship traversal) "
+                   "- Special: '$this', '$previous', '$context:N' "
+                   "Example: 'SecurityBehavior->MITIGATES->TacticDef:name' with {'create': 'never'}"
     )
 
     # DEPRECATED: Legacy graph generation (kept for backwards compatibility)

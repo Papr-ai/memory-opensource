@@ -657,6 +657,10 @@ class UploadDocumentRequest(BaseModel):
         None,
         description="Property overrides for node customization with match conditions"
     )
+    simple_schema_mode: Optional[bool] = Field(
+        None,
+        description="Deprecated. Kept for backward compatibility with older clients."
+    )
     # Note: The file itself is handled by FastAPI's UploadFile, not Pydantic
 
     @field_validator("type")
@@ -793,6 +797,50 @@ class SearchMode(str, Enum):
     SEMANTIC = "semantic"  # Vector similarity search
     EXACT = "exact"        # Exact property match
     FUZZY = "fuzzy"        # Partial/fuzzy match
+
+
+class SpecialRef(BaseModel):
+    """
+    Represents a special reference in link_to DSL.
+
+    Special references allow linking to contextual nodes:
+    - $this: The Memory node being created
+    - $previous: User's most recent memory
+    - $context:N: Last N memories in conversation
+
+    Examples:
+        SpecialRef(ref="$this")
+        SpecialRef(ref="$previous", type="FOLLOWS")
+        SpecialRef(ref="$context", count=5)
+    """
+    ref: Literal["$this", "$previous", "$context"] = Field(
+        ...,
+        description="The special reference type: '$this' (current memory), "
+                   "'$previous' (user's last memory), '$context' (conversation context)"
+    )
+    count: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="For $context: number of previous memories to include. "
+                   "Only used when ref='$context'."
+    )
+    type: Optional[str] = Field(
+        default=None,
+        description="Relationship type to create. "
+                   "For $previous, defaults to 'FOLLOWS'. "
+                   "For $context, defines how to link context memories."
+    )
+
+    model_config = ConfigDict(
+        extra='forbid',
+        json_schema_extra={
+            "examples": [
+                {"ref": "$this"},
+                {"ref": "$previous", "type": "FOLLOWS"},
+                {"ref": "$context", "count": 5}
+            ]
+        }
+    )
 
 
 class PropertyMatch(BaseModel):
