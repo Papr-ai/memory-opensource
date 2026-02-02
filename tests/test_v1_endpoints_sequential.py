@@ -181,6 +181,14 @@ from tests.test_graph_generation_modes import (
     test_manual_mode_with_explicit_graph,
 )
 
+# Import message/learning detection tests
+from tests.test_learning_detection_pytest import (
+    test_learning_detection_in_messages,
+)
+from tests.test_messages_endpoint_end_to_end import (
+    test_messages_endpoint_end_to_end,
+)
+
 # Import document processing tests
 from tests.test_document_processing_v2 import (
     test_document_upload_v2_with_api_key,
@@ -631,6 +639,19 @@ class V1EndpointTester:
             result = await self.run_test(test_name, test_func, app_instance)
             self.results.append(result)
     
+    async def run_message_tests(self, app_instance):
+        """Run message endpoint and learning detection tests."""
+        logger.info("🧪 Running Message & Learning Detection Tests...")
+
+        message_tests = [
+            ("Messages - End-to-End Workflow", test_messages_endpoint_end_to_end_wrapper),
+            ("Messages - Learning Detection with Neo4j Verification", test_learning_detection_in_messages_wrapper),
+        ]
+
+        for test_name, test_func in message_tests:
+            result = await self.run_test(test_name, test_func, app_instance)
+            self.results.append(result)
+    
     async def run_all_tests(self):
         """Run all v1 endpoint tests sequentially."""
         logger.info("🚀 Starting V1 Endpoints Sequential Test Suite")
@@ -668,6 +689,8 @@ class V1EndpointTester:
             await self.run_graph_generation_tests(app_instance)
             # Run multi-tenant tests
             await self.run_multi_tenant_tests(app_instance)
+            # Run message and learning detection tests
+            await self.run_message_tests(app_instance)
         except Exception as e:
             # Catch any unhandled exceptions during test execution
             suite_error = str(e)
@@ -1065,6 +1088,18 @@ async def test_batch_memory_multi_tenant_scoping_wrapper(app_instance):
 async def test_backward_compatibility_wrapper(app_instance):
     """Wrapper for test_backward_compatibility - doesn't need app."""
     await test_backward_compatibility()
+
+# Message and learning detection test wrappers
+async def test_messages_endpoint_end_to_end_wrapper(app_instance):
+    """Wrapper for test_messages_endpoint_end_to_end to work with sequential test runner."""
+    # The test creates its own client, we just call it
+    await test_messages_endpoint_end_to_end()
+
+async def test_learning_detection_in_messages_wrapper(app_instance):
+    """Wrapper for test_learning_detection_in_messages to work with sequential test runner."""
+    # This test needs the caplog fixture - create a dummy one
+    dummy_caplog = DummyCaplog()
+    await test_learning_detection_in_messages(dummy_caplog)
 
 async def main():
     """Main entry point."""

@@ -383,7 +383,8 @@ async def test_auto_mode_with_property_overrides(app):
                 metadata=MemoryMetadata(
                     createdAt="2024-01-15T10:00:00Z",
                     topics=["AI", "project management"],
-                    sourceType="Test"
+                    sourceType="Test",
+                    external_user_id="user_001"
                 ),
                 graph_generation=GraphGeneration(
                     mode=GraphGenerationMode.AUTO,
