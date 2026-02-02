@@ -26,8 +26,55 @@ logger = LoggerSingleton.get_logger(__name__)
 # PYDANTIC MODELS FOR STRUCTURED OUTPUTS
 # ============================================================================
 
+class FileOperations(BaseModel):
+    """Track files accessed during conversation"""
+    read: List[str] = Field(
+        default_factory=list,
+        description="Files that were read/opened/viewed"
+    )
+    modified: List[Dict[str, str]] = Field(
+        default_factory=list,
+        description="Files that were edited. Each dict has 'path' and 'description' keys"
+    )
+    created: List[str] = Field(
+        default_factory=list,
+        description="New files that were created"
+    )
+    deleted: List[str] = Field(
+        default_factory=list,
+        description="Files that were removed/deleted"
+    )
+
+class ProjectContext(BaseModel):
+    """Extracted project context from conversation"""
+    project_name: Optional[str] = Field(
+        default=None,
+        description="Name of the project being worked on"
+    )
+    project_id: Optional[str] = Field(
+        default=None,
+        description="Unique identifier for the project (e.g., 'proj_task_app')"
+    )
+    project_path: Optional[str] = Field(
+        default=None,
+        description="Root file path of the project if mentioned"
+    )
+    tech_stack: List[str] = Field(
+        default_factory=list,
+        description="Technologies, frameworks, languages detected (e.g., React, TypeScript, Node.js)"
+    )
+    current_task: Optional[str] = Field(
+        default=None,
+        description="What the user is currently working on in this project"
+    )
+    git_repo: Optional[str] = Field(
+        default=None,
+        description="Git repository URL if mentioned"
+    )
+
 class ConversationSummaries(BaseModel):
-    """Hierarchical conversation summaries"""
+    """Hierarchical conversation summaries with structured details"""
+    # Existing hierarchical summaries
     short_term: str = Field(
         description="Concise summary of the last 15 messages (current batch)"
     )
@@ -40,6 +87,36 @@ class ConversationSummaries(BaseModel):
     topics: List[str] = Field(
         default_factory=list,
         description="Key topics discussed in the conversation"
+    )
+    
+    # NEW: Enhanced structured fields (Paprwork-inspired)
+    session_intent: Optional[str] = Field(
+        default=None,
+        description="What is the user trying to accomplish? (1-2 sentences)"
+    )
+    key_decisions: List[str] = Field(
+        default_factory=list,
+        description="Important decisions made and their reasoning"
+    )
+    current_state: Optional[str] = Field(
+        default=None,
+        description="Where are we now? What's working? What's not working?"
+    )
+    next_steps: List[str] = Field(
+        default_factory=list,
+        description="Specific actionable next steps (3-5 items)"
+    )
+    technical_details: List[str] = Field(
+        default_factory=list,
+        description="Important technical details to remember (endpoints, error messages, function names, config values)"
+    )
+    files_accessed: Optional[FileOperations] = Field(
+        default=None,
+        description="Files that were read, modified, created, or deleted"
+    )
+    project_context: Optional[ProjectContext] = Field(
+        default=None,
+        description="Detected project context (name, tech stack, current task, etc.)"
     )
 
 async def add_message_to_memory_task(
@@ -184,6 +261,92 @@ For detected agent performance learnings, provide:
 - performance_scope: Scope level (project, goal, user, global)
 """
 
+FAILED_APPROACH_TRACKING_PROMPT = """
+**FAILED APPROACH TRACKING:**
+
+Identify approaches that were attempted but didn't work. This prevents re-trying dead ends.
+
+Track failed approaches when:
+- An approach/solution was tried but had to be abandoned
+- Technical limitations or errors blocked a path
+- Design decisions were reversed due to issues
+- Implementation strategies proved ineffective
+
+For detected failed approaches, provide:
+- has_failed_approach: boolean
+- failed_approach_content: Clear description of what was tried
+- failed_approach_reason: Why it didn't work or had to be abandoned
+- successful_alternative: What was used instead (if applicable)
+- failed_approach_category: technical, design, planning, execution
+"""
+
+FILE_TRACKING_PROMPT = """
+**FILE TRACKING:**
+
+Track all file operations mentioned in the conversation:
+- READ: Files that were opened, viewed, or read
+- MODIFIED: Files that were edited (include path and brief description of changes)
+- CREATED: New files that were created
+- DELETED: Files that were removed
+
+Include FULL file paths when mentioned (e.g., src/components/Login.tsx, not just Login.tsx).
+Extract file paths from:
+- Explicit mentions ("I'm reading src/api/auth.ts")
+- Tool use (file_read, file_write tool calls)
+- Code blocks with file paths in comments
+- Discussion of specific files
+
+For each file operation, provide:
+- read: Array of file paths
+- modified: Array of objects with "path" and "description" keys
+- created: Array of file paths
+- deleted: Array of file paths
+"""
+
+PROJECT_CONTEXT_DETECTION_PROMPT = """
+**PROJECT CONTEXT DETECTION:**
+
+From the conversation, extract project information:
+
+1. **project_name**: Name of the project being worked on
+   - Look for: "working on the task management app", "building a chat app"
+   - Extract from: Explicit mentions, repository names, app descriptions
+   - Example: "Task Management App", "E-commerce Platform"
+
+2. **project_id**: Unique identifier (lowercase, underscore-separated)
+   - Format: "proj_" + sanitized project name
+   - Example: "proj_task_management_app", "proj_ecommerce_platform"
+
+3. **project_path**: Root directory path if file paths are mentioned
+   - Find common root from file paths (e.g., /Users/user/projects/task-app)
+   - Or extract from mentions ("working in ~/projects/myapp")
+
+4. **tech_stack**: Technologies, frameworks, languages detected
+   - Extract from: File extensions (.tsx = TypeScript+React), explicit mentions, imports
+   - Examples: ["React", "TypeScript", "Node.js", "Express", "PostgreSQL"]
+   - Include: Languages, frameworks, databases, tools
+
+5. **current_task**: What user is currently working on
+   - Extract from: Recent messages about implementation, debugging, building
+   - Example: "Implementing JWT authentication", "Debugging WebSocket connection"
+
+6. **git_repo**: Git repository URL if mentioned
+   - Look for: github.com, gitlab.com, bitbucket.org URLs
+   - Example: "github.com/user/task-app"
+
+**Detection Strategy:**
+- Start with low confidence if project not mentioned yet
+- Update confidence as more context emerges
+- Look across ALL messages in batch (not just one)
+- Use file paths as strong signal (e.g., src/components → React app)
+- Use technology mentions (e.g., "React component" → React in tech_stack)
+
+**If project context unclear:**
+- Set project_name: null
+- Set project_id: null
+- Continue updating in future batches as more context emerges
+"""
+
 
 class MemoryMetadataSchema(BaseModel):
     """Schema for memory metadata"""
@@ -225,6 +388,13 @@ class MessageAnalysisSchema(BaseModel):
     efficient_approach: Optional[str] = None
     performance_context: Optional[str] = None
     performance_scope: Optional[str] = None  # project, user, general
+    
+    # NEW: General failed approach tracking (expanded beyond just performance)
+    has_failed_approach: bool = False
+    failed_approach_content: Optional[str] = None
+    failed_approach_reason: Optional[str] = None
+    successful_alternative: Optional[str] = None
+    failed_approach_category: Optional[str] = None  # technical, design, planning, execution
 
 class BatchMessageAnalysisSchema(BaseModel):
     """Structured output schema for batch message analysis"""
@@ -272,6 +442,8 @@ async def get_session_summaries(
         AND ($org_id IS NULL OR s.organization_id = $org_id)
         RETURN s.medium_term_summary as medium_term,
                s.long_term_summary as long_term,
+               s.session_intent as session_intent,
+               s.current_state as current_state,
                s.message_count as message_count
         LIMIT 1
         """
@@ -288,6 +460,8 @@ async def get_session_summaries(
                 summaries = {
                     'medium_term': record['medium_term'] or '',
                     'long_term': record['long_term'] or '',
+                    'session_intent': record.get('session_intent') or '',
+                    'current_state': record.get('current_state') or '',
                     'message_count': record['message_count'] or 0
                 }
                 logger.info(f"Found existing summaries for session {session_id}: {summaries['message_count']} messages")
@@ -310,7 +484,10 @@ async def get_agent_learning_schema_id(
     namespace_id: Optional[str] = None
 ) -> Optional[str]:
     """
-    Look up AgentLearning schema by name or tag.
+    Look up or auto-register AgentLearning schema.
+    
+    If the schema doesn't exist for this organization, it will be
+    automatically created on first use.
     
     Args:
         user_id: User ID for schema lookup
@@ -319,30 +496,27 @@ async def get_agent_learning_schema_id(
         namespace_id: Optional namespace ID
         
     Returns:
-        Schema ID if found, None otherwise
+        Schema ID (found or created), None on error
     """
     try:
-        from services.schema_service import SchemaService
+        from services.default_schema_initializer import ensure_agent_learning_schema
         
-        schema_service = SchemaService()
-        all_schemas = await schema_service.get_active_schemas(
+        schema_id = await ensure_agent_learning_schema(
             user_id=user_id,
             workspace_id=workspace_id,
             organization_id=organization_id,
             namespace_id=namespace_id
         )
         
-        # Look for schema by name or tag
-        for schema in all_schemas:
-            if schema.name == "AgentLearning" or "agent_learning" in getattr(schema, 'tags', []):
-                logger.info(f"Found AgentLearning schema: {schema.id}")
-                return schema.id
+        if schema_id:
+            logger.info(f"✅ AgentLearning schema ready: {schema_id}")
+        else:
+            logger.warning(f"⚠️ Could not find or create AgentLearning schema for organization {organization_id}")
         
-        logger.warning(f"AgentLearning schema not found for user {user_id}, organization {organization_id}")
-        return None
+        return schema_id
         
     except Exception as e:
-        logger.error(f"Error looking up AgentLearning schema: {e}", exc_info=True)
+        logger.error(f"❌ Error ensuring AgentLearning schema: {e}", exc_info=True)
         return None
 
 
@@ -452,7 +626,7 @@ Assistant categories:
 
 **SUMMARY GENERATION:**
 
-Generate hierarchical summaries for the conversation:
+Generate hierarchical summaries with structured details:
 
 1. **short_term**: Concise summary of THIS batch (last 15 messages)
    - Focus on: Key decisions, progress, new information
@@ -472,6 +646,46 @@ Generate hierarchical summaries for the conversation:
    - Update strategy: Only update if significant new themes/outcomes emerge
 
 4. **topics**: Array of key topics discussed (3-7 topics)
+
+5. **session_intent**: What is the user trying to accomplish? (1-2 sentences)
+   - Extract the main goal or objective
+   - Example: "User is building a React authentication flow with JWT tokens"
+
+6. **key_decisions**: Important decisions made and their reasoning (array)
+   - List 3-5 key decisions if any were made
+   - Include WHY each decision was made
+   - Example: "Decided to store JWT in httpOnly cookies for security (XSS protection)"
+
+7. **current_state**: Where are we now? What's working? What's not? (string)
+   - Summarize current status
+   - Separate what's working from what's not
+   - Example: "Working: JWT generation, login form. Not working: Token refresh timing issues"
+
+8. **next_steps**: Specific actionable next steps (array of 3-5 items)
+   - List concrete next actions
+   - Example: "Debug token refresh timing", "Implement ProtectedRoute component"
+
+9. **technical_details**: Important technical specifics (array)
+   - Error messages, function names, endpoints, config values
+   - Example: "Token expiry: 3600 seconds", "Refresh endpoint: POST /api/auth/refresh"
+
+10. **files_accessed**: Track file operations (object with arrays)
+    - read: [file paths that were read/viewed]
+    - modified: [{path: "file.ts", description: "added validation"}]
+    - created: [file paths that were created]
+    - deleted: [file paths that were removed]
+
+11. **project_context**: Extracted project information (object)
+    - project_name: Name of the project
+    - project_id: Unique identifier (e.g., "proj_task_app")
+    - project_path: Root directory path
+    - tech_stack: Array of technologies detected
+    - current_task: What user is currently working on
+    - git_repo: Repository URL if mentioned
+
+{FILE_TRACKING_PROMPT}
+
+{PROJECT_CONTEXT_DETECTION_PROMPT}
 
 Return a JSON object with an "analyses" array and a "summaries" object.
 Each analysis should include:
@@ -494,6 +708,15 @@ LEARNING FIELDS (include for EACH message, even if no learning detected):
 - inefficient_approach: string (null if not applicable)
 - efficient_approach: string (null if not applicable)
 - performance_context: string (null if not detected)
+
+FAILED APPROACH FIELDS (include for EACH message):
+- has_failed_approach: boolean
+- failed_approach_content: string (null if not detected)
+- failed_approach_reason: string (null if not detected)
+- successful_alternative: string (null if applicable)
+- failed_approach_category: string (null if not detected - options: technical, design, planning, execution)
+
+{FAILED_APPROACH_TRACKING_PROMPT}
 - performance_scope: string (null if not detected)
 
 For memory_request, MUST include:
@@ -516,6 +739,8 @@ For memory_request, MUST include:
 PREVIOUS SUMMARIES (for context):
 Long-term (full session): {previous_summaries.get('long_term', 'N/A')}
 Medium-term (last ~100 messages): {previous_summaries.get('medium_term', 'N/A')}
+Session Intent: {previous_summaries.get('session_intent', 'N/A')}
+Current State: {previous_summaries.get('current_state', 'N/A')}
 Current message count: {previous_summaries.get('message_count', 0)}
 
 """
@@ -533,6 +758,13 @@ YOUR TASKS:
 3. UPDATE medium-term summary by synthesizing previous medium + new short
 4. UPDATE long-term summary if new significant themes/outcomes emerged (otherwise keep similar)
 5. Extract key topics discussed
+6. UPDATE session_intent if it has evolved or clarified
+7. UPDATE key_decisions array (add new decisions, keep previous important ones)
+8. UPDATE current_state to reflect latest status
+9. UPDATE next_steps based on what's left to do
+10. UPDATE technical_details with any new important details
+11. UPDATE files_accessed based on files mentioned in this batch
+12. DETECT project_context from conversation (project name, tech stack, current task, file paths, git repo)
 
 Return complete analysis with both "analyses" array and "summaries" object."""
 
@@ -649,6 +881,7 @@ async def process_batch_analysis_results(
     project_id: Optional[str] = None,
     goal_id: Optional[str] = None,
     session_id: Optional[str] = None,
+    session_title: Optional[str] = None,  # NEW: Session title from messages
     parent_background_tasks: Optional[BackgroundTasks] = None,
     memory_policy: Optional[Any] = None,  # From MessageRequest
     graph_generation: Optional[Any] = None,  # From MessageRequest (deprecated)
@@ -927,6 +1160,61 @@ async def process_batch_analysis_results(
                 else:
                     logger.warning(f"AgentLearning schema not found, skipping agent performance learning for message {result.message_id}")
             
+            # 4. Create FAILED APPROACH memory if detected
+            if result.has_failed_approach and result.failed_approach_content:
+                logger.info(f"Creating failed approach memory for message {result.message_id}")
+                
+                failed_approach_request = AddMemoryRequest(
+                    content=result.failed_approach_content,
+                    type="text",
+                    metadata=MemoryMetadata(
+                        user_id=user_id,
+                        workspace_id=workspace_id,
+                        organization_id=organization_id,
+                        namespace_id=namespace_id,
+                        role=MessageRole.ASSISTANT,
+                        category=AssistantMemoryCategory.LEARNING,
+                        conversationId=result.session_id,
+                        customMetadata={
+                            "type": "failed_approach",
+                            "category": result.failed_approach_category or "general",
+                            "reason": result.failed_approach_reason or "",
+                            "alternative": result.successful_alternative or "",
+                            "source_message_id": result.message_id,
+                            "project_id": project_id
+                        }
+                    )
+                )
+                
+                try:
+                    # Create memory for failed approach
+                    memory_items = await add_message_to_memory_task(
+                        memory_request=failed_approach_request,
+                        user_id=user_id,
+                        session_token=session_token,
+                        neo_session=None,
+                        memory_graph=None,
+                        background_tasks=parent_background_tasks,
+                        client_type="message_processing",
+                        user_workspace_ids=None,
+                        api_key=None,
+                        legacy_route=True,
+                        workspace_id=workspace_id,
+                        organization_id=organization_id,
+                        namespace_id=namespace_id,
+                        api_key_id=api_key_id
+                    )
+                    
+                    if memory_items and len(memory_items) > 0:
+                        logger.info(f"✅ Successfully created failed approach memory {memory_items[0].memoryId}")
+                        stats["learnings_created"] += 1
+                    else:
+                        logger.error(f"❌ Failed to create failed approach memory for message {result.message_id}")
+                        stats["errors"] += 1
+                except Exception as e:
+                    logger.error(f"❌ Error creating failed approach memory: {e}")
+                    stats["errors"] += 1
+            
             # Update message status to completed
             if result.message_id:
                 await update_message_processing_status(result.message_id, "completed")
@@ -971,6 +1259,25 @@ async def process_batch_analysis_results(
                             "short_term_summary": summaries.short_term,
                             "medium_term_summary": summaries.medium_term,
                             "long_term_summary": summaries.long_term,
+                            "session_intent": summaries.session_intent or "",
+                            "key_decisions": summaries.key_decisions or [],
+                            "current_state": summaries.current_state or "",
+                            "next_steps": summaries.next_steps or [],
+                            "technical_details": summaries.technical_details or [],
+                            "files_accessed": {
+                                "read": summaries.files_accessed.read if summaries.files_accessed else [],
+                                "modified": summaries.files_accessed.modified if summaries.files_accessed else [],
+                                "created": summaries.files_accessed.created if summaries.files_accessed else [],
+                                "deleted": summaries.files_accessed.deleted if summaries.files_accessed else []
+                            } if summaries.files_accessed else {},
+                            "project_context": {
+                                "project_name": summaries.project_context.project_name if summaries.project_context else None,
+                                "project_id": summaries.project_context.project_id if summaries.project_context else None,
+                                "project_path": summaries.project_context.project_path if summaries.project_context else None,
+                                "tech_stack": summaries.project_context.tech_stack if summaries.project_context else [],
+                                "current_task": summaries.project_context.current_task if summaries.project_context else None,
+                                "git_repo": summaries.project_context.git_repo if summaries.project_context else None
+                            } if summaries.project_context else {},
                             "message_count": len(analysis_results),
                             "topics": ",".join(summaries.topics),
                             "last_updated": datetime.now(timezone.utc).isoformat()
@@ -987,6 +1294,11 @@ async def process_batch_analysis_results(
                                 node_label="MessageSession",
                                 property_name="sessionId",
                                 property_value=session_id
+                            ),
+                            PropertyOverrideRule(
+                                node_label="MessageSession",
+                                property_name="title",
+                                property_value=session_title or ""  # From message customMetadata
                             ),
                             PropertyOverrideRule(
                                 node_label="MessageSession",
@@ -1012,6 +1324,71 @@ async def process_batch_analysis_results(
                                 node_label="MessageSession",
                                 property_name="topics",
                                 property_value=",".join(summaries.topics)
+                            ),
+                            PropertyOverrideRule(
+                                node_label="MessageSession",
+                                property_name="session_intent",
+                                property_value=summaries.session_intent or ""
+                            ),
+                            PropertyOverrideRule(
+                                node_label="MessageSession",
+                                property_name="key_decisions",
+                                property_value=json.dumps(summaries.key_decisions) if summaries.key_decisions else "[]"
+                            ),
+                            PropertyOverrideRule(
+                                node_label="MessageSession",
+                                property_name="current_state",
+                                property_value=summaries.current_state or ""
+                            ),
+                            PropertyOverrideRule(
+                                node_label="MessageSession",
+                                property_name="next_steps",
+                                property_value=json.dumps(summaries.next_steps) if summaries.next_steps else "[]"
+                            ),
+                            PropertyOverrideRule(
+                                node_label="MessageSession",
+                                property_name="technical_details",
+                                property_value=json.dumps(summaries.technical_details) if summaries.technical_details else "[]"
+                            ),
+                            PropertyOverrideRule(
+                                node_label="MessageSession",
+                                property_name="files_accessed",
+                                property_value=json.dumps({
+                                    "read": summaries.files_accessed.read if summaries.files_accessed else [],
+                                    "modified": summaries.files_accessed.modified if summaries.files_accessed else [],
+                                    "created": summaries.files_accessed.created if summaries.files_accessed else [],
+                                    "deleted": summaries.files_accessed.deleted if summaries.files_accessed else []
+                                })
+                            ),
+                            PropertyOverrideRule(
+                                node_label="MessageSession",
+                                property_name="project_name",
+                                property_value=summaries.project_context.project_name if summaries.project_context else ""
+                            ),
+                            PropertyOverrideRule(
+                                node_label="MessageSession",
+                                property_name="project_id",
+                                property_value=summaries.project_context.project_id if summaries.project_context else ""
+                            ),
+                            PropertyOverrideRule(
+                                node_label="MessageSession",
+                                property_name="project_path",
+                                property_value=summaries.project_context.project_path if summaries.project_context else ""
+                            ),
+                            PropertyOverrideRule(
+                                node_label="MessageSession",
+                                property_name="tech_stack",
+                                property_value=",".join(summaries.project_context.tech_stack) if summaries.project_context and summaries.project_context.tech_stack else ""
+                            ),
+                            PropertyOverrideRule(
+                                node_label="MessageSession",
+                                property_name="current_task",
+                                property_value=summaries.project_context.current_task if summaries.project_context else ""
+                            ),
+                            PropertyOverrideRule(
+                                node_label="MessageSession",
+                                property_name="git_repo",
+                                property_value=summaries.project_context.git_repo if summaries.project_context else ""
                             )
                         ]
                     )

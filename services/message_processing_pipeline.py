@@ -511,6 +511,14 @@ async def smart_message_processing_workflow(
                     namespace_id=namespace_id
                 )
                 
+                # Extract session title from messages (if provided in customMetadata)
+                session_title = None
+                for msg in unprocessed_messages:
+                    custom_meta = msg.get("metadata", {}).get("customMetadata", {})
+                    if custom_meta.get("session_title"):
+                        session_title = custom_meta["session_title"]
+                        break  # Use the first non-null title found
+                
                 # Process the analysis results
                 batch_stats = await process_batch_analysis_results(
                     analysis_results,
@@ -522,6 +530,7 @@ async def smart_message_processing_workflow(
                     namespace_id,
                     api_key_id=api_key_id,
                     session_id=message_request.sessionId,  # ✅ Pass session_id
+                    session_title=session_title,  # ✅ Pass session title
                     parent_background_tasks=parent_background_tasks,  # ✅ Pass it down
                     memory_policy=message_request.memory_policy,  # ✅ Pass from message
                     graph_generation=message_request.graph_generation,  # ✅ Pass from message

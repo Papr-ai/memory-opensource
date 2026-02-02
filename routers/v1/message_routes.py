@@ -201,7 +201,7 @@ async def store_message(
     - Returns hierarchical conversation summaries (short/medium/long-term)
     - Includes `context_for_llm` field with pre-compressed context
     - Summaries are automatically generated every 15 messages
-    - Use `/sessions/{session_id}/summarize` endpoint to generate on-demand
+    - Use `/sessions/{session_id}/compress` endpoint to retrieve on-demand
     
     **Access Control**:
     - Only returns messages for the authenticated user
@@ -377,45 +377,16 @@ async def get_session_status(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.post("/sessions/{session_id}/summarize",
-    response_model=SessionSummaryResponse,
-    responses={
-        200: {"model": SessionSummaryResponse, "description": "Session summary generated or retrieved"},
-        401: {"description": "Unauthorized"},
-        404: {"description": "Session not found"},
-        500: {"description": "Internal server error"}
-    },
-    description="""
-    Generate or retrieve conversation summaries for a session.
-    
-    **Authentication Required**: Bearer token, API key, or session token
-    
-    **Behavior**:
-    - If summaries already exist, returns them immediately
-    - If no summaries exist, triggers summarization now
-    - Returns hierarchical summaries (short/medium/long-term) and topics
-    - Includes AI agent instructions for searching memory by sessionId
-    
-    **Use Cases**:
-    - Get summaries for sessions that haven't hit the 15-message threshold yet
-    - Provide compressed context to AI agents
-    - Quick overview of long conversations
-    
-    **AI Agent Note**:
-    - Response includes instructions for searching memories by sessionId
-    - Use the metadata filter: `sessionId='<session_id>'` to find related memories
-    """
-)
-async def summarize_session(
+async def _compress_session_impl(
     request: Request,
     session_id: str,
     background_tasks: BackgroundTasks,
-    bearer_token: Optional[HTTPAuthorizationCredentials] = Depends(bearer_auth),
-    api_key: Optional[str] = Depends(api_key_header),
-    session_token: Optional[str] = Depends(session_token_header),
-    memory_graph: MemoryGraph = Depends(get_memory_graph)
+    bearer_token: Optional[HTTPAuthorizationCredentials],
+    api_key: Optional[str],
+    session_token: Optional[str],
+    memory_graph: MemoryGraph
 ):
-    """Generate or retrieve conversation summaries for a session"""
+    """Get compressed conversation context for a session"""
     
     try:
         # Authenticate user
@@ -461,7 +432,8 @@ async def summarize_session(
             # Summaries exist, return them with AI agent instructions
             logger.info(f"Returning existing summaries for session {session_id}")
             
-            return SessionSummaryResponse(
+            # Build full response including all enhanced fields from Parse
+            summary_response = SessionSummaryResponse(
                 session_id=session_id,
                 summaries=ConversationSummaryResponse(
                     short_term=existing_summaries.get("short_term", ""),
@@ -473,6 +445,20 @@ async def summarize_session(
                 ai_agent_note=f"To find more details about this conversation, search memories with metadata filter: sessionId='{session_id}'",
                 from_cache=True
             )
+            
+            # Add enhanced fields from Parse (if they exist)
+            summary_dict = summary_response.model_dump()
+            summary_dict["enhanced_fields"] = {
+                "session_intent": existing_summaries.get("session_intent"),
+                "key_decisions": existing_summaries.get("key_decisions", []),
+                "current_state": existing_summaries.get("current_state"),
+                "next_steps": existing_summaries.get("next_steps", []),
+                "technical_details": existing_summaries.get("technical_details", []),
+                "files_accessed": existing_summaries.get("files_accessed", {}),
+                "project_context": existing_summaries.get("project_context", {})
+            }
+            
+            return summary_dict
         
         # No summaries exist, trigger summarization now
         logger.info(f"No existing summaries found, triggering summarization for session {session_id}")
@@ -567,6 +553,55 @@ async def summarize_session(
     except Exception as e:
         logger.error(f"Error generating session summary: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+# GET /sessions/{session_id}/compress (primary endpoint)
+@router.get("/sessions/{session_id}/compress",
+    response_model=SessionSummaryResponse,
+    responses={
+        200: {"model": SessionSummaryResponse, "description": "Session summary (compressed context)"},
+        401: {"description": "Unauthorized"},
+        404: {"description": "Session not found or no summary exists"},
+        500: {"description": "Internal server error"}
+    },
+    description="""
+    Get compressed conversation context for a session.
+    
+    Compress your conversation into hierarchical summaries with rich metadata,
+    perfect for reducing token usage in LLM context windows.
+    
+    **Authentication Required**: Bearer token, API key, or session token
+    
+    **What it returns**:
+    - **short_term**: Last 15 messages compressed
+    - **medium_term**: Last ~100 messages compressed  
+    - **long_term**: Full session compressed
+    - **topics**: Key topics discussed
+    - **enhanced_fields**: Project context, tech stack, key decisions, next steps, files accessed
+    
+    **Perfect for**:
+    - Reducing token usage in LLM prompts (96% savings)
+    - Providing conversation context without full history
+    - Quick conversation overview for AI agents
+    - Project documentation and status snapshots
+    
+    **Input**: Just the session ID - all context is extracted automatically
+    """
+)
+async def compress_session(
+    request: Request,
+    session_id: str,
+    background_tasks: BackgroundTasks,
+    bearer_token: Optional[HTTPAuthorizationCredentials] = Depends(bearer_auth),
+    api_key: Optional[str] = Depends(api_key_header),
+    session_token: Optional[str] = Depends(session_token_header),
+    memory_graph: MemoryGraph = Depends(get_memory_graph)
+):
+    """Get compressed conversation context for a session"""
+    return await _compress_session_impl(
+        request, session_id, background_tasks,
+        bearer_token, api_key, session_token, memory_graph
+    )
 
 
 @router.post("/sessions/{session_id}/process",
