@@ -75,7 +75,7 @@ google-genai = "^1.46.0"         # NEW Gemini SDK - NO protobuf conflicts! https
 # google-generativeai = "^0.8.0"  # OLD (deprecated) - Conflicts with TensorLake, support ends Aug 2025
 pymupdf = "^1.26.6"              # PyMuPDF - required for Gemini PDF processing
 reducto = "*"                    # Reducto AI - use latest available
-tensorlake = "^0.2.69"           # TensorLake.ai SDK - NOW COMPATIBLE with new google-genai!
+# tensorlake is not available on PyPI; keep it out of default deps for OSS builds.
 temporalio = "^1.8.0"            # Temporal workflows for durable processing (1.8+ required for VersioningIntent)
 pinecone = "^7.3.0"
 motor = "^3.7.1"
