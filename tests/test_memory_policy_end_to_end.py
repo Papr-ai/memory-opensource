@@ -153,6 +153,148 @@ def extract_nodes_from_search(search_result: Dict) -> List[Dict]:
     return nodes
 
 
+def _apply_tenant_fields(payload: Dict[str, Any]) -> None:
+    """Apply tenant fields only when available in env."""
+    if TEST_ORGANIZATION_ID:
+        payload["organization_id"] = TEST_ORGANIZATION_ID
+    if TEST_NAMESPACE_ID:
+        payload["namespace_id"] = TEST_NAMESPACE_ID
+
+
+def get_project_management_schema() -> Dict[str, Any]:
+    """Schema for manual graph override tests."""
+    return {
+        "name": "Project Management Graph (Policy Test)",
+        "description": "Schema for manual graph override tests",
+        "status": "active",
+        "node_types": {
+            "Person": {
+                "name": "Person",
+                "label": "Person",
+                "properties": {
+                    "name": {"type": "string", "required": True},
+                    "email": {"type": "string", "required": False},
+                    "role": {"type": "string", "required": False}
+                },
+                "unique_identifiers": ["email"],
+                "required_properties": ["name"]
+            },
+            "Company": {
+                "name": "Company",
+                "label": "Company",
+                "properties": {
+                    "name": {"type": "string", "required": True},
+                    "domain": {"type": "string", "required": False},
+                    "industry": {"type": "string", "required": False}
+                },
+                "unique_identifiers": ["name"],
+                "required_properties": ["name"]
+            },
+            "Task": {
+                "name": "Task",
+                "label": "Task",
+                "properties": {
+                    "title": {"type": "string", "required": True},
+                    "description": {"type": "string", "required": False},
+                    "status": {"type": "string", "required": False},
+                    "priority": {"type": "string", "required": False}
+                },
+                "unique_identifiers": ["title"],
+                "required_properties": ["title"]
+            }
+        },
+        "relationship_types": {
+            "WORKS_AT": {
+                "name": "WORKS_AT",
+                "label": "Works At",
+                "allowed_source_types": ["Person"],
+                "allowed_target_types": ["Company"]
+            },
+            "OWNS": {
+                "name": "OWNS",
+                "label": "Owns",
+                "allowed_source_types": ["Person"],
+                "allowed_target_types": ["Task"]
+            }
+        }
+    }
+
+
+def get_deeptrust_schema(unique_id: str) -> Dict[str, Any]:
+    """DeepTrust-style schema with edge policy for MITIGATES."""
+    return {
+        "name": f"DeepTrust Security Schema {unique_id}",
+        "description": "Schema with controlled vocabulary + edge policy for mitigations",
+        "status": "active",
+        "node_types": {
+            "SecurityBehavior": {
+                "name": "SecurityBehavior",
+                "label": "SecurityBehavior",
+                "properties": {
+                    "id": {"type": "string", "required": False},
+                    "name": {"type": "string", "required": True},
+                    "description": {"type": "string", "required": False},
+                    "category": {"type": "string", "required": False}
+                },
+                "unique_identifiers": ["name"],
+                "required_properties": ["name"]
+            },
+            "TacticDef": {
+                "name": "TacticDef",
+                "label": "TacticDef",
+                "properties": {
+                    "id": {"type": "string", "required": False},
+                    "name": {"type": "string", "required": True},
+                    "description": {"type": "string", "required": False}
+                },
+                "unique_identifiers": ["name"],
+                "required_properties": ["name"]
+            }
+        },
+        "relationship_types": {
+            "MITIGATES": {
+                "name": "MITIGATES",
+                "label": "Mitigates",
+                "allowed_source_types": ["SecurityBehavior"],
+                "allowed_target_types": ["TacticDef"],
+                "constraint": {
+                    "create": "lookup",
+                    "search": {
+                        "properties": [
+                            {"name": "name", "mode": "semantic", "threshold": 0.9}
+                        ]
+                    }
+                }
+            }
+        },
+        "memory_policy": {
+            "mode": "auto",
+            "consent": "explicit",
+            "risk": "sensitive",
+            "node_constraints": [
+                {
+                    "node_type": "SecurityBehavior",
+                    "create": "lookup",
+                    "search": {
+                        "properties": [
+                            {"name": "name", "mode": "semantic", "threshold": 0.85}
+                        ]
+                    }
+                },
+                {
+                    "node_type": "TacticDef",
+                    "create": "lookup",
+                    "search": {
+                        "properties": [
+                            {"name": "name", "mode": "semantic", "threshold": 0.9}
+                        ]
+                    }
+                }
+            ]
+        }
+    }
+
+
 # ============================================================================
 # link_to DSL End-to-End Tests with Validation
 # ============================================================================
@@ -462,16 +604,19 @@ class TestSchemaLevelPolicyInheritance:
                 schema_data = {
                     "name": f"TestSchema_{unique_id}",
                     "description": "Test schema for policy inheritance",
-                    "node_types": [
-                        {
+                    "node_types": {
+                        "TestTask": {
                             "name": "TestTask",
+                            "label": "TestTask",
                             "description": "A test task type",
-                            "properties": [
-                                {"name": "title", "type": "string", "required": True},
-                                {"name": "status", "type": "string"}
-                            ]
+                            "properties": {
+                                "title": {"type": "string", "required": True},
+                                "status": {"type": "string", "required": False}
+                            },
+                            "unique_identifiers": ["title"],
+                            "required_properties": ["title"]
                         }
-                    ],
+                    },
                     "memory_policy": {
                         "mode": "auto",
                         "consent": "explicit",
@@ -486,25 +631,24 @@ class TestSchemaLevelPolicyInheritance:
 
                 # Create schema
                 schema_response = await client.post(
-                    "/v1/schema",
+                    "/v1/schemas",
                     json=schema_data,
                     headers=api_headers
                 )
 
-                if schema_response.status_code == 200:
+                if schema_response.status_code == 201:
                     schema_result = schema_response.json()
-                    schema_id = schema_result.get("data", {}).get("schema_id")
+                    schema_id = schema_result.get("data", {}).get("id")
 
                     if schema_id:
                         # Create memory using schema (inherits policy)
                         memory_data = {
                             "content": f"Task to review code changes - TestID {unique_id}",
                             "type": "text",
-                            "namespace_id": TEST_NAMESPACE_ID,
-                            "organization_id": TEST_ORGANIZATION_ID,
-                            "schema_id": schema_id
-                            # Note: no memory_policy - should inherit from schema
+                            "memory_policy": {"schema_id": schema_id}
+                            # Note: no memory_policy overrides beyond schema_id
                         }
+                        _apply_tenant_fields(memory_data)
 
                         memory_response = await client.post(
                             "/v1/memory",
@@ -604,6 +748,270 @@ class TestPolicyMerging:
 
                 assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
 
+
+# ============================================================================
+# Manual Graph Override Tests (memory_policy manual mode)
+# ============================================================================
+
+class TestManualPolicyGraphOverride:
+    """Tests for manual memory_policy graph overrides (nodes + relationships)."""
+
+    @pytest.mark.asyncio
+    async def test_manual_graph_override_full_api(self, unique_id, api_headers):
+        """
+        Create a schema, then add a memory with manual nodes/relationships.
+        Validate that nodes appear in agentic graph search results.
+        """
+        async with LifespanManager(app, startup_timeout=30) as manager:
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=manager.app),
+                base_url="http://test",
+                timeout=60.0
+            ) as client:
+                schema_data = get_project_management_schema()
+                schema_data["name"] = f"{schema_data['name']} [{unique_id}]"
+                _apply_tenant_fields(schema_data)
+
+                schema_response = await client.post("/v1/schemas", json=schema_data, headers=api_headers)
+                assert schema_response.status_code == 201, f"Schema creation failed: {schema_response.text}"
+                schema_id = schema_response.json()["data"]["id"]
+
+                content = f"Manual graph override test - {unique_id}"
+                manual_nodes = [
+                    {
+                        "id": f"person_{unique_id}",
+                        "type": "Person",
+                        "properties": {
+                            "name": f"Sarah Johnson {unique_id}",
+                            "email": f"sarah.{unique_id}@acmecorp.com",
+                            "role": "CTO"
+                        }
+                    },
+                    {
+                        "id": f"company_{unique_id}",
+                        "type": "Company",
+                        "properties": {
+                            "name": f"Acme Corp {unique_id}",
+                            "domain": f"acme-{unique_id}.com",
+                            "industry": "Security"
+                        }
+                    },
+                    {
+                        "id": f"task_{unique_id}",
+                        "type": "Task",
+                        "properties": {
+                            "title": f"Implement access controls {unique_id}",
+                            "status": "in_progress",
+                            "priority": "high"
+                        }
+                    }
+                ]
+                manual_relationships = [
+                    {"source": f"person_{unique_id}", "target": f"company_{unique_id}", "type": "WORKS_AT"},
+                    {"source": f"person_{unique_id}", "target": f"task_{unique_id}", "type": "OWNS"}
+                ]
+
+                memory_payload = {
+                    "content": content,
+                    "type": "text",
+                    "memory_policy": {
+                        "schema_id": schema_id,
+                        "mode": "manual",
+                        "nodes": manual_nodes,
+                        "relationships": manual_relationships
+                    }
+                }
+                _apply_tenant_fields(memory_payload)
+
+                response = await client.post("/v1/memory", json=memory_payload, headers=api_headers)
+                assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+
+                await asyncio.sleep(3)
+                search_payload = {
+                    "query": content,
+                    "enable_agentic_graph": False,
+                    "max_memories": 5,
+                    "search_override": {
+                        "pattern": {
+                            "source_label": "Person",
+                            "relationship_type": "WORKS_AT",
+                            "target_label": "Company",
+                            "direction": "->"
+                        },
+                        "filters": [
+                            {
+                                "node_type": "Company",
+                                "property_name": "name",
+                                "operator": "CONTAINS",
+                                "value": f"Acme Corp {unique_id}"
+                            }
+                        ]
+                    }
+                }
+                _apply_tenant_fields(search_payload)
+                nodes = []
+                for _ in range(5):
+                    search_response = await client.post("/v1/memory/search", json=search_payload, headers=api_headers)
+                    assert search_response.status_code == 200
+                    search_result = search_response.json()
+                    nodes = extract_nodes_from_search(search_result)
+                    node_names = {
+                        (n.get("properties", {}).get("name") or n.get("name"))
+                        for n in nodes if isinstance(n, dict)
+                    }
+                    if any(f"Acme Corp {unique_id}" in (name or "") for name in node_names) and any(
+                        f"Sarah Johnson {unique_id}" in (name or "") for name in node_names
+                    ):
+                        break
+                    await asyncio.sleep(2)
+
+                node_names = {
+                    (n.get("properties", {}).get("name") or n.get("name"))
+                    for n in nodes if isinstance(n, dict)
+                }
+                assert any(f"Acme Corp {unique_id}" in (name or "") for name in node_names), "Company node not found"
+                assert any(f"Sarah Johnson {unique_id}" in (name or "") for name in node_names), "Person node not found"
+
+
+# ============================================================================
+# DeepTrust Edge Policy Tests (schema-level + memory-level)
+# ============================================================================
+
+class TestDeepTrustEdgePolicy:
+    """Tests for schema-level edge policy and memory-level overrides."""
+
+    @pytest.mark.asyncio
+    async def test_deeptrust_edge_policy_link_to_dsl(self, unique_id, api_headers):
+        """
+        Create DeepTrust schema with MITIGATES edge policy.
+        Use link_to DSL (short form) to create nodes + edge.
+        """
+        async with LifespanManager(app, startup_timeout=30) as manager:
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=manager.app),
+                base_url="http://test",
+                timeout=60.0
+            ) as client:
+                schema_data = get_deeptrust_schema(unique_id)
+                _apply_tenant_fields(schema_data)
+
+                schema_response = await client.post("/v1/schemas", json=schema_data, headers=api_headers)
+                assert schema_response.status_code == 201, f"Schema creation failed: {schema_response.text}"
+                schema_id = schema_response.json()["data"]["id"]
+
+                content = f"Defense evasion detected; verify identity policy applies. [run:{unique_id}]"
+                memory_payload = {
+                    "content": content,
+                    "type": "text",
+                    "memory_policy": {"schema_id": schema_id},
+                    "link_to": {
+                        "SecurityBehavior:name": {"create": "auto"},
+                        "TacticDef:name": {"create": "auto"},
+                        "SecurityBehavior->MITIGATES->TacticDef:name": {"create": "never"}
+                    }
+                }
+                _apply_tenant_fields(memory_payload)
+
+                response = await client.post("/v1/memory", json=memory_payload, headers=api_headers)
+                assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+
+                await asyncio.sleep(3)
+                search_payload = {
+                    "query": content,
+                    "enable_agentic_graph": True,
+                    "max_memories": 5
+                }
+                _apply_tenant_fields(search_payload)
+                search_response = await client.post("/v1/memory/search", json=search_payload, headers=api_headers)
+                assert search_response.status_code == 200
+                search_result = search_response.json()
+                nodes = extract_nodes_from_search(search_result)
+
+                labels = {n.get("label") for n in nodes if isinstance(n, dict)}
+                assert "SecurityBehavior" in labels, "SecurityBehavior node missing from graph results"
+                assert "TacticDef" in labels, "TacticDef node missing from graph results"
+
+    @pytest.mark.asyncio
+    async def test_deeptrust_edge_policy_full_api(self, unique_id, api_headers):
+        """
+        Create DeepTrust schema with MITIGATES edge policy.
+        Use full memory_policy with edge_constraints to define the relationship.
+        """
+        async with LifespanManager(app, startup_timeout=30) as manager:
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=manager.app),
+                base_url="http://test",
+                timeout=60.0
+            ) as client:
+                schema_data = get_deeptrust_schema(f"{unique_id}-full")
+                _apply_tenant_fields(schema_data)
+
+                schema_response = await client.post("/v1/schemas", json=schema_data, headers=api_headers)
+                assert schema_response.status_code == 201, f"Schema creation failed: {schema_response.text}"
+                schema_id = schema_response.json()["data"]["id"]
+
+                content = f"Mitigate tactics using security behaviors. [run:{unique_id}]"
+                memory_payload = {
+                    "content": content,
+                    "type": "text",
+                    "memory_policy": {
+                        "schema_id": schema_id,
+                        "mode": "auto",
+                        "node_constraints": [
+                            {
+                                "node_type": "SecurityBehavior",
+                                "create": "auto",
+                                "search": {
+                                    "properties": [
+                                        {"name": "name", "mode": "semantic", "threshold": 0.85}
+                                    ]
+                                }
+                            },
+                            {
+                                "node_type": "TacticDef",
+                                "create": "auto",
+                                "search": {
+                                    "properties": [
+                                        {"name": "name", "mode": "semantic", "threshold": 0.9}
+                                    ]
+                                }
+                            }
+                        ],
+                        "edge_constraints": [
+                            {
+                                "edge_type": "MITIGATES",
+                                "source_type": "SecurityBehavior",
+                                "target_type": "TacticDef",
+                                "create": "lookup",
+                                "search": {
+                                    "properties": [
+                                        {"name": "name", "mode": "semantic", "threshold": 0.9}
+                                    ]
+                                }
+                            }
+                        ]
+                    }
+                }
+                _apply_tenant_fields(memory_payload)
+
+                response = await client.post("/v1/memory", json=memory_payload, headers=api_headers)
+                assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+
+                await asyncio.sleep(3)
+                search_payload = {
+                    "query": content,
+                    "enable_agentic_graph": True,
+                    "max_memories": 5
+                }
+                _apply_tenant_fields(search_payload)
+                search_response = await client.post("/v1/memory/search", json=search_payload, headers=api_headers)
+                assert search_response.status_code == 200
+                search_result = search_response.json()
+                nodes = extract_nodes_from_search(search_result)
+
+                labels = {n.get("label") for n in nodes if isinstance(n, dict)}
+                assert "SecurityBehavior" in labels, "SecurityBehavior node missing from graph results"
+                assert "TacticDef" in labels, "TacticDef node missing from graph results"
     @pytest.mark.asyncio
     async def test_link_to_constraints_merge_with_memory_policy(self, unique_id, api_headers):
         """

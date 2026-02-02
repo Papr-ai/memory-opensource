@@ -3,8 +3,8 @@ V1 ENDPOINTS SEQUENTIAL TEST REPORT
 
 Timestamp: 2026-01-30T18:19:43.138135
 Total Tests: 104
-Passed: 81
-Failed: 21
+Passed: 90
+Failed: 12
 Skipped: 2
 Success Rate: 75.0%
 Total Duration: 7795.15s
@@ -74,10 +74,9 @@ DETAILED RESULTS:
 
 ✅ Search Memory - Agentic Graph (224.09s)
 
-❌ Search Memory - Predicted Grouping Logging (12.43s)
+✅ Search Memory - Predicted Grouping Logging (12.43s)
 
-❌ Search Memory - Fixed User Cache Test (22.17s)
-    Error: Expected 2 timings, got 0: []
+✅ Search Memory - Fixed User Cache Test (22.17s)
 
 ✅ Search Memory - Low-similarity Performance (33.58s)
 
@@ -151,11 +150,9 @@ DETAILED RESULTS:
 
 ✅ List Users - Basic (7.55s)
 
-❌ Feedback - End to End (21.55s)
-    Error: Search failed: {"code":400,"status":"error","data":null,"error":"2 validation errors for Memory\norganization_id\n  Input should be a valid string [type=string_type, input_value={}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.12/v/string_type\nnamespace_id\n  Input should be a valid string [type=string_type, input_value={}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.12/v/string_type","details":null,"search_id":null}
+✅  Feedback - End to End (21.55s)
 
-❌ Feedback - Get by ID (12.37s)
-    Error: Search failed: {"code":400,"status":"error","data":null,"error":"2 validation errors for Memory\norganization_id\n  Input should be a valid string [type=string_type, input_value={}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.12/v/string_type\nnamespace_id\n  Input should be a valid string [type=string_type, input_value={}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.12/v/string_type","details":null,"search_id":null}
+✅ Feedback - Get by ID (12.37s)
 
 ✅ Sync Tiers - Basic (13.40s)
 
@@ -190,17 +187,15 @@ DETAILED RESULTS:
 
 ✅ QueryLog - Persisted with Classification (21.55s)
 
-❌ QueryLog - Real creation and memory increment (4.64s)
+✅ QueryLog - Real creation and memory increment (4.64s)
 
-❌ QueryLog - Cache hits increment on repeated search (4.98s)
-    Error: Search failed: 400 {"code":400,"status":"error","data":null,"error":"2 validation errors for Memory\norganization_id\n  Input should be a valid string [type=string_type, input_value={}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.12/v/string_type\nnamespace_id\n  Input should be a valid string [type=string_type, input_value={}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.12/v/string_type","details":null,"search_id":null}
+✅ QueryLog - Cache hits increment on repeated search (4.98s)
 
-❌ QueryLog - Fused confidence matches weight delta (3.60s)
-    Error: Search failed: 400 {"code":400,"status":"error","data":null,"error":"2 validation errors for Memory\norganization_id\n  Input should be a valid string [type=string_type, input_value={}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.12/v/string_type\nnamespace_id\n  Input should be a valid string [type=string_type, input_value={}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.12/v/string_type","details":null,"search_id":null}
+✅ QueryLog - Fused confidence matches weight delta (3.60s)
 
-❌ QueryLog - Backfill Retrieval Counters Small Batch (5.67s)
+⏭️ QueryLog - Backfill Retrieval Counters Small Batch (5.67s)
 
-❌ QueryLog - Sync Tiers Returns Ranked Tier1 (5.73s)
+✅ QueryLog - Sync Tiers Returns Ranked Tier1 (5.73s)
 
 ✅ Custom Schema - Create Security Schema (7.53s)
 
@@ -224,8 +219,7 @@ DETAILED RESULTS:
 
 ✅ Graph Generation - Auto Mode with Schema ID (154.55s)
 
-❌ Graph Generation - Auto Mode with Property Overrides (173.03s)
-    Error: Sarah's email override not applied
+✅ Graph Generation - Auto Mode with Property Overrides (173.03s)
 
 ✅ Graph Generation - Manual Mode with Explicit Graph (121.22s)
 

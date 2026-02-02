@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, ConfigDict, field_validator
+from pydantic import BaseModel, Field, ConfigDict, field_validator, AliasChoices, model_validator
 from typing import Dict, Any, List, Optional, Union, Literal, TYPE_CHECKING
 from enum import Enum
 from datetime import datetime, timezone
@@ -307,9 +307,28 @@ class UserGraphSchema(BaseModel):
     user_id: Optional[Union[str, Dict[str, Any]]] = None  # Set automatically from authentication (string or Parse Pointer)
     workspace_id: Optional[Union[str, Dict[str, Any]]] = None  # String or Parse Pointer (legacy)
     
-    # Multi-tenant ownership (NEW) - Parse Pointers
-    organization: Optional[Union[str, Dict[str, Any]]] = None  # Organization this schema belongs to (Parse Pointer)
-    namespace: Optional[Union[str, Dict[str, Any]]] = None     # Namespace this schema belongs to (Parse Pointer)
+    # Multi-tenant ownership (IDs, not Parse pointers)
+    organization_id: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("organization_id", "organization"),
+        description="Organization ID this schema belongs to. Accepts legacy 'organization' alias."
+    )
+    namespace_id: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("namespace_id", "namespace"),
+        description="Namespace ID this schema belongs to. Accepts legacy 'namespace' alias."
+    )
+    # Deprecated legacy fields (kept for backwards compatibility)
+    organization: Optional[Union[str, Dict[str, Any]]] = Field(
+        default=None,
+        description="DEPRECATED: Use 'organization_id' instead. Accepts Parse pointer or objectId.",
+        json_schema_extra={"deprecated": True}
+    )
+    namespace: Optional[Union[str, Dict[str, Any]]] = Field(
+        default=None,
+        description="DEPRECATED: Use 'namespace_id' instead. Accepts Parse pointer or objectId.",
+        json_schema_extra={"deprecated": True}
+    )
     
     # Schema definitions
     node_types: Dict[str, UserNodeType] = Field(
@@ -360,6 +379,33 @@ class UserGraphSchema(BaseModel):
         if len(v) > 20:
             raise ValueError(f"Schema cannot have more than 20 relationship types (found {len(v)})")
         return v
+
+    @field_validator("organization_id", "namespace_id", mode="before")
+    @classmethod
+    def normalize_tenant_ids(cls, v):
+        """Accept Parse pointers or strings and normalize to objectId string."""
+        if isinstance(v, dict) and v.get("__type") == "Pointer":
+            return v.get("objectId")
+        return v
+
+    @model_validator(mode="after")
+    def handle_legacy_tenant_fields(self):
+        """Log deprecation warning when legacy organization/namespace are used."""
+        if self.organization is not None:
+            logger.warning(
+                "DEPRECATION WARNING: 'organization' is deprecated on UserGraphSchema. "
+                "Use 'organization_id' instead."
+            )
+            if self.organization_id is None:
+                self.organization_id = self.organization if isinstance(self.organization, str) else self.organization.get("objectId")
+        if self.namespace is not None:
+            logger.warning(
+                "DEPRECATION WARNING: 'namespace' is deprecated on UserGraphSchema. "
+                "Use 'namespace_id' instead."
+            )
+            if self.namespace_id is None:
+                self.namespace_id = self.namespace if isinstance(self.namespace, str) else self.namespace.get("objectId")
+        return self
 
 
     @field_validator('created_at', 'updated_at', 'last_used_at', mode='before')
