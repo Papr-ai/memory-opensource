@@ -1,4 +1,5 @@
 from typing import Dict, Any, List, Optional, Union
+import asyncio
 from models.user_schemas import UserGraphSchema, SchemaStatus, SchemaScope, SchemaResponse, SchemaListResponse
 from services.logging_config import get_logger
 from services.url_utils import clean_url
@@ -182,7 +183,11 @@ class SchemaService:
             # Store in Parse Server
             # Convert complex nested objects for Parse Server
             schema_data = schema.model_dump(mode='json', exclude_none=True)
-            logger.info(f"🔍 TRACE STEP 16 - SCHEMA MODEL_DUMP: {json.dumps(schema_data, indent=2)}")
+            try:
+                schema_dump = json.dumps(schema_data, indent=2)
+            except TypeError:
+                schema_dump = json.dumps(schema_data, indent=2, default=str)
+            logger.info(f"🔍 TRACE STEP 16 - SCHEMA MODEL_DUMP: {schema_dump}")
             
             # Development server expects Objects, not JSON strings
             # Keep node_types and relationship_types as objects
@@ -235,14 +240,35 @@ class SchemaService:
                     logger.info(f"🔍 NAMESPACE CONVERTED: {schema_data['namespace']}")
                 del schema_data['namespace_id']
             
-            logger.info(f"🔍 TRACE STEP 20 - FINAL SCHEMA_DATA: {json.dumps(schema_data, indent=2)}")
+            try:
+                final_schema_dump = json.dumps(schema_data, indent=2)
+            except TypeError:
+                final_schema_dump = json.dumps(schema_data, indent=2, default=str)
+            logger.info(f"🔍 TRACE STEP 20 - FINAL SCHEMA_DATA: {final_schema_dump}")
             
             async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.parse_server_url}/parse/classes/UserGraphSchema",
-                    headers=self._get_headers(use_master_key=True),
-                    json=schema_data
-                )
+                response = None
+                for attempt in range(2):
+                    try:
+                        response = await client.post(
+                            f"{self.parse_server_url}/parse/classes/UserGraphSchema",
+                            headers=self._get_headers(use_master_key=True),
+                            json=schema_data,
+                            timeout=20.0
+                        )
+                        break
+                    except httpx.RequestError as e:
+                        logger.error(
+                            "Schema create request failed (attempt %s/2): %s",
+                            attempt + 1,
+                            e,
+                        )
+                        if attempt == 0:
+                            await asyncio.sleep(0.5)
+                        else:
+                            raise
+                if response is None:
+                    raise RuntimeError("Schema create request did not return a response")
                 
                 if response.status_code != 201:
                     logger.error(f"Failed to create schema: {response.text}")

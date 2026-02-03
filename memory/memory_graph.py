@@ -10579,9 +10579,15 @@ class MemoryGraph:
                 existing_entity = await self._search_qdrant_for_existing_entity(node.label, props, unique_identifiers, user_schema)
                 
                 # Step 3: Neo4j MERGE with canonical values or new entity
-                return await self._merge_node_with_sync_results(
+                merge_result = await self._merge_node_with_sync_results(
                     node.label, props, unique_identifiers, existing_entity, neo_session
                 )
+                if merge_result:
+                    return merge_result
+
+                # If MERGE was skipped (e.g., unique identifiers are null), fall back to content-based creation
+                logger.info(f"🔄 SYNC STEP 3: Falling back to content-based creation for {node.label}")
+                return await self._create_node_with_content_check(node, common_metadata, neo_session)
             else:
                 # Fall back to content-based approach for nodes without unique_identifiers
                 logger.info(f"No unique_identifiers found for {node.label}, falling back to content-based approach")

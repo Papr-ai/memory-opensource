@@ -1105,6 +1105,10 @@ class Memory(BaseModel):
         description="Final relevance (0-1). rank_results=False: 0.6*sim + 0.25*pop + 0.15*recency. rank_results=True: RRF-based fusion."
     )
 
+    # Processing metrics (optional; populated when available from Parse)
+    metrics: Optional[Dict[str, Any]] = None
+    totalProcessingCost: Optional[float] = None
+
     model_config = ConfigDict(
         from_attributes=True,
         validate_assignment=True,
@@ -1274,6 +1278,12 @@ class Memory(BaseModel):
             'reranker_confidence': getattr(parse_memory, 'reranker_confidence', None),
             'reranker_type': getattr(parse_memory, 'reranker_type', None),
             'relevance_score': getattr(parse_memory, 'relevance_score', None),
+            # Processing metrics (if present in Parse)
+            'metrics': getattr(parse_memory, 'metrics', None),
+            'totalProcessingCost': (
+                getattr(parse_memory, 'totalProcessingCost', None)
+                or getattr(parse_memory, 'total_processing_cost', None)
+            ),
         }
 
         # Add document-specific fields if this is a DocumentMemoryItem
