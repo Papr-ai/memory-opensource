@@ -14,9 +14,9 @@ Tests cover:
 7. Validation via GraphQL and Search
 
 Validation Strategy:
-- After creating memory, use /v1/memory/search to verify nodes exist
-- Use /v1/graphql to query specific node types and verify properties
-- Compare LLM-extracted vs user-specified properties
+- After creating memory, use Neo4j to verify nodes/relationships exist
+- Validate node properties/relationships using _omo_source_memory_id scoping
+- Compare LLM-extracted vs user-specified properties when applicable
 """
 
 import pytest
@@ -61,6 +61,14 @@ TEST_X_PAPR_API_KEY = env.get('TEST_X_PAPR_API_KEY')
 TEST_SESSION_TOKEN = env.get('TEST_SESSION_TOKEN')
 TEST_NAMESPACE_ID = env.get('TEST_NAMESPACE_ID')
 TEST_ORGANIZATION_ID = env.get('TEST_ORGANIZATION_ID')
+
+def _has_llm_api_key() -> bool:
+    """Return True when an LLM API key is configured for extraction."""
+    return bool(
+        os.getenv("OPENAI_API_KEY")
+        or os.getenv("GEMINI_API_KEY")
+        or os.getenv("GOOGLE_API_KEY")
+    )
 
 
 # ============================================================================
@@ -151,6 +159,70 @@ def extract_nodes_from_search(search_result: Dict) -> List[Dict]:
         elif "neo_nodes" in data:
             nodes = data["neo_nodes"]
     return nodes
+
+
+def _extract_memory_id(response: httpx.Response) -> str:
+    """Extract memory_id from add_memory response using AddMemoryResponse."""
+    add_result = AddMemoryResponse.model_validate(response.json())
+    assert add_result.status == "success", f"Add memory failed: {response.text}"
+    assert add_result.data, f"Missing memory data in response: {response.text}"
+    return add_result.data[0].memoryId
+
+
+def _resolve_app_instance(app_instance):
+    """Resolve FastAPI app instance for Neo4j access."""
+    if hasattr(app_instance, "state"):
+        return app_instance
+    if hasattr(app_instance, "app") and hasattr(app_instance.app, "state"):
+        return app_instance.app
+    if hasattr(app, "state"):
+        return app
+    raise AssertionError("Unable to resolve app instance with state")
+
+
+async def _neo4j_records(
+    app_instance,
+    query: str,
+    params: Dict[str, Any],
+    min_records: int = 1,
+    retries: int = 10,
+    delay_seconds: float = 3.0
+) -> List[Dict[str, Any]]:
+    """Run Neo4j query with retries for eventual consistency."""
+    app_instance = _resolve_app_instance(app_instance)
+    records: List[Dict[str, Any]] = []
+    for _ in range(retries):
+        async with app_instance.state.memory_graph.async_neo_conn.get_session() as session:
+            result = await session.run(query, **params)
+            records = []
+            async for record in result:
+                records.append(record.data())
+        if len(records) >= min_records:
+            return records
+        await asyncio.sleep(delay_seconds)
+    return records
+
+
+async def _neo4j_count(
+    app_instance,
+    query: str,
+    params: Dict[str, Any],
+    min_count: int = 1,
+    retries: int = 10,
+    delay_seconds: float = 3.0
+) -> int:
+    """Run Neo4j count query with retries."""
+    app_instance = _resolve_app_instance(app_instance)
+    count = 0
+    for _ in range(retries):
+        async with app_instance.state.memory_graph.async_neo_conn.get_session() as session:
+            result = await session.run(query, **params)
+            record = await result.single()
+            count = int(record.get("count", 0)) if record else 0
+        if count >= min_count:
+            return count
+        await asyncio.sleep(delay_seconds)
+    return count
 
 
 def _apply_tenant_fields(payload: Dict[str, Any]) -> None:
@@ -305,6 +377,8 @@ class TestLinkToDSLEndToEnd:
     @pytest.mark.asyncio
     async def test_link_to_string_form(self, unique_id, api_headers):
         """Test link_to with simple string form: 'Task:title'."""
+        if not _has_llm_api_key():
+            pytest.skip("LLM API key not configured; link_to extraction cannot create nodes")
         async with LifespanManager(app, startup_timeout=30) as manager:
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=manager.app),
@@ -319,37 +393,35 @@ class TestLinkToDSLEndToEnd:
                     "link_to": "Task:title"
                 }
 
-                # Create memory
                 response = await client.post("/v1/memory", json=data, headers=api_headers)
-                logger.info(f"Response status: {response.status_code}")
-
                 assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
-                response_data = response.json()
+                memory_id = _extract_memory_id(response)
 
-                # Extract memory ID for validation
-                memory_id = None
-                if response_data.get("data"):
-                    first_item = response_data["data"][0] if isinstance(response_data["data"], list) else response_data["data"]
-                    memory_id = first_item.get("memoryId") or first_item.get("objectId")
-
-                logger.info(f"Created memory with ID: {memory_id}")
-
-                # Validate via search - should find the memory
-                await asyncio.sleep(2)  # Allow indexing time
-                search_result = await search_for_memory(client, api_headers, f"authentication bug TestID {unique_id}", namespace_id=TEST_NAMESPACE_ID)
-
-                assert search_result.get("status") == "success" or search_result.get("code") == 200
-                logger.info(f"Search found {len(search_result.get('data', {}).get('memories', []))} memories")
+                task_records = await _neo4j_records(
+                    manager.app,
+                    """
+                    MATCH (t:Task)
+                    WHERE t._omo_source_memory_id = $memory_id
+                    RETURN t.title AS title
+                    """,
+                    {"memory_id": memory_id}
+                )
+                assert task_records, "Task node not found"
 
     @pytest.mark.asyncio
     async def test_link_to_list_form(self, unique_id, api_headers):
         """Test link_to with list form: ['Task:title', 'Person:email']."""
+        if not _has_llm_api_key():
+            pytest.skip("LLM API key not configured; link_to extraction cannot create nodes")
         async with LifespanManager(app, startup_timeout=30) as manager:
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=manager.app),
                 base_url="http://test"
             ) as client:
-                test_content = f"John assigned the auth bug to Alice - TestID {unique_id}"
+                test_content = (
+                    f"Alice {unique_id} assigned Task Fix authentication {unique_id} "
+                    f"to Bob {unique_id}."
+                )
                 data = {
                     "content": test_content,
                     "type": "text",
@@ -359,19 +431,44 @@ class TestLinkToDSLEndToEnd:
                 }
 
                 response = await client.post("/v1/memory", json=data, headers=api_headers)
-
                 assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+                memory_id = _extract_memory_id(response)
+
+                task_count = await _neo4j_count(
+                    manager.app,
+                    """
+                    MATCH (t:Task)
+                    WHERE t._omo_source_memory_id = $memory_id
+                      AND t.title CONTAINS $unique_id
+                    RETURN count(t) AS count
+                    """,
+                    {"memory_id": memory_id, "unique_id": unique_id}
+                )
+                assert task_count > 0, "Task node not found"
+
+                person_count = await _neo4j_count(
+                    manager.app,
+                    """
+                    MATCH (p:Person)
+                    WHERE p._omo_source_memory_id = $memory_id
+                      AND p.name CONTAINS $unique_id
+                    RETURN count(p) AS count
+                    """,
+                    {"memory_id": memory_id, "unique_id": unique_id}
+                )
+                assert person_count > 0, "Person node not found"
 
     @pytest.mark.asyncio
     async def test_link_to_dict_form_with_create_never(self, unique_id, api_headers):
-        """Test link_to dict form with create='never' for controlled vocabulary."""
+        """Test link_to with dict form + create='never'."""
         async with LifespanManager(app, startup_timeout=30) as manager:
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=manager.app),
                 base_url="http://test"
             ) as client:
+                test_content = f"Don't create new tasks for this - TestID {unique_id}"
                 data = {
-                    "content": f"Critical security issue found in API - TestID {unique_id}",
+                    "content": test_content,
                     "type": "text",
                     "namespace_id": TEST_NAMESPACE_ID,
                     "organization_id": TEST_ORGANIZATION_ID,
@@ -381,28 +478,57 @@ class TestLinkToDSLEndToEnd:
                 }
 
                 response = await client.post("/v1/memory", json=data, headers=api_headers)
-
                 assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+                memory_id = _extract_memory_id(response)
+
+                task_count = await _neo4j_count(
+                    manager.app,
+                    """
+                    MATCH (t:Task)
+                    WHERE t._omo_source_memory_id = $memory_id
+                    RETURN count(t) AS count
+                    """,
+                    {"memory_id": memory_id},
+                    min_count=0,
+                    retries=1
+                )
+                assert task_count == 0, "Task node should not be created when create='never'"
 
     @pytest.mark.asyncio
     async def test_link_to_with_exact_match(self, unique_id, api_headers):
         """Test link_to with exact match: 'Task:id=TASK-123'."""
+        if not _has_llm_api_key():
+            pytest.skip("LLM API key not configured; link_to extraction cannot create nodes")
         async with LifespanManager(app, startup_timeout=30) as manager:
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=manager.app),
                 base_url="http://test"
             ) as client:
                 data = {
-                    "content": f"Update on task TASK-{unique_id}: Status changed to in-progress",
+                    "content": f"Task reference with exact ID TASK-{unique_id} - TestID {unique_id}",
                     "type": "text",
                     "namespace_id": TEST_NAMESPACE_ID,
                     "organization_id": TEST_ORGANIZATION_ID,
-                    "link_to": f"Task:id=TASK-{unique_id}"
+                    "link_to": {
+                        f"Task:id=TASK-{unique_id}": {"set": {"id": f"TASK-{unique_id}"}}
+                    }
                 }
 
                 response = await client.post("/v1/memory", json=data, headers=api_headers)
-
                 assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+                memory_id = _extract_memory_id(response)
+
+                task_records = await _neo4j_records(
+                    manager.app,
+                    """
+                    MATCH (t:Task)
+                    WHERE t._omo_source_memory_id = $memory_id
+                      AND t.id = $task_id
+                    RETURN t.id AS id
+                    """,
+                    {"memory_id": memory_id, "task_id": f"TASK-{unique_id}"}
+                )
+                assert task_records, "Task node with exact id not found"
 
     @pytest.mark.asyncio
     async def test_link_to_with_semantic_threshold(self, unique_id, api_headers):
@@ -421,8 +547,19 @@ class TestLinkToDSLEndToEnd:
                 }
 
                 response = await client.post("/v1/memory", json=data, headers=api_headers)
-
                 assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+                memory_id = _extract_memory_id(response)
+
+                task_records = await _neo4j_records(
+                    manager.app,
+                    """
+                    MATCH (t:Task)
+                    WHERE t._omo_source_memory_id = $memory_id
+                    RETURN t.title AS title
+                    """,
+                    {"memory_id": memory_id}
+                )
+                assert task_records, "Task node not found"
 
 
 # ============================================================================
@@ -448,7 +585,10 @@ class TestFullMemoryPolicyEndToEnd:
                 base_url="http://test"
             ) as client:
                 # Content with clear entities for extraction
-                test_content = f"Meeting with John Smith about Project Alpha status update - TestID {unique_id}"
+                test_content = (
+                    f"Meeting with Evelyn {unique_id} about Task Alpha {unique_id} "
+                    f"status update - TestID {unique_id}"
+                )
                 data = {
                     "content": test_content,
                     "type": "text",
@@ -483,21 +623,31 @@ class TestFullMemoryPolicyEndToEnd:
                 response = await client.post("/v1/memory", json=data, headers=api_headers)
 
                 assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
-                response_data = response.json()
+                memory_id = _extract_memory_id(response)
 
-                logger.info(f"Memory policy auto mode response: {response_data.get('status')}")
-
-                # Wait for async processing
-                await asyncio.sleep(3)
-
-                # Validate via search - should find related content
-                search_result = await search_for_memory(
-                    client, api_headers,
-                    f"John Smith Project Alpha TestID {unique_id}",
-                    namespace_id=TEST_NAMESPACE_ID
+                person_records = await _neo4j_records(
+                    manager.app,
+                    """
+                    MATCH (p:Person)
+                    WHERE p._omo_source_memory_id = $memory_id
+                      AND p.name CONTAINS $unique_id
+                    RETURN p.name AS name
+                    """,
+                    {"memory_id": memory_id, "unique_id": unique_id}
                 )
+                assert person_records, "Person node not found"
 
-                logger.info(f"Search result status: {search_result.get('status')}")
+                task_records = await _neo4j_records(
+                    manager.app,
+                    """
+                    MATCH (t:Task)
+                    WHERE t._omo_source_memory_id = $memory_id
+                      AND t.title CONTAINS $unique_id
+                    RETURN t.title AS title
+                    """,
+                    {"memory_id": memory_id, "unique_id": unique_id}
+                )
+                assert task_records, "Task node not found"
 
     @pytest.mark.asyncio
     async def test_memory_policy_manual_mode_exact_nodes(self, unique_id, api_headers):
@@ -515,6 +665,7 @@ class TestFullMemoryPolicyEndToEnd:
                 base_url="http://test"
             ) as client:
                 task_id = f"task_{unique_id}"
+                person_id = f"person_{unique_id}"
                 data = {
                     "content": f"Structured data import test - TestID {unique_id}",
                     "type": "text",
@@ -531,11 +682,18 @@ class TestFullMemoryPolicyEndToEnd:
                                     "status": "pending",
                                     "priority": "high"
                                 }
+                            },
+                            {
+                                "id": person_id,
+                                "type": "Person",
+                                "properties": {
+                                    "name": f"Owner {unique_id}"
+                                }
                             }
                         ],
                         "relationships": [
                             {
-                                "source": "$this",
+                                "source": person_id,
                                 "target": task_id,
                                 "type": "MENTIONS"
                             }
@@ -547,7 +705,31 @@ class TestFullMemoryPolicyEndToEnd:
 
                 assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
 
-                logger.info(f"Manual mode created memory with task_id: {task_id}")
+                memory_id = _extract_memory_id(response)
+
+                task_records = await _neo4j_records(
+                    manager.app,
+                    """
+                    MATCH (t:Task)
+                    WHERE t._omo_source_memory_id = $memory_id
+                      AND t.title CONTAINS $title
+                    RETURN t.title AS title
+                    """,
+                    {"memory_id": memory_id, "title": f"Test Task {unique_id}"}
+                )
+                assert task_records, "Task node not found in manual mode"
+
+                mentions_count = await _neo4j_count(
+                    manager.app,
+                    """
+                    MATCH (p:Person)-[r:MENTIONS]->(t:Task)
+                    WHERE p._omo_source_memory_id = $memory_id
+                      AND t._omo_source_memory_id = $memory_id
+                    RETURN count(r) AS count
+                    """,
+                    {"memory_id": memory_id}
+                )
+                assert mentions_count > 0, "MENTIONS relationship not found in manual mode"
 
     @pytest.mark.asyncio
     async def test_memory_policy_with_omo_safety(self, unique_id, api_headers):
@@ -558,7 +740,7 @@ class TestFullMemoryPolicyEndToEnd:
                 base_url="http://test"
             ) as client:
                 data = {
-                    "content": f"Sensitive customer data - TestID {unique_id}",
+                    "content": f"Sensitive customer data for Sarah {unique_id} at Acme Corp - TestID {unique_id}",
                     "type": "text",
                     "namespace_id": TEST_NAMESPACE_ID,
                     "organization_id": TEST_ORGANIZATION_ID,
@@ -566,6 +748,17 @@ class TestFullMemoryPolicyEndToEnd:
                         "mode": "auto",
                         "consent": "explicit",
                         "risk": "sensitive",
+                        "node_constraints": [
+                            {
+                                "node_type": "Person",
+                                "create": "auto",
+                                "search": {
+                                    "properties": [
+                                        {"name": "name", "mode": "semantic"}
+                                    ]
+                                }
+                            }
+                        ],
                         "acl": {
                             "read": [f"user_{unique_id}"],
                             "write": [f"user_{unique_id}"]
@@ -576,6 +769,98 @@ class TestFullMemoryPolicyEndToEnd:
                 response = await client.post("/v1/memory", json=data, headers=api_headers)
 
                 assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+                memory_id = _extract_memory_id(response)
+
+                person_records = await _neo4j_records(
+                    manager.app,
+                    """
+                    MATCH (p:Person)
+                    WHERE p._omo_source_memory_id = $memory_id
+                      AND p.name CONTAINS $unique_id
+                    RETURN p.name AS name
+                    """,
+                    {"memory_id": memory_id, "unique_id": unique_id}
+                )
+                assert person_records, "Person node not found for OMO safety test"
+
+
+# ============================================================================
+# Custom Metadata Propagation Tests
+# ============================================================================
+
+class TestCustomMetadataPropagation:
+    """Tests that metadata.customMetadata is applied to Neo4j node properties."""
+
+    @pytest.mark.asyncio
+    async def test_custom_metadata_applied_to_nodes(self, unique_id, api_headers):
+        async with LifespanManager(app, startup_timeout=30) as manager:
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=manager.app),
+                base_url="http://test"
+            ) as client:
+                custom_metadata = {
+                    "source": "unit_test",
+                    "category": "policy_validation",
+                    "classification": "confidential"
+                }
+                payload = {
+                    "content": f"Custom metadata propagation test - TestID {unique_id}",
+                    "type": "text",
+                    "namespace_id": TEST_NAMESPACE_ID,
+                    "organization_id": TEST_ORGANIZATION_ID,
+                    "memory_policy": {
+                        "mode": "manual",
+                        "nodes": [
+                            {
+                                "id": f"person_{unique_id}",
+                                "type": "Person",
+                                "properties": {
+                                    "name": f"Alex Rivera {unique_id}"
+                                }
+                            },
+                            {
+                                "id": f"company_{unique_id}",
+                                "type": "Company",
+                                "properties": {
+                                    "name": f"Example Co {unique_id}"
+                                }
+                            }
+                        ],
+                        "relationships": [
+                            {
+                                "source": f"person_{unique_id}",
+                                "target": f"company_{unique_id}",
+                                "type": "WORKS_AT"
+                            }
+                        ]
+                    },
+                    "metadata": {
+                        "customMetadata": custom_metadata
+                    }
+                }
+
+                response = await client.post("/v1/memory", json=payload, headers=api_headers)
+                assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+                memory_id = _extract_memory_id(response)
+
+                node_records = await _neo4j_records(
+                    manager.app,
+                    """
+                    MATCH (n)
+                    WHERE n._omo_source_memory_id = $memory_id
+                      AND NOT 'Memory' IN labels(n)
+                    RETURN properties(n) AS props
+                    """,
+                    {"memory_id": memory_id},
+                    min_records=2
+                )
+                assert node_records, "No Neo4j nodes found for custom metadata test"
+
+                for record in node_records:
+                    props = record.get("props", {})
+                    assert props.get("source") == custom_metadata["source"]
+                    assert props.get("category") == custom_metadata["category"]
+                    assert props.get("classification") == custom_metadata["classification"]
 
 
 # ============================================================================
@@ -630,6 +915,7 @@ class TestSchemaLevelPolicyInheritance:
                 }
 
                 # Create schema
+                _apply_tenant_fields(schema_data)
                 schema_response = await client.post(
                     "/v1/schemas",
                     json=schema_data,
@@ -643,7 +929,7 @@ class TestSchemaLevelPolicyInheritance:
                     if schema_id:
                         # Create memory using schema (inherits policy)
                         memory_data = {
-                            "content": f"Task to review code changes - TestID {unique_id}",
+                            "content": f"TestTask to review code changes - TestID {unique_id}",
                             "type": "text",
                             "memory_policy": {"schema_id": schema_id}
                             # Note: no memory_policy overrides beyond schema_id
@@ -657,6 +943,17 @@ class TestSchemaLevelPolicyInheritance:
                         )
 
                         assert memory_response.status_code == 200
+                        memory_id = _extract_memory_id(memory_response)
+                        test_task_records = await _neo4j_records(
+                            manager.app,
+                            """
+                            MATCH (t:TestTask)
+                            WHERE t._omo_source_memory_id = $memory_id
+                            RETURN t.title AS title
+                            """,
+                            {"memory_id": memory_id}
+                        )
+                        assert test_task_records, "TestTask node not found for inherited schema policy"
                         logger.info(f"Memory created with inherited schema policy, schema_id: {schema_id}")
                 else:
                     logger.warning(f"Schema creation returned {schema_response.status_code}, skipping inheritance test")
@@ -706,6 +1003,20 @@ class TestMemoryLevelPolicyOverride:
                 response = await client.post("/v1/memory", json=data, headers=api_headers)
 
                 assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+                memory_id = _extract_memory_id(response)
+
+                task_count = await _neo4j_count(
+                    manager.app,
+                    """
+                    MATCH (t:Task)
+                    WHERE t._omo_source_memory_id = $memory_id
+                    RETURN count(t) AS count
+                    """,
+                    {"memory_id": memory_id},
+                    min_count=0,
+                    retries=1
+                )
+                assert task_count == 0, "Task nodes should not be created when create='never'"
                 logger.info("Memory created with policy override")
 
 
@@ -826,51 +1137,45 @@ class TestManualPolicyGraphOverride:
                 response = await client.post("/v1/memory", json=memory_payload, headers=api_headers)
                 assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
 
-                await asyncio.sleep(3)
-                search_payload = {
-                    "query": content,
-                    "enable_agentic_graph": False,
-                    "max_memories": 5,
-                    "search_override": {
-                        "pattern": {
-                            "source_label": "Person",
-                            "relationship_type": "WORKS_AT",
-                            "target_label": "Company",
-                            "direction": "->"
-                        },
-                        "filters": [
-                            {
-                                "node_type": "Company",
-                                "property_name": "name",
-                                "operator": "CONTAINS",
-                                "value": f"Acme Corp {unique_id}"
-                            }
-                        ]
-                    }
-                }
-                _apply_tenant_fields(search_payload)
-                nodes = []
-                for _ in range(5):
-                    search_response = await client.post("/v1/memory/search", json=search_payload, headers=api_headers)
-                    assert search_response.status_code == 200
-                    search_result = search_response.json()
-                    nodes = extract_nodes_from_search(search_result)
-                    node_names = {
-                        (n.get("properties", {}).get("name") or n.get("name"))
-                        for n in nodes if isinstance(n, dict)
-                    }
-                    if any(f"Acme Corp {unique_id}" in (name or "") for name in node_names) and any(
-                        f"Sarah Johnson {unique_id}" in (name or "") for name in node_names
-                    ):
-                        break
-                    await asyncio.sleep(2)
+                memory_id = _extract_memory_id(response)
+                person_name = f"Sarah Johnson {unique_id}"
+                company_name = f"Acme Corp {unique_id}"
 
-                node_names = {
-                    (n.get("properties", {}).get("name") or n.get("name"))
-                    for n in nodes if isinstance(n, dict)
-                }
-                assert any(f"Acme Corp {unique_id}" in (name or "") for name in node_names), "Company node not found"
-                assert any(f"Sarah Johnson {unique_id}" in (name or "") for name in node_names), "Person node not found"
+                person_records = await _neo4j_records(
+                    manager.app,
+                    """
+                    MATCH (p:Person)
+                    WHERE p._omo_source_memory_id = $memory_id
+                      AND p.name CONTAINS $name
+                    RETURN p.name AS name
+                    """,
+                    {"memory_id": memory_id, "name": person_name}
+                )
+                assert person_records, "Person node not found"
+
+                company_records = await _neo4j_records(
+                    manager.app,
+                    """
+                    MATCH (c:Company)
+                    WHERE c._omo_source_memory_id = $memory_id
+                      AND c.name CONTAINS $name
+                    RETURN c.name AS name
+                    """,
+                    {"memory_id": memory_id, "name": company_name}
+                )
+                assert company_records, "Company node not found"
+
+                works_at_count = await _neo4j_count(
+                    manager.app,
+                    """
+                    MATCH (p:Person)-[r:WORKS_AT]->(c:Company)
+                    WHERE p._omo_source_memory_id = $memory_id
+                      AND c._omo_source_memory_id = $memory_id
+                    RETURN count(r) AS count
+                    """,
+                    {"memory_id": memory_id}
+                )
+                assert works_at_count > 0, "WORKS_AT relationship not found"
 
 
 # ============================================================================
@@ -915,21 +1220,43 @@ class TestDeepTrustEdgePolicy:
                 response = await client.post("/v1/memory", json=memory_payload, headers=api_headers)
                 assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
 
-                await asyncio.sleep(3)
-                search_payload = {
-                    "query": content,
-                    "enable_agentic_graph": True,
-                    "max_memories": 5
-                }
-                _apply_tenant_fields(search_payload)
-                search_response = await client.post("/v1/memory/search", json=search_payload, headers=api_headers)
-                assert search_response.status_code == 200
-                search_result = search_response.json()
-                nodes = extract_nodes_from_search(search_result)
+                memory_id = _extract_memory_id(response)
 
-                labels = {n.get("label") for n in nodes if isinstance(n, dict)}
-                assert "SecurityBehavior" in labels, "SecurityBehavior node missing from graph results"
-                assert "TacticDef" in labels, "TacticDef node missing from graph results"
+                security_behavior_count = await _neo4j_count(
+                    manager.app,
+                    """
+                    MATCH (s:SecurityBehavior)
+                    WHERE s._omo_source_memory_id = $memory_id
+                    RETURN count(s) AS count
+                    """,
+                    {"memory_id": memory_id}
+                )
+                assert security_behavior_count > 0, "SecurityBehavior node missing"
+
+                tactic_def_count = await _neo4j_count(
+                    manager.app,
+                    """
+                    MATCH (t:TacticDef)
+                    WHERE t._omo_source_memory_id = $memory_id
+                    RETURN count(t) AS count
+                    """,
+                    {"memory_id": memory_id}
+                )
+                assert tactic_def_count > 0, "TacticDef node missing"
+
+                mitigates_count = await _neo4j_count(
+                    manager.app,
+                    """
+                    MATCH (s:SecurityBehavior)-[r:MITIGATES]->(t:TacticDef)
+                    WHERE s._omo_source_memory_id = $memory_id
+                      AND t._omo_source_memory_id = $memory_id
+                    RETURN count(r) AS count
+                    """,
+                    {"memory_id": memory_id},
+                    min_count=0,
+                    retries=1
+                )
+                assert mitigates_count == 0, "MITIGATES edge should not be created when create='never'"
 
     @pytest.mark.asyncio
     async def test_deeptrust_edge_policy_full_api(self, unique_id, api_headers):
@@ -997,21 +1324,29 @@ class TestDeepTrustEdgePolicy:
                 response = await client.post("/v1/memory", json=memory_payload, headers=api_headers)
                 assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
 
-                await asyncio.sleep(3)
-                search_payload = {
-                    "query": content,
-                    "enable_agentic_graph": True,
-                    "max_memories": 5
-                }
-                _apply_tenant_fields(search_payload)
-                search_response = await client.post("/v1/memory/search", json=search_payload, headers=api_headers)
-                assert search_response.status_code == 200
-                search_result = search_response.json()
-                nodes = extract_nodes_from_search(search_result)
+                memory_id = _extract_memory_id(response)
 
-                labels = {n.get("label") for n in nodes if isinstance(n, dict)}
-                assert "SecurityBehavior" in labels, "SecurityBehavior node missing from graph results"
-                assert "TacticDef" in labels, "TacticDef node missing from graph results"
+                security_behavior_count = await _neo4j_count(
+                    manager.app,
+                    """
+                    MATCH (s:SecurityBehavior)
+                    WHERE s._omo_source_memory_id = $memory_id
+                    RETURN count(s) AS count
+                    """,
+                    {"memory_id": memory_id}
+                )
+                assert security_behavior_count > 0, "SecurityBehavior node missing"
+
+                tactic_def_count = await _neo4j_count(
+                    manager.app,
+                    """
+                    MATCH (t:TacticDef)
+                    WHERE t._omo_source_memory_id = $memory_id
+                    RETURN count(t) AS count
+                    """,
+                    {"memory_id": memory_id}
+                )
+                assert tactic_def_count > 0, "TacticDef node missing"
     @pytest.mark.asyncio
     async def test_link_to_constraints_merge_with_memory_policy(self, unique_id, api_headers):
         """
@@ -1080,6 +1415,20 @@ class TestControlledVocabulary:
 
                 # Request should succeed (memory is created)
                 assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+                memory_id = _extract_memory_id(response)
+
+                tactic_count = await _neo4j_count(
+                    manager.app,
+                    """
+                    MATCH (t:TacticDef)
+                    WHERE t._omo_source_memory_id = $memory_id
+                    RETURN count(t) AS count
+                    """,
+                    {"memory_id": memory_id},
+                    min_count=0,
+                    retries=1
+                )
+                assert tactic_count == 0, "TacticDef node should not be created when create='never'"
 
     @pytest.mark.asyncio
     async def test_mixed_create_policies(self, unique_id, api_headers):
@@ -1196,31 +1545,19 @@ class TestGraphQLValidation:
 
                 response = await client.post("/v1/memory", json=data, headers=api_headers)
                 assert response.status_code == 200
+                memory_id = _extract_memory_id(response)
 
-                # Wait for processing
-                await asyncio.sleep(3)
-
-                # Query via GraphQL to verify node exists
-                graphql_query = """
-                query FindTask($title: String!) {
-                    tasks(where: { title_CONTAINS: $title }) {
-                        title
-                        status
-                    }
-                }
-                """
-
-                # Note: GraphQL may require different auth
-                gql_result = await query_graphql(
-                    client, api_headers,
-                    graphql_query,
-                    {"title": unique_id}
+                task_records = await _neo4j_records(
+                    manager.app,
+                    """
+                    MATCH (t:Task)
+                    WHERE t._omo_source_memory_id = $memory_id
+                      AND t.title CONTAINS $title
+                    RETURN t.title AS title, t.status AS status
+                    """,
+                    {"memory_id": memory_id, "title": task_title}
                 )
-
-                logger.info(f"GraphQL result: {gql_result}")
-                # GraphQL response structure varies - just verify no errors
-                if "errors" not in gql_result:
-                    logger.info("GraphQL query successful")
+                assert task_records, "Task node not found via Neo4j"
 
 
 # ============================================================================

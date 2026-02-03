@@ -2956,6 +2956,267 @@ class MemoryGraph:
                 logger.error(f"Error in {operation_name}: {e}")
             return None
 
+    async def find_node_by_property(
+        self,
+        node_type: str,
+        property_name: str,
+        property_value: Any,
+        context: Optional[Dict[str, Any]] = None
+    ) -> Optional[Dict[str, Any]]:
+        """Find a node by exact property match with tenant + ACL scoping."""
+        if self.async_neo_conn.fallback_mode:
+            logger.warning("Neo4j in fallback mode, skipping find_node_by_property")
+            return None
+
+        if not node_type or not property_name:
+            return None
+
+        if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", property_name):
+            logger.warning(f"Invalid property name in find_node_by_property: {property_name}")
+            return None
+
+        metadata = (context or {}).get("metadata", {}) if context else {}
+        workspace_id = (context or {}).get("workspace_id") or metadata.get("workspace_id")
+        organization_id = metadata.get("organization_id")
+        namespace_id = metadata.get("namespace_id")
+        user_id = metadata.get("user_id")
+
+        tenant_conditions = []
+        if workspace_id:
+            tenant_conditions.append("n.workspace_id = $workspace_id")
+        if organization_id:
+            tenant_conditions.append("n.organization_id = $organization_id")
+        if namespace_id:
+            tenant_conditions.append("n.namespace_id = $namespace_id")
+
+        acl_conditions = []
+        if user_id:
+            acl_conditions.append("n.user_id = $user_id")
+            acl_conditions.append("$user_id IN n.user_read_access")
+        if workspace_id:
+            acl_conditions.append("$workspace_id IN n.workspace_read_access")
+        if organization_id:
+            acl_conditions.append("$organization_id IN n.organization_read_access")
+        if namespace_id:
+            acl_conditions.append("$namespace_id IN n.namespace_read_access")
+
+        where_parts = [f"n.{property_name} = $property_value"]
+        if tenant_conditions:
+            where_parts.append(f"({' AND '.join(tenant_conditions)})")
+        if acl_conditions:
+            where_parts.append(f"({' OR '.join(acl_conditions)})")
+
+        where_clause = f"WHERE {' AND '.join(where_parts)}"
+        query = f"""
+        MATCH (n:`{node_type}`)
+        {where_clause}
+        RETURN properties(n) AS props
+        LIMIT 1
+        """
+        params = {
+            "property_value": property_value,
+            "workspace_id": workspace_id,
+            "organization_id": organization_id,
+            "namespace_id": namespace_id,
+            "user_id": user_id
+        }
+
+        async with self.async_neo_conn.get_session() as session:
+            result = await self._safe_neo4j_run(session, query, params, "find_node_by_property")
+            if result is None:
+                return None
+            record = await result.single()
+            return record.get("props") if record else None
+
+    async def find_node_by_semantic_match(
+        self,
+        node_type: str,
+        property_name: str,
+        query_text: str,
+        threshold: float = 0.85,
+        context: Optional[Dict[str, Any]] = None
+    ) -> Optional[Dict[str, Any]]:
+        """Find a node by semantic match using property-indexed Qdrant search."""
+        if not query_text or not self.qdrant_client:
+            return None
+
+        metadata = (context or {}).get("metadata", {}) if context else {}
+        props = {
+            "user_id": metadata.get("user_id"),
+            "workspace_id": metadata.get("workspace_id"),
+            "organization_id": metadata.get("organization_id"),
+            "namespace_id": metadata.get("namespace_id")
+        }
+        # Reuse the property-indexed semantic search logic
+        result = await self._search_qdrant_for_similar_content(
+            node_label=node_type,
+            content=query_text,
+            selected_property=property_name,
+            props=props,
+            common_metadata=metadata
+        )
+        if not result or result.get("similarity_score", 0) < threshold:
+            return None
+
+        canonical_node_id = result.get("canonical_node_id")
+        if not canonical_node_id:
+            return None
+
+        return await self.find_node_by_property(
+            node_type=node_type,
+            property_name="id",
+            property_value=canonical_node_id,
+            context=context
+        )
+
+    async def find_node_by_fuzzy_match(
+        self,
+        node_type: str,
+        property_name: str,
+        query_text: str,
+        threshold: float = 0.7,
+        context: Optional[Dict[str, Any]] = None
+    ) -> Optional[Dict[str, Any]]:
+        """Find a node by fuzzy (substring) match with tenant + ACL scoping."""
+        if self.async_neo_conn.fallback_mode:
+            logger.warning("Neo4j in fallback mode, skipping find_node_by_fuzzy_match")
+            return None
+
+        if not node_type or not property_name or not query_text:
+            return None
+
+        if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", property_name):
+            logger.warning(f"Invalid property name in find_node_by_fuzzy_match: {property_name}")
+            return None
+
+        metadata = (context or {}).get("metadata", {}) if context else {}
+        workspace_id = (context or {}).get("workspace_id") or metadata.get("workspace_id")
+        organization_id = metadata.get("organization_id")
+        namespace_id = metadata.get("namespace_id")
+        user_id = metadata.get("user_id")
+
+        tenant_conditions = []
+        if workspace_id:
+            tenant_conditions.append("n.workspace_id = $workspace_id")
+        if organization_id:
+            tenant_conditions.append("n.organization_id = $organization_id")
+        if namespace_id:
+            tenant_conditions.append("n.namespace_id = $namespace_id")
+
+        acl_conditions = []
+        if user_id:
+            acl_conditions.append("n.user_id = $user_id")
+            acl_conditions.append("$user_id IN n.user_read_access")
+        if workspace_id:
+            acl_conditions.append("$workspace_id IN n.workspace_read_access")
+        if organization_id:
+            acl_conditions.append("$organization_id IN n.organization_read_access")
+        if namespace_id:
+            acl_conditions.append("$namespace_id IN n.namespace_read_access")
+
+        where_parts = [f"toLower(n.{property_name}) CONTAINS toLower($query_text)"]
+        if tenant_conditions:
+            where_parts.append(f"({' AND '.join(tenant_conditions)})")
+        if acl_conditions:
+            where_parts.append(f"({' OR '.join(acl_conditions)})")
+
+        where_clause = f"WHERE {' AND '.join(where_parts)}"
+        query = f"""
+        MATCH (n:`{node_type}`)
+        {where_clause}
+        RETURN properties(n) AS props
+        LIMIT 1
+        """
+        params = {
+            "query_text": query_text,
+            "workspace_id": workspace_id,
+            "organization_id": organization_id,
+            "namespace_id": namespace_id,
+            "user_id": user_id
+        }
+
+        async with self.async_neo_conn.get_session() as session:
+            result = await self._safe_neo4j_run(session, query, params, "find_node_by_fuzzy_match")
+            if result is None:
+                return None
+            record = await result.single()
+            return record.get("props") if record else None
+
+    async def find_node_via_relationship(
+        self,
+        node_type: str,
+        edge_type: str,
+        target_node_id: str,
+        direction: str = "outgoing",
+        context: Optional[Dict[str, Any]] = None
+    ) -> Optional[Dict[str, Any]]:
+        """Find a node via relationship to a target node with tenant + ACL scoping."""
+        if self.async_neo_conn.fallback_mode:
+            logger.warning("Neo4j in fallback mode, skipping find_node_via_relationship")
+            return None
+
+        metadata = (context or {}).get("metadata", {}) if context else {}
+        workspace_id = (context or {}).get("workspace_id") or metadata.get("workspace_id")
+        organization_id = metadata.get("organization_id")
+        namespace_id = metadata.get("namespace_id")
+        user_id = metadata.get("user_id")
+
+        tenant_conditions = []
+        if workspace_id:
+            tenant_conditions.append("n.workspace_id = $workspace_id")
+            tenant_conditions.append("t.workspace_id = $workspace_id")
+        if organization_id:
+            tenant_conditions.append("n.organization_id = $organization_id")
+            tenant_conditions.append("t.organization_id = $organization_id")
+        if namespace_id:
+            tenant_conditions.append("n.namespace_id = $namespace_id")
+            tenant_conditions.append("t.namespace_id = $namespace_id")
+
+        acl_conditions = []
+        if user_id:
+            acl_conditions.append("n.user_id = $user_id")
+            acl_conditions.append("$user_id IN n.user_read_access")
+            acl_conditions.append("t.user_id = $user_id")
+            acl_conditions.append("$user_id IN t.user_read_access")
+        if workspace_id:
+            acl_conditions.append("$workspace_id IN n.workspace_read_access")
+            acl_conditions.append("$workspace_id IN t.workspace_read_access")
+        if organization_id:
+            acl_conditions.append("$organization_id IN n.organization_read_access")
+            acl_conditions.append("$organization_id IN t.organization_read_access")
+        if namespace_id:
+            acl_conditions.append("$namespace_id IN n.namespace_read_access")
+            acl_conditions.append("$namespace_id IN t.namespace_read_access")
+
+        where_parts = ["t.id = $target_node_id"]
+        if tenant_conditions:
+            where_parts.append(f"({' AND '.join(tenant_conditions)})")
+        if acl_conditions:
+            where_parts.append(f"({' OR '.join(acl_conditions)})")
+
+        where_clause = f"WHERE {' AND '.join(where_parts)}"
+        rel_pattern = f"-[:{edge_type}]->" if direction == "outgoing" else f"<-[:{edge_type}]-"
+        query = f"""
+        MATCH (n:`{node_type}`){rel_pattern}(t)
+        {where_clause}
+        RETURN properties(n) AS props
+        LIMIT 1
+        """
+        params = {
+            "target_node_id": target_node_id,
+            "workspace_id": workspace_id,
+            "organization_id": organization_id,
+            "namespace_id": namespace_id,
+            "user_id": user_id
+        }
+
+        async with self.async_neo_conn.get_session() as session:
+            result = await self._safe_neo4j_run(session, query, params, "find_node_via_relationship")
+            if result is None:
+                return None
+            record = await result.single()
+            return record.get("props") if record else None
+
     async def memory_item_exists_async(self, session, memory_item_id: str) -> bool:
         """Async check if memory item exists in Neo4j"""
         result = await self._safe_neo4j_run(
@@ -11617,6 +11878,12 @@ class MemoryGraph:
             "_omo_audit": json.dumps(omo_audit) if omo_audit else None
         }
 
+        custom_metadata = metadata.get("customMetadata")
+        if isinstance(custom_metadata, dict):
+            for key, value in custom_metadata.items():
+                if key not in common_metadata:
+                    common_metadata[key] = value
+
         # OMO Risk Enforcement: For flagged content, restrict ACL to owner only
         if omo_risk == "flagged":
             logger.warning(f"Memory {memory_id} has risk='flagged' - restricting ACL to owner only")
@@ -11825,6 +12092,23 @@ class MemoryGraph:
             memory_node_id = str(memory_item.id)
             id_mapping[memory_node_id] = memory_node_id
             logger.info(f"📍 ID MAPPING: Added Memory node ID to mapping: {memory_node_id}")
+
+        # Ensure LLM-generated IDs map to final IDs even when nodes were constraint-linked
+        for node in nodes_objects:
+            try:
+                node_props = node.properties.model_dump() if hasattr(node.properties, 'model_dump') else dict(node.properties)
+            except Exception:
+                node_props = dict(getattr(node, "properties", {}) or {})
+            llm_gen_id = node_props.get("llmGenNodeId")
+            node_id_val = node_props.get("id")
+            if not llm_gen_id or not node_id_val:
+                continue
+            if llm_gen_id in skipped_node_ids:
+                continue
+            # Only map when the final node_id is known to be valid
+            if node_id_val in id_mapping and llm_gen_id not in id_mapping:
+                id_mapping[llm_gen_id] = node_id_val
+                logger.debug(f"📍 ID MAPPING: Added llmGenNodeId {llm_gen_id} -> {node_id_val}")
         
         logger.info(f"📍 ID MAPPING: Built mapping for {len(id_mapping)} successfully created node IDs")
 

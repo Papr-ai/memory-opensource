@@ -6,7 +6,7 @@ Total Tests: 104
 Passed: 90
 Failed: 12
 Skipped: 2
-Success Rate: 75.0%
+Success Rate: 86.53%
 Total Duration: 7795.15s
 
 DETAILED RESULTS:

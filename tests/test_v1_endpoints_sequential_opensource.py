@@ -98,8 +98,10 @@ from tests.test_memory_policy_end_to_end import (
     TestLinkToDSLEndToEnd,
     TestFullMemoryPolicyEndToEnd,
     TestCustomMetadataPropagation,
+    TestCustomMetadataPropagation,
     TestSchemaLevelPolicyInheritance,
     TestMemoryLevelPolicyOverride,
+    TestManualPolicyGraphOverride,
     TestManualPolicyGraphOverride,
     TestPolicyMerging,
     TestControlledVocabulary,
@@ -376,6 +378,7 @@ class V1EndpointTesterOSS:
             ("Memory Policy - Auto Mode", test_memory_policy_auto_mode_wrapper),
             ("Memory Policy - Manual Mode", test_memory_policy_manual_mode_wrapper),
             ("Memory Policy - OMO Safety", test_memory_policy_omo_safety_wrapper),
+            ("Memory Policy - Custom Metadata", test_memory_policy_custom_metadata_wrapper),
             ("Memory Policy - Custom Metadata", test_memory_policy_custom_metadata_wrapper),
             ("Memory Policy - Schema Inheritance", test_memory_policy_schema_inheritance_wrapper),
             ("Memory Policy - Override Schema", test_memory_policy_override_schema_wrapper),
@@ -856,6 +859,10 @@ async def test_memory_policy_manual_mode_wrapper(app_instance):
 async def test_memory_policy_omo_safety_wrapper(app_instance):
     unique_id, headers = _memory_policy_fixtures()
     await TestFullMemoryPolicyEndToEnd().test_memory_policy_with_omo_safety(unique_id, headers)
+
+async def test_memory_policy_custom_metadata_wrapper(app_instance):
+    unique_id, headers = _memory_policy_fixtures()
+    await TestCustomMetadataPropagation().test_custom_metadata_applied_to_nodes(unique_id, headers)
 
 async def test_memory_policy_custom_metadata_wrapper(app_instance):
     unique_id, headers = _memory_policy_fixtures()

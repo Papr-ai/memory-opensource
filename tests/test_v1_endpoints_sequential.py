@@ -92,8 +92,10 @@ from tests.test_add_memory_fastapi import (
 from tests.test_memory_policy_end_to_end import (
     TestLinkToDSLEndToEnd,
     TestFullMemoryPolicyEndToEnd,
+    TestCustomMetadataPropagation,
     TestSchemaLevelPolicyInheritance,
     TestMemoryLevelPolicyOverride,
+    TestManualPolicyGraphOverride,
     TestPolicyMerging,
     TestControlledVocabulary,
     TestEdgeConstraintsEndToEnd,
@@ -410,8 +412,10 @@ class V1EndpointTester:
             ("Memory Policy - Auto Mode", test_memory_policy_auto_mode_wrapper),
             ("Memory Policy - Manual Mode", test_memory_policy_manual_mode_wrapper),
             ("Memory Policy - OMO Safety", test_memory_policy_omo_safety_wrapper),
+            ("Memory Policy - Custom Metadata", test_memory_policy_custom_metadata_wrapper),
             ("Memory Policy - Schema Inheritance", test_memory_policy_schema_inheritance_wrapper),
             ("Memory Policy - Override Schema", test_memory_policy_override_schema_wrapper),
+            ("Memory Policy - Manual Graph Override", test_memory_policy_manual_graph_override_wrapper),
             ("Memory Policy - link_to + policy", test_memory_policy_link_to_with_policy_wrapper),
             ("Memory Policy - link_to merge constraints", test_memory_policy_link_to_merge_constraints_wrapper),
             ("Memory Policy - create never blocks", test_memory_policy_create_never_blocks_wrapper),
@@ -1028,6 +1032,10 @@ async def test_memory_policy_omo_safety_wrapper(app_instance):
     unique_id, headers = _memory_policy_fixtures()
     await TestFullMemoryPolicyEndToEnd().test_memory_policy_with_omo_safety(unique_id, headers)
 
+async def test_memory_policy_custom_metadata_wrapper(app_instance):
+    unique_id, headers = _memory_policy_fixtures()
+    await TestCustomMetadataPropagation().test_custom_metadata_applied_to_nodes(unique_id, headers)
+
 async def test_memory_policy_schema_inheritance_wrapper(app_instance):
     unique_id, headers = _memory_policy_fixtures()
     await TestSchemaLevelPolicyInheritance().test_schema_policy_inheritance(unique_id, headers)
@@ -1035,6 +1043,10 @@ async def test_memory_policy_schema_inheritance_wrapper(app_instance):
 async def test_memory_policy_override_schema_wrapper(app_instance):
     unique_id, headers = _memory_policy_fixtures()
     await TestMemoryLevelPolicyOverride().test_memory_policy_overrides_schema(unique_id, headers)
+
+async def test_memory_policy_manual_graph_override_wrapper(app_instance):
+    unique_id, headers = _memory_policy_fixtures()
+    await TestManualPolicyGraphOverride().test_manual_graph_override_full_api(unique_id, headers)
 
 async def test_memory_policy_link_to_with_policy_wrapper(app_instance):
     unique_id, headers = _memory_policy_fixtures()
