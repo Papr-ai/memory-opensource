@@ -5,10 +5,12 @@ from pydantic import BaseModel, Field, ConfigDict, field_validator
 from typing import Optional, List, Dict, Any, Literal, Union, TYPE_CHECKING
 from datetime import datetime, timezone
 from enum import Enum
-from models.shared_types import MemoryMetadata, MessageRole, UserMemoryCategory, AssistantMemoryCategory
+from models.shared_types import MemoryMetadata, MessageRole, UserMemoryCategory, AssistantMemoryCategory, MemoryPolicy
 
+# Import GraphGeneration with TYPE_CHECKING to avoid circular import at module load time
+# It will be resolved at runtime via model_rebuild()
 if TYPE_CHECKING:
-    from models.memory_models import MemoryPolicy, GraphGeneration
+    from models.memory_models import GraphGeneration
 
 
 class MessageRequest(BaseModel):
@@ -45,7 +47,7 @@ class MessageRequest(BaseModel):
     )
     
     # Graph generation control (same as AddMemoryRequest)
-    memory_policy: Optional["MemoryPolicy"] = Field(
+    memory_policy: Optional[MemoryPolicy] = Field(
         default=None,
         description="Unified policy for graph generation and OMO safety. "
                    "Use mode='auto' (LLM extraction), 'manual' (exact nodes), "
@@ -299,3 +301,23 @@ class EnhancedAddMemoryRequest(BaseModel):
             }
         }
     )
+
+
+# Rebuild models to resolve forward references
+# This must be done after all models are defined
+def _rebuild_message_models():
+    """Rebuild Pydantic models to resolve forward references"""
+    try:
+        # Import GraphGeneration at runtime to resolve forward reference
+        from models.memory_models import GraphGeneration
+        
+        # Rebuild the model with the resolved types
+        MessageRequest.model_rebuild()
+    except Exception as e:
+        # Log but don't fail - this is a safety measure
+        import logging
+        logging.warning(f"Failed to rebuild MessageRequest model: {e}")
+
+
+# Call rebuild at module load time
+_rebuild_message_models()
