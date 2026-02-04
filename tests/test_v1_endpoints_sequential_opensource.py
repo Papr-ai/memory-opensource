@@ -109,6 +109,7 @@ from tests.test_memory_policy_end_to_end import (
     TestGraphQLValidation,
     TestErrorHandling,
     TestDeepTrustEdgePolicy,
+    TestDeepTrustEdgePolicy,
     unique_id as memory_policy_unique_id,
     api_headers as memory_policy_api_headers,
 )

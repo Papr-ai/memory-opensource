@@ -1569,6 +1569,11 @@ class User(UserMixin):
             tier_limits = features.get_tier_limits(effective_tier)
             logger.info(f"🔍 DEBUG: tier_limits from config: {tier_limits}")
             
+            # If metered billing is on, no need to check tier/limits (customer pays per usage)
+            if is_metered_billing_on:
+                logger.info(f"✅ Metered billing enabled - bypassing tier/subscription checks (customer pays per usage)")
+                return None
+            
             # Check if customer has no tier (no active subscription)
             if effective_tier is None or effective_tier == 'None':
                 logger.warning(f"❌ No active subscription found for customer {stripe_customer_id}")
@@ -1604,11 +1609,6 @@ class User(UserMixin):
             logger.info(f"  - Current Memories: {workspace_memories_count:,} / {memory_count_limit:,}")
             logger.info(f"  - Current Storage: {workspace_storage_gb:.2f}GB / {storage_gb_limit}GB")
             
-            # If metered billing is on, no need to check limits (customer pays per usage)
-            if is_metered_billing_on:
-                logger.info(f"✅ Metered billing enabled - bypassing tier limits (customer pays per usage)")
-                return None
-
             # Check if EITHER limit is exceeded
             memory_limit_exceeded = memory_count_limit and workspace_memories_count >= memory_count_limit
             storage_limit_exceeded = storage_gb_limit and workspace_storage_gb >= storage_gb_limit

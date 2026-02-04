@@ -5,14 +5,15 @@ Security Schema Neo4j Verification Tests
 Tests that verify security schema memories are properly stored in Neo4j.
 This test adds 3 different types of memories and directly verifies Neo4j storage:
 
-1. Memory with schema_id (top-level) - LLM generates graph from content + schema
+1. Memory with memory_policy.schema_id - LLM generates graph from content + schema
 2. Baseline memory (no schema) - For comparison/baseline testing
-3. Memory with graph_override (top-level) - Pre-made graph bypasses LLM
+3. Memory with graph_generation.manual (pre-made graph bypasses LLM)
 
 Each memory uses a unique external_user_id (in metadata) for isolated verification.
 
 API Structure:
-- schema_id, graph_override: top-level fields (from SchemaSpecificationMixin)
+- memory_policy.schema_id: nested field for schema reference
+- graph_generation.manual: nested field for pre-made graph
 - external_user_id: in metadata for add memory, top-level for search
 """
 
@@ -20,17 +21,20 @@ import asyncio
 import httpx
 import os
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 from neo4j import GraphDatabase
 from typing import Dict, Any, List
 from dotenv import load_dotenv
+from main import app
+from asgi_lifespan import LifespanManager
 
 # Load environment variables from .env file
 env_path = Path(__file__).parent.parent / '.env'
 load_dotenv(dotenv_path=env_path)
 
 # Test configuration
-BASE_URL = "http://localhost:8000"
+BASE_URL = os.getenv("BASE_URL", "http://localhost:8000")
 TEST_API_KEY = os.getenv("PAPR_API_KEY", "f80c5a2940f21882420b41690522cb2c")
 
 # Neo4j connection
@@ -44,6 +48,29 @@ _test_state = {
     "memory_2_id": None,  # agentic approach
     "memory_3_id": None,  # graph_override approach
 }
+
+
+def _use_asgi_client() -> bool:
+    """Use in-process ASGI client unless explicitly disabled."""
+    return os.getenv("USE_ASGI_TEST_CLIENT", "true").lower() == "true"
+
+
+@asynccontextmanager
+async def _get_client(timeout: float = 30.0) -> httpx.AsyncClient:
+    if _use_asgi_client():
+        async with LifespanManager(app, startup_timeout=60.0, shutdown_timeout=10.0):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app),
+                base_url="http://test",
+                timeout=timeout,
+            ) as client:
+                yield client
+    else:
+        async with httpx.AsyncClient(
+            base_url=BASE_URL,
+            timeout=timeout,
+        ) as client:
+            yield client
 
 
 def get_security_schema_data() -> Dict[str, Any]:
@@ -198,7 +225,7 @@ async def test_create_security_schema():
     print("Test 1: Create Security Schema")
     print("="*60)
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with _get_client(timeout=30.0) as client:
         schema_data = get_security_schema_data()
 
         headers = {
@@ -206,7 +233,7 @@ async def test_create_security_schema():
             "X-API-Key": TEST_API_KEY
         }
 
-        response = await client.post(f"{BASE_URL}/v1/schemas", headers=headers, json=schema_data)
+        response = await client.post("/v1/schemas", headers=headers, json=schema_data)
 
         if response.status_code != 201:
             raise Exception(f"Schema creation failed: {response.text}")
@@ -228,13 +255,15 @@ async def test_add_memory_with_schema_id():
     if not _test_state["schema_id"]:
         raise Exception("Schema must be created first")
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with _get_client(timeout=30.0) as client:
         schema_id = _test_state["schema_id"]
 
         memory_data = {
             "content": "Security incident detected: SQL injection attempt targeting /api/users endpoint from IP 192.168.1.100. This is a credential access tactic with high severity impact on data confidentiality.",
             "type": "text",
-            "schema_id": schema_id,  # Top-level field from SchemaSpecificationMixin
+            "memory_policy": {
+                "schema_id": schema_id  # Schema ID goes inside memory_policy
+            },
             "metadata": {
                 "external_user_id": "security_test_user_001",  # Unique ID for this test - in metadata
                 "event_type": "security_incident",
@@ -247,13 +276,20 @@ async def test_add_memory_with_schema_id():
             "X-API-Key": TEST_API_KEY
         }
 
-        response = await client.post(f"{BASE_URL}/v1/memory", headers=headers, json=memory_data)
+        response = await client.post("/v1/memory", headers=headers, json=memory_data)
 
         if response.status_code != 200:
             raise Exception(f"Memory creation failed: {response.text}")
 
         result = response.json()
-        memory_id = result["data"][0]["memoryId"]
+        memory_data_item = result["data"][0] if isinstance(result.get("data"), list) and result["data"] else result.get("data", {})
+        memory_id = (
+            memory_data_item.get("memoryId")
+            or memory_data_item.get("id")
+            or memory_data_item.get("objectId")
+        )
+        if not memory_id:
+            raise Exception(f"Memory creation response missing id: {result}")
         _test_state["memory_1_id"] = memory_id
 
         print(f"✅ Memory created with schema_id: {memory_id}")
@@ -267,7 +303,7 @@ async def test_add_memory_baseline():
     print("Test 3: Add Baseline Memory (no schema)")
     print("="*60)
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with _get_client(timeout=30.0) as client:
         memory_data = {
             "content": "Detected privilege escalation attempt: User account 'guest' attempting to access admin dashboard. This maps to privilege escalation tactic with critical impact on system integrity.",
             "type": "text",
@@ -283,13 +319,20 @@ async def test_add_memory_baseline():
             "X-API-Key": TEST_API_KEY
         }
 
-        response = await client.post(f"{BASE_URL}/v1/memory", headers=headers, json=memory_data)
+        response = await client.post("/v1/memory", headers=headers, json=memory_data)
 
         if response.status_code != 200:
             raise Exception(f"Memory creation failed: {response.text}")
 
         result = response.json()
-        memory_id = result["data"][0]["memoryId"]
+        memory_data_item = result["data"][0] if isinstance(result.get("data"), list) and result["data"] else result.get("data", {})
+        memory_id = (
+            memory_data_item.get("memoryId")
+            or memory_data_item.get("id")
+            or memory_data_item.get("objectId")
+        )
+        if not memory_id:
+            raise Exception(f"Memory creation response missing id: {result}")
         _test_state["memory_2_id"] = memory_id
 
         print(f"✅ Memory created with agentic graph: {memory_id}")
@@ -298,15 +341,15 @@ async def test_add_memory_baseline():
 
 
 async def test_add_memory_with_graph_override():
-    """Test 4: Add memory with graph_override (pre-made graph)"""
+    """Test 4: Add memory with graph_generation.manual (pre-made graph)"""
     print("\n" + "="*60)
-    print("Test 4: Add Memory with graph_override")
+    print("Test 4: Add Memory with graph_generation.manual")
     print("="*60)
 
     if not _test_state["schema_id"]:
         raise Exception("Schema must be created first")
 
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with _get_client(timeout=60.0) as client:
         schema_id = _test_state["schema_id"]
 
         # Pre-made graph structure
@@ -359,8 +402,13 @@ async def test_add_memory_with_graph_override():
         memory_data = {
             "content": "Critical alert: Detected 500GB data transfer to unknown external IP 203.0.113.45 over port 443. Potential data exfiltration event.",
             "type": "text",
-            "schema_id": schema_id,  # Top-level field from SchemaSpecificationMixin
-            "graph_override": graph_override,  # Top-level field - pre-made graph bypasses LLM
+            "memory_policy": {
+                "schema_id": schema_id  # Schema ID goes inside memory_policy
+            },
+            "graph_generation": {
+                "mode": "manual",
+                "manual": graph_override  # Pre-made graph bypasses LLM
+            },
             "metadata": {
                 "external_user_id": "security_test_user_003",  # Unique ID for this test - in metadata
                 "event_type": "data_exfiltration",
@@ -373,13 +421,20 @@ async def test_add_memory_with_graph_override():
             "X-API-Key": TEST_API_KEY
         }
 
-        response = await client.post(f"{BASE_URL}/v1/memory", headers=headers, json=memory_data)
+        response = await client.post("/v1/memory", headers=headers, json=memory_data)
 
         if response.status_code != 200:
             raise Exception(f"Memory creation failed: {response.text}")
 
         result = response.json()
-        memory_id = result["data"][0]["memoryId"]
+        memory_data_item = result["data"][0] if isinstance(result.get("data"), list) and result["data"] else result.get("data", {})
+        memory_id = (
+            memory_data_item.get("memoryId")
+            or memory_data_item.get("id")
+            or memory_data_item.get("objectId")
+        )
+        if not memory_id:
+            raise Exception(f"Memory creation response missing id: {result}")
         _test_state["memory_3_id"] = memory_id
 
         print(f"✅ Memory created with graph_override: {memory_id}")
@@ -472,7 +527,7 @@ async def test_search_returns_neo4j_data():
 
     all_passed = True
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with _get_client(timeout=30.0) as client:
         headers = {
             "Content-Type": "application/json",
             "X-API-Key": TEST_API_KEY
@@ -491,7 +546,7 @@ async def test_search_returns_neo4j_data():
             }
 
             response = await client.post(
-                f"{BASE_URL}/v1/memory/search",
+                "/v1/memory/search",
                 headers=headers,
                 json=search_data
             )
@@ -508,7 +563,8 @@ async def test_search_returns_neo4j_data():
                 all_passed = False
                 continue
 
-            memories = result.get("data", [])
+            response_data = result.get("data") or {}
+            memories = response_data.get("memories") or response_data.get("memory_items") or []
             print(f"   Memories found: {len(memories)}")
 
             if len(memories) > 0:
@@ -520,7 +576,6 @@ async def test_search_returns_neo4j_data():
                 print(f"   Response keys: {list(result.keys())}")
 
                 # Check for Neo4j nodes in the response data
-                response_data = result.get("data", {})
                 nodes = response_data.get("nodes", [])
                 
                 if nodes:
