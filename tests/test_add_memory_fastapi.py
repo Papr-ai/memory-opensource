@@ -6110,11 +6110,12 @@ async def test_v1_search_with_organization_and_namespace_filter(app):
             logger.info("   - Created 3 memories with batch org/namespace scoping")
             logger.info("   - Verified org/namespace IDs via GET /v1/memory/{memory_id}")
 
-            # Step 3: Search with namespace_id filter and ensure no namespace_id=None results
+            # Step 3: Search with namespace_id filter using unique test run content
             logger.info("\nStep 3: Searching with namespace_id filter")
             await asyncio.sleep(2)
+            # Search for the specific test run content to avoid matching old test data
             namespace_search_request = SearchRequest(
-                query="sprint planning",
+                query=f"sprint planning run:{test_run_id}",
                 rank_results=False,
                 namespace_id=test_namespace_id
             )
@@ -6131,10 +6132,24 @@ async def test_v1_search_with_organization_and_namespace_filter(app):
             assert namespace_payload.data is not None
             memories = namespace_payload.data.memories or []
             assert len(memories) > 0, "Namespace search should return at least one memory"
+            
+            # Verify that all returned memories have the correct namespace_id
+            # and at least one of them is from our test run
+            found_test_memory = False
             for memory in memories:
+                # All memories must have the correct namespace_id (no None values allowed)
                 assert memory.namespace_id == test_namespace_id, (
-                    f"Expected namespace_id {test_namespace_id}, got {memory.namespace_id}"
+                    f"Expected namespace_id {test_namespace_id}, got {memory.namespace_id}. "
+                    f"Memory ID: {memory.id}, Content: {memory.content[:100]}"
                 )
+                # Check if this is one of our newly created memories
+                if test_run_id in (memory.content or ""):
+                    found_test_memory = True
+            
+            assert found_test_memory, (
+                f"Search did not return any memories from test run {test_run_id}. "
+                f"Found {len(memories)} memories but none match our test data."
+            )
 
 
 

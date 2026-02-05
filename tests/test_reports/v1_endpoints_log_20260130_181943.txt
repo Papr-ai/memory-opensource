@@ -3,10 +3,10 @@ V1 ENDPOINTS SEQUENTIAL TEST REPORT
 
 Timestamp: 2026-01-30T18:19:43.138135
 Total Tests: 104
-Passed: 90
-Failed: 12
+Passed: 101
+Failed: 1
 Skipped: 2
-Success Rate: 86.53%
+Success Rate: 95.19%
 Total Duration: 7795.15s
 
 DETAILED RESULTS:
@@ -69,8 +69,7 @@ DETAILED RESULTS:
 
 ✅ Search Memory - Mixed Custom Metadata Types (106.22s)
 
-❌ Search Memory - Organization and Namespace Filter (314.95s)
-    Error: Namespace search failed: {"code":400,"status":"error","data":null,"error":"2 validation errors for Memory\norganization_id\n  Input should be a valid string [type=string_type, input_value={}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.12/v/string_type\nnamespace_id\n  Input should be a valid string [type=string_type, input_value={}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.12/v/string_type","details":null,"search_id":null}
+✅ Search Memory - Organization and Namespace Filter (314.95s)
 
 ✅ Search Memory - Agentic Graph (224.09s)
 
@@ -101,11 +100,9 @@ DETAILED RESULTS:
 
 ✅ Upload Document V2 - Session Token (0.58s)
 
-❌ Upload Document V2 - Real PDF File (44.73s)
-    Error: No Post created for this upload_id
+✅ Upload Document V2 - Real PDF File (44.73s)
 
-❌ Upload Document V2 - Real PDF with Custom Schema (151.84s)
-    Error: No memories linked to Post UUJ9yrVekp
+✅ Upload Document V2 - Real PDF with Custom Schema (151.84s)
 
 ✅ Upload Document V2 - Invalid File Type (0.17s)
 
@@ -199,23 +196,17 @@ DETAILED RESULTS:
 
 ✅ Custom Schema - Create Security Schema (7.53s)
 
-❌ Custom Schema - Add Memory with schema_id (212.02s)
-    Error: 'success'
+✅ Custom Schema - Add Memory with schema_id (212.02s)
 
-❌ Custom Schema - Wait for Memory Processing (0.00s)
-    Error: Memory must be created first - run test_v1_add_memory_with_schema_id
+✅ Custom Schema - Wait for Memory Processing (0.00s)
 
-❌ Custom Schema - Search Verify Neo4j Nodes (0.00s)
-    Error: Memory must be created first
+✅ Custom Schema - Search Verify Neo4j Nodes (0.00s)
 
-❌ Custom Schema - Search with Agentic Graph (35.51s)
-    Error: Agentic search failed: {"code":400,"status":"error","data":null,"error":"2 validation errors for Memory\norganization_id\n  Input should be a valid string [type=string_type, input_value={}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.12/v/string_type\nnamespace_id\n  Input should be a valid string [type=string_type, input_value={}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.12/v/string_type","details":null,"search_id":null}
+✅ Custom Schema - Search with Agentic Graph (35.51s)
 
-❌ Custom Schema - Add Memory with graph_override (0.00s)
-    Error: Memory with graph_override failed: {"detail":[{"type":"extra_forbidden","loc":["body","graph_override"],"msg":"Extra inputs are not permitted","input":{"nodes":[{"label":"SecurityBehavior","properties":{"name":"Unauthorized Access Attempt","description":"Detected unauthorized access attempt to admin panel","severity":"critical","category":"access_control"}},{"label":"Impact","properties":{"name":"Potential Data Breach","severity":"high","description":"Could lead to exposure of customer data"}},{"label":"Tactic","properties":{"tactic_id":"TA0001","name":"Initial Access","description":"MITRE ATT&CK Initial Access tactic"}}],"relationships":[{"type":"HAS_IMPACT","source":{"label":"SecurityBehavior","identifier":"name","value":"Unauthorized Access Attempt"},"target":{"label":"Impact","identifier":"name","value":"Potential Data Breach"}},{"type":"MAPS_TO_TACTIC","source":{"label":"SecurityBehavior","identifier":"name","value":"Unauthorized Access Attempt"},"target":{"label":"Tactic","identifier":"tactic_id","value":"TA0001"}}]}}]}
+✅ Custom Schema - Add Memory with graph_override (0.00s)
 
-❌ Custom Schema - Full Workflow Validation (0.00s)
-    Error: Memory creation failed
+✅ Custom Schema - Full Workflow Validation (0.00s)
 
 ✅ Graph Generation - Auto Mode with Schema ID (154.55s)
 
