@@ -1228,15 +1228,19 @@ class ChatGPTCompletion:
             logger.error(f"Error during API call: {str(e)}")
             raise
    
-    def acl_filter_to_cypher_conditions(self, acl_filter: ACLFilter) -> str:
+    def acl_filter_to_cypher_conditions(self, acl_filter: ACLFilter, node_alias: str = "m") -> str:
         """
-        Convert ACLFilter Pydantic model to Cypher conditions string.
+        Convert ACLFilter Pydantic model to Cypher conditions string for a specific node.
+        
+        IMPORTANT: This should be called for BOTH m and n nodes in relationship queries
+        to ensure multi-tenant isolation and prevent leaking data across tenants.
         
         Args:
             acl_filter (ACLFilter): Pydantic model containing ACL conditions
+            node_alias (str): Node variable name in Cypher query (e.g., "m", "n")
             
         Returns:
-            str: Cypher conditions string
+            str: Cypher conditions string for the specified node
         """
         conditions = []
 
@@ -1246,54 +1250,54 @@ class ChatGPTCompletion:
                 # Handle user_id equality condition
                 eq_value = condition.user_id.get("$eq")
                 if eq_value:
-                    conditions.append(f"m.user_id IS NOT NULL AND m.user_id = '{eq_value}'")
+                    conditions.append(f"{node_alias}.user_id IS NOT NULL AND {node_alias}.user_id = '{eq_value}'")
                     
             if condition.user_read_access:
                 # Handle user_read_access IN condition
                 in_values = condition.user_read_access.get("$in", [])
                 if in_values:
                     in_values_formatted = [f"'{v}'" for v in in_values]
-                    conditions.append(f"m.user_read_access IS NOT NULL AND any(x IN m.user_read_access WHERE x IN [{', '.join(in_values_formatted)}])")
+                    conditions.append(f"{node_alias}.user_read_access IS NOT NULL AND any(x IN {node_alias}.user_read_access WHERE x IN [{', '.join(in_values_formatted)}])")
                     
             if condition.workspace_read_access:
                 # Handle workspace_read_access IN condition
                 in_values = condition.workspace_read_access.get("$in", [])
                 if in_values:
                     in_values_formatted = [f"'{v}'" for v in in_values]
-                    conditions.append(f"m.workspace_read_access IS NOT NULL AND any(x IN m.workspace_read_access WHERE x IN [{', '.join(in_values_formatted)}])")
+                    conditions.append(f"{node_alias}.workspace_read_access IS NOT NULL AND any(x IN {node_alias}.workspace_read_access WHERE x IN [{', '.join(in_values_formatted)}])")
                     
             if condition.role_read_access:
                 # Handle role_read_access IN condition
                 in_values = condition.role_read_access.get("$in", [])
                 if in_values:
                     in_values_formatted = [f"'{v}'" for v in in_values]
-                    conditions.append(f"m.role_read_access IS NOT NULL AND any(x IN m.role_read_access WHERE x IN [{', '.join(in_values_formatted)}])")
+                    conditions.append(f"{node_alias}.role_read_access IS NOT NULL AND any(x IN {node_alias}.role_read_access WHERE x IN [{', '.join(in_values_formatted)}])")
                     
             if condition.organization_id:
                 # Handle organization_id equality condition
                 eq_value = condition.organization_id.get("$eq")
                 if eq_value:
-                    conditions.append(f"m.organization_id IS NOT NULL AND m.organization_id = '{eq_value}'")
+                    conditions.append(f"{node_alias}.organization_id IS NOT NULL AND {node_alias}.organization_id = '{eq_value}'")
                     
             if condition.organization_read_access:
                 # Handle organization_read_access IN condition
                 in_values = condition.organization_read_access.get("$in", [])
                 if in_values:
                     in_values_formatted = [f"'{v}'" for v in in_values]
-                    conditions.append(f"m.organization_read_access IS NOT NULL AND any(x IN m.organization_read_access WHERE x IN [{', '.join(in_values_formatted)}])")
+                    conditions.append(f"{node_alias}.organization_read_access IS NOT NULL AND any(x IN {node_alias}.organization_read_access WHERE x IN [{', '.join(in_values_formatted)}])")
                     
             if condition.namespace_id:
                 # Handle namespace_id equality condition
                 eq_value = condition.namespace_id.get("$eq")
                 if eq_value:
-                    conditions.append(f"m.namespace_id IS NOT NULL AND m.namespace_id = '{eq_value}'")
+                    conditions.append(f"{node_alias}.namespace_id IS NOT NULL AND {node_alias}.namespace_id = '{eq_value}'")
                     
             if condition.namespace_read_access:
                 # Handle namespace_read_access IN condition
                 in_values = condition.namespace_read_access.get("$in", [])
                 if in_values:
                     in_values_formatted = [f"'{v}'" for v in in_values]
-                    conditions.append(f"m.namespace_read_access IS NOT NULL AND any(x IN m.namespace_read_access WHERE x IN [{', '.join(in_values_formatted)}])")
+                    conditions.append(f"{node_alias}.namespace_read_access IS NOT NULL AND any(x IN {node_alias}.namespace_read_access WHERE x IN [{', '.join(in_values_formatted)}])")
 
         # Join all conditions with OR
         cypher_acl_condition = " OR ".join(conditions) if conditions else "true"
@@ -1880,9 +1884,10 @@ Note: Always use 'm', 'r', 'n' as variable names for source Memory node, relatio
                             logger.info(f"Fallback template system successful")
                         except Exception as fallback_error:
                             logger.error(f"Fallback template system also failed: {fallback_error}")
-                            # Use absolute fallback
+                            # Use absolute fallback with ACL for BOTH m and n nodes
                             generated_query = """MATCH path = (m:Memory)-[:RELATED_TO*1..2]->(n:Memory)
 WHERE (m.user_id = $user_id OR any(x IN coalesce(m.user_read_access, []) WHERE x IN $user_read_access) OR any(x IN coalesce(m.workspace_read_access, []) WHERE x IN $workspace_read_access) OR any(x IN coalesce(m.role_read_access, []) WHERE x IN $role_read_access) OR any(x IN coalesce(m.organization_read_access, []) WHERE x IN $organization_read_access) OR any(x IN coalesce(m.namespace_read_access, []) WHERE x IN $namespace_read_access))
+  AND (n.user_id = $user_id OR any(x IN coalesce(n.user_read_access, []) WHERE x IN $user_read_access) OR any(x IN coalesce(n.workspace_read_access, []) WHERE x IN $workspace_read_access) OR any(x IN coalesce(n.role_read_access, []) WHERE x IN $role_read_access) OR any(x IN coalesce(n.organization_read_access, []) WHERE x IN $organization_read_access) OR any(x IN coalesce(n.namespace_read_access, []) WHERE x IN $namespace_read_access))
 WITH DISTINCT path
 RETURN {
     path: path,
@@ -1892,7 +1897,7 @@ RETURN {
         startNode: startNode(r).id, endNode: endNode(r).id
     }]
 } AS result"""
-                            logger.warning(f"Using absolute fallback query")
+                            logger.warning(f"Using absolute fallback query with ACL for both m and n nodes")
                 else:
                     # NEW: Use enhanced schema for Instructor/Groq path too
                     if enhanced_schema_cache and relationship_patterns:
@@ -2396,11 +2401,15 @@ RETURN {
     ) -> str:
         """
         Generate a fallback Cypher query if LLM fails, mirroring the original functionality.
+        IMPORTANT: Applies ACL conditions to BOTH m and n nodes for multi-tenant isolation.
         """
         try:
             cipher_relationship_types = memory_graph_schema.get('relationships', []) if memory_graph_schema else []
             sanitized_relationship_types = [rel_type.replace('-', '_') for rel_type in cipher_relationship_types] if cipher_relationship_types else []
-            cypher_acl_conditions = self.acl_filter_to_cypher_conditions(acl_filter)
+            
+            # Generate ACL conditions for BOTH nodes
+            cypher_acl_conditions_m = self.acl_filter_to_cypher_conditions(acl_filter, node_alias="m")
+            cypher_acl_conditions_n = self.acl_filter_to_cypher_conditions(acl_filter, node_alias="n")
 
             # Build the MATCH clause
             if sanitized_relationship_types:
@@ -2411,10 +2420,14 @@ RETURN {
                 MATCH (m:Memory)-[r:{relationship_type_string}]->(n:Memory)
                 WHERE m.id IN $bigbird_memory_ids
                 """
-                # Incorporate the ACL conditions into your WHERE clause
-                if cypher_acl_conditions:
+                # Incorporate the ACL conditions for BOTH m and n
+                if cypher_acl_conditions_m:
                     cipher_query += f"""
-                    AND ({cypher_acl_conditions})
+                    AND ({cypher_acl_conditions_m})
+                    """
+                if cypher_acl_conditions_n:
+                    cipher_query += f"""
+                    AND ({cypher_acl_conditions_n})
                     """
                 cipher_query += f"""
                 AND r.type IN $sanitized_relationship_types
@@ -2425,9 +2438,13 @@ RETURN {
                 MATCH (m:Memory)-[r:RELATION]->(n:Memory)
                 WHERE m.id IN $bigbird_memory_ids
                 """
-                if cypher_acl_conditions:
+                if cypher_acl_conditions_m:
                     cipher_query += f"""
-                    AND ({cypher_acl_conditions})
+                    AND ({cypher_acl_conditions_m})
+                    """
+                if cypher_acl_conditions_n:
+                    cipher_query += f"""
+                    AND ({cypher_acl_conditions_n})
                     """
 
             # Complete the query with the RETURN and ORDER BY clauses
@@ -2437,7 +2454,7 @@ RETURN {
             LIMIT {top_k}
             """
 
-            logger.info(f"Fallback Cipher Query: {cipher_query}")
+            logger.info(f"Fallback Cipher Query with ACL for both nodes: {cipher_query}")
             return cipher_query.strip()
         except Exception as e:
             logger.error(f"Error generating fallback Cypher query: {e}")
@@ -2459,21 +2476,27 @@ RETURN {
             cipher_relationship_types = memory_graph_schema.get('relationships', []) if memory_graph_schema else []
             sanitized_relationship_types = [rel_type.replace('-', '_') for rel_type in cipher_relationship_types] if cipher_relationship_types else []
             
-            # Build ACL conditions
-            acl_conditions = []
+            # Build ACL conditions for BOTH nodes (m and n)
+            acl_conditions_m = []
+            acl_conditions_n = []
             acl_or_conditions = acl_filter.get('$or', [])
             
             for condition in acl_or_conditions:
                 if 'user_id' in condition:
-                    acl_conditions.append("m.user_id = $user_id")
+                    acl_conditions_m.append("m.user_id = $user_id")
+                    acl_conditions_n.append("n.user_id = $user_id")
                 elif 'user_read_access' in condition:
-                    acl_conditions.append("m.user_read_access IN $user_read_access")
+                    acl_conditions_m.append("m.user_read_access IN $user_read_access")
+                    acl_conditions_n.append("n.user_read_access IN $user_read_access")
                 elif 'workspace_read_access' in condition:
-                    acl_conditions.append("m.workspace_read_access IN $workspace_read_access")
+                    acl_conditions_m.append("m.workspace_read_access IN $workspace_read_access")
+                    acl_conditions_n.append("n.workspace_read_access IN $workspace_read_access")
                 elif 'role_read_access' in condition:
-                    acl_conditions.append("m.role_read_access IN $role_read_access")
+                    acl_conditions_m.append("m.role_read_access IN $role_read_access")
+                    acl_conditions_n.append("n.role_read_access IN $role_read_access")
             
-            cypher_acl_conditions = " OR ".join(acl_conditions) if acl_conditions else ""
+            cypher_acl_conditions_m = " OR ".join(acl_conditions_m) if acl_conditions_m else ""
+            cypher_acl_conditions_n = " OR ".join(acl_conditions_n) if acl_conditions_n else ""
 
             # Build the MATCH clause
             if sanitized_relationship_types:
@@ -2485,10 +2508,14 @@ RETURN {
                 MATCH path = (p)-[*1..2]-(n)
                 WHERE m.id IN $bigbird_memory_ids
                 """
-                # Add ACL conditions
-                if cypher_acl_conditions:
+                # Add ACL conditions for BOTH m and n
+                if cypher_acl_conditions_m:
                     cipher_query += f"""
-                    AND ({cypher_acl_conditions})
+                    AND ({cypher_acl_conditions_m})
+                    """
+                if cypher_acl_conditions_n:
+                    cipher_query += f"""
+                    AND ({cypher_acl_conditions_n})
                     """
                 cipher_query += f"""
                 AND type(r) IN $sanitized_relationship_types
@@ -2499,9 +2526,13 @@ RETURN {
                 MATCH (m:Memory)-[r]->(n:Memory)
                 WHERE m.id IN $bigbird_memory_ids
                 """
-                if cypher_acl_conditions:
+                if cypher_acl_conditions_m:
                     cipher_query += f"""
-                    AND ({cypher_acl_conditions})
+                    AND ({cypher_acl_conditions_m})
+                    """
+                if cypher_acl_conditions_n:
+                    cipher_query += f"""
+                    AND ({cypher_acl_conditions_n})
                     """
 
             # Complete the query
@@ -2511,7 +2542,7 @@ RETURN {
             LIMIT {top_k}
             """
 
-            logger.info(f"Fallback Cipher Query: {cipher_query}")
+            logger.info(f"Fallback Cipher Query with ACL for both nodes (async): {cipher_query}")
             return cipher_query.strip()
         except Exception as e:
             logger.error(f"Error generating fallback Cypher query: {e}")
@@ -5159,6 +5190,7 @@ RETURN {
                 if memory_id and generated_nodes_with_ids:
                     logger.info(f"🔗 AUTO-CONNECT: Creating automatic EXTRACTED relationships from Memory {memory_id} to {len(generated_nodes_with_ids)} generated nodes")
                     for node in generated_nodes_with_ids:
+                        # Use node's UUID id - the ID mapping in store_llm_generated_graph will handle the conversion
                         node_id = node.get('properties', {}).get('id')
                         if node_id:
                             # Create LLMGraphRelationship object for automatic connection

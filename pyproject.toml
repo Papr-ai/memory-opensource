@@ -73,6 +73,7 @@ posthog = "^3.0.0"  # Self-hostable analytics for open source
 # Document processing providers
 google-genai = "^1.46.0"         # NEW Gemini SDK - NO protobuf conflicts! https://googleapis.github.io/python-genai/
 # google-generativeai = "^0.8.0"  # OLD (deprecated) - Conflicts with TensorLake, support ends Aug 2025
+google-cloud-aiplatform = "^1.53.0"  # Vertex AI for custom trained models (Qwen4B embeddings)
 pymupdf = "^1.26.6"              # PyMuPDF - required for Gemini PDF processing
 reducto = "*"                    # Reducto AI - use latest available
 tensorlake = "0.2.101"           # Pinned to a known PyPI release

@@ -62,6 +62,10 @@ class MemoryNodeProperties(BaseModel):
     role_write_access: List[str] = Field(default_factory=list)
     external_user_read_access: Optional[List[str]] = Field(default_factory=list)
     external_user_write_access: Optional[List[str]] = Field(default_factory=list)
+    namespace_read_access: Optional[List[str]] = Field(default_factory=list, description="Namespace-level read access")
+    namespace_write_access: Optional[List[str]] = Field(default_factory=list, description="Namespace-level write access")
+    organization_read_access: Optional[List[str]] = Field(default_factory=list, description="Organization-level read access")
+    organization_write_access: Optional[List[str]] = Field(default_factory=list, description="Organization-level write access")
     createdAt: Optional[str] = None
     updatedAt: Optional[str] = None
 
@@ -129,6 +133,10 @@ def memory_item_to_node(memory_item: 'MemoryItem', chunk_ids: List[str]) -> LLMG
         role_write_access=metadata.get('role_write_access', []),
         external_user_read_access=metadata.get('external_user_read_access', []),
         external_user_write_access=metadata.get('external_user_write_access', []),
+        namespace_read_access=metadata.get('namespace_read_access', []),
+        namespace_write_access=metadata.get('namespace_write_access', []),
+        organization_read_access=metadata.get('organization_read_access', []),
+        organization_write_access=metadata.get('organization_write_access', []),
         createdAt=metadata.get('createdAt') or datetime.now(timezone.utc).isoformat(),
         **custom_fields
     ).model_dump(exclude_none=True)
@@ -154,6 +162,10 @@ class NeoBaseProperties(BaseModel):
     role_write_access: Optional[List[str]] = Field(default_factory=list)
     external_user_read_access: Optional[List[str]] = Field(default_factory=list)
     external_user_write_access: Optional[List[str]] = Field(default_factory=list)
+    namespace_read_access: Optional[List[str]] = Field(default_factory=list, description="Namespace-level read access")
+    namespace_write_access: Optional[List[str]] = Field(default_factory=list, description="Namespace-level write access")
+    organization_read_access: Optional[List[str]] = Field(default_factory=list, description="Organization-level read access")
+    organization_write_access: Optional[List[str]] = Field(default_factory=list, description="Organization-level write access")
 
      # Multi-tenant scoping fields
     organization_id: Optional[str] = Field(default=None, description="Organization ID for multi-tenant scoping")
@@ -233,6 +245,10 @@ class BaseNodeProperties(BaseModel):
     role_write_access: Optional[List[str]] = Field(default_factory=list)
     external_user_read_access: Optional[List[str]] = Field(default_factory=list)
     external_user_write_access: Optional[List[str]] = Field(default_factory=list)
+    namespace_read_access: Optional[List[str]] = Field(default_factory=list, description="Namespace-level read access")
+    namespace_write_access: Optional[List[str]] = Field(default_factory=list, description="Namespace-level write access")
+    organization_read_access: Optional[List[str]] = Field(default_factory=list, description="Organization-level read access")
+    organization_write_access: Optional[List[str]] = Field(default_factory=list, description="Organization-level write access")
 
     # Multi-tenant scoping fields
     organization_id: Optional[str] = Field(default=None, description="Organization ID for multi-tenant scoping")

@@ -26,7 +26,7 @@ class PropertyDefinition(BaseModel):
     max_length: Optional[int] = None  # For strings
     min_value: Optional[float] = None  # For numbers
     max_value: Optional[float] = None  # For numbers
-    enum_values: Optional[List[str]] = Field(None, max_length=10, description="List of allowed enum values (max 10)")  # For enumerated values
+    enum_values: Optional[List[str]] = Field(None, max_length=15, description="List of allowed enum values (max 15)")  # For enumerated values
     pattern: Optional[str] = None  # Regex pattern for strings
 
     model_config = ConfigDict(extra='forbid', exclude_none=True)
@@ -37,8 +37,8 @@ class PropertyDefinition(BaseModel):
         if v is not None:
             if len(v) == 0:
                 raise ValueError("enum_values cannot be empty if provided")
-            if len(v) > 10:
-                raise ValueError("enum_values cannot contain more than 10 values")
+            if len(v) > 15:
+                raise ValueError("enum_values cannot contain more than 15 values")
             # Check for duplicates
             if len(v) != len(set(v)):
                 raise ValueError("enum_values cannot contain duplicate values")
