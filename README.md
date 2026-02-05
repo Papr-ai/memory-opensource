@@ -125,7 +125,7 @@ cp .env.example .env.opensource
 3. **Start all services**
 ```bash
 # Open source setup (auto-initializes everything)
-docker-compose up -d
+docker compose up -d
 ```
 
 4. **Access the API**
@@ -149,7 +149,7 @@ pip install -r requirements.txt
 2. **Start required services**
 ```bash
 # Recommended: Use docker-compose for open source setup
-docker-compose up -d mongodb neo4j qdrant redis parse-server
+docker compose up -d mongodb neo4j qdrant redis parse-server
 
 # Or start individually (for development):
 # MongoDB

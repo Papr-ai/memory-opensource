@@ -16,7 +16,9 @@ services:
 
   # Main Papr Memory Application
   papr-memory:
-    build: .
+    build:
+      context: .
+      network: host
     container_name: papr-memory
     image: "${IMAGE_NAME:-papr_memory_oss}:${IMAGE_TAG:-latest}"
     entrypoint: ["/app/scripts/opensource/docker_entrypoint_opensource.sh"]
@@ -171,14 +173,14 @@ services:
       PARSE_SERVER_APP_NAME: Papr Memory
       PARSE_SERVER_ENABLE_EXPERIMENTAL_DIRECT_ACCESS: 1
       # Allow class creation during initial setup - can be disabled after schema is initialized
-      PARSE_SERVER_ALLOW_CLIENT_CLASS_CREATION: true
-      PARSE_SERVER_ENABLE_PRIVATE_USERS: true
+      PARSE_SERVER_ALLOW_CLIENT_CLASS_CREATION: "true"
+      PARSE_SERVER_ENABLE_PRIVATE_USERS: "true"
       # Allow custom objectId during object creation (required for search_id functionality)
       # Note: Parse Server 8.x may not support this as an environment variable
       # If this doesn't work, you may need to configure allowCustomObjectId in Parse Server
       # initialization code or use a separate search_id field instead of objectId
       # This allows setting objectId when creating QueryLog entries to match search_id
-      PARSE_SERVER_ALLOW_CUSTOM_OBJECT_ID: true
+      PARSE_SERVER_ALLOW_CUSTOM_OBJECT_ID: "true"
       # Parse Server 8.x security settings for local development
       PARSE_SERVER_ALLOW_INSECURE_HTTP: 1
       PARSE_SERVER_ENABLE_CHECK_LOG: 0
@@ -227,7 +229,7 @@ services:
           "users": [
             {
               "user": "admin",
-              "pass": "$2b$10$/.J.hoDpJjXsJl.deEeeU.bAa8Dgwurprhh2DXheQkjsmNFZEJ7nS"
+              "pass": "$$2b$$10$$/.J.hoDpJjXsJl.deEeeU.bAa8Dgwurprhh2DXheQkjsmNFZEJ7nS"
             }
           ],
           "useEncryptedPasswords": true
