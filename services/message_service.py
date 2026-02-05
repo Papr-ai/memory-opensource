@@ -247,9 +247,25 @@ async def get_session_messages(
             chat_data = chat_response.json()
             if not chat_data.get("results"):
                 logger.info(f"No chat session found for sessionId: {session_id}")
-                return MessageHistoryResponse(messages=[], total_count=0, has_more=False)
+                return MessageHistoryResponse(sessionId=session_id, messages=[], total_count=0)
             
-            chat_object_id = chat_data["results"][0]["objectId"]
+            chat_record = chat_data["results"][0]
+            chat_object_id = chat_record["objectId"]
+            
+            # Extract summaries if available
+            summaries_data = chat_record.get("summaries")
+            summaries = None
+            context_for_llm = None
+            
+            if summaries_data:
+                from models.message_models import ConversationSummaryResponse
+                summaries = ConversationSummaryResponse(
+                    short_term=summaries_data.get("short_term"),
+                    medium_term=summaries_data.get("medium_term"),
+                    long_term=summaries_data.get("long_term"),
+                    topics=summaries_data.get("topics", []),
+                    last_updated=datetime.fromisoformat(summaries_data["last_updated"].replace('Z', '+00:00')) if summaries_data.get("last_updated") else None
+                )
         
             # Build query filters - query by chat pointer
             where_conditions = {
@@ -325,12 +341,35 @@ async def get_session_messages(
             count_response.raise_for_status()
             total_count = count_response.json().get("count", len(messages))
             
+            # Generate context_for_llm if summaries exist
+            if summaries:
+                # Format recent messages (last 5-10)
+                recent_messages_text = ""
+                for msg in messages[-10:]:
+                    role_str = msg.role if isinstance(msg.role, str) else msg.role.value
+                    content_str = msg.content if isinstance(msg.content, str) else str(msg.content)[:200]
+                    recent_messages_text += f"{role_str}: {content_str}\n"
+                
+                context_for_llm = f"""CONVERSATION SUMMARY:
+Full Session: {summaries.long_term}
+
+Recent Context (last ~100 messages): {summaries.medium_term}
+
+Current Batch (last 15 messages): {summaries.short_term}
+
+Key Topics: {', '.join(summaries.topics)}
+
+LATEST MESSAGES:
+{recent_messages_text}"""
+            
             logger.info(f"Retrieved {len(messages)} messages for session {session_id}")
             
             return MessageHistoryResponse(
                 sessionId=session_id,
                 messages=messages,
-                total_count=total_count
+                total_count=total_count,
+                summaries=summaries,
+                context_for_llm=context_for_llm
             )
             
     except Exception as e:
@@ -691,12 +730,13 @@ async def update_message_processing_status(
     """
     try:
         update_data = {
-            "processingStatus": status,
-            "updatedAt": datetime.now(timezone.utc).isoformat()
+            "processingStatus": status
         }
         
         if error_message:
             update_data["processingError"] = error_message
+        
+        # Note: Parse Server automatically updates 'updatedAt' field
         
         url = f"{PARSE_SERVER_URL}/parse/classes/PostMessage/{message_id}"
         
@@ -709,4 +749,80 @@ async def update_message_processing_status(
             
     except Exception as e:
         logger.error(f"Error updating message status: {str(e)}")
+        return False
+
+
+async def update_chat_summaries(
+    session_id: str,
+    user_id: str,
+    summaries: Dict[str, Any],
+    workspace_id: Optional[str] = None
+) -> bool:
+    """
+    Update Chat.summaries field in Parse Server with hierarchical conversation summaries.
+    
+    Args:
+        session_id: Session identifier
+        user_id: User ID for access control
+        summaries: Dict with short_term, medium_term, long_term, topics keys
+        workspace_id: Optional workspace ID for filtering
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        # Find Chat by sessionId
+        chat_query = {
+            "sessionId": session_id,
+            "user": {
+                "__type": "Pointer",
+                "className": "_User",
+                "objectId": user_id
+            }
+        }
+        
+        async with httpx.AsyncClient() as client:
+            chat_response = await client.get(
+                f"{PARSE_SERVER_URL}/parse/classes/Chat",
+                headers=HEADERS,
+                params={"where": json.dumps(chat_query), "limit": 1}
+            )
+            
+            if chat_response.status_code != 200:
+                logger.error(f"Failed to find chat session: {chat_response.status_code} - {chat_response.text}")
+                return False
+            
+            chat_data = chat_response.json()
+            if not chat_data.get("results"):
+                logger.warning(f"No chat session found for sessionId: {session_id}")
+                return False
+            
+            chat_object_id = chat_data["results"][0]["objectId"]
+            
+            # Update Chat with summaries
+            update_data = {
+                "summaries": {
+                    "short_term": summaries.get("short_term", ""),
+                    "medium_term": summaries.get("medium_term", ""),
+                    "long_term": summaries.get("long_term", ""),
+                    "topics": summaries.get("topics", []),
+                    "last_updated": datetime.now(timezone.utc).isoformat()
+                }
+            }
+            
+            update_response = await client.put(
+                f"{PARSE_SERVER_URL}/parse/classes/Chat/{chat_object_id}",
+                headers=HEADERS,
+                json=update_data
+            )
+            
+            if update_response.status_code in [200, 201]:
+                logger.info(f"✅ Updated Chat summaries for session {session_id}")
+                return True
+            else:
+                logger.error(f"Failed to update Chat summaries: {update_response.status_code} - {update_response.text}")
+                return False
+                
+    except Exception as e:
+        logger.error(f"Error updating chat summaries: {str(e)}")
         return False

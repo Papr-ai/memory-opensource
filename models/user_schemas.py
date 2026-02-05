@@ -1,9 +1,12 @@
-from pydantic import BaseModel, Field, ConfigDict, field_validator
-from typing import Dict, Any, List, Optional, Union, Literal
+from pydantic import BaseModel, Field, ConfigDict, field_validator, AliasChoices, model_validator
+from typing import Dict, Any, List, Optional, Union, Literal, TYPE_CHECKING
 from enum import Enum
 from datetime import datetime, timezone
 from uuid import uuid4
 import re
+
+if TYPE_CHECKING:
+    from models.shared_types import MemoryPolicy, NodeConstraint, EdgeConstraint
 
 class PropertyType(str, Enum):
     STRING = "string"
@@ -26,7 +29,7 @@ class PropertyDefinition(BaseModel):
     max_length: Optional[int] = None  # For strings
     min_value: Optional[float] = None  # For numbers
     max_value: Optional[float] = None  # For numbers
-    enum_values: Optional[List[str]] = Field(None, max_length=10, description="List of allowed enum values (max 10)")  # For enumerated values
+    enum_values: Optional[List[str]] = Field(None, max_length=15, description="List of allowed enum values (max 15)")  # For enumerated values
     pattern: Optional[str] = None  # Regex pattern for strings
 
     model_config = ConfigDict(extra='forbid', exclude_none=True)
@@ -37,8 +40,8 @@ class PropertyDefinition(BaseModel):
         if v is not None:
             if len(v) == 0:
                 raise ValueError("enum_values cannot be empty if provided")
-            if len(v) > 10:
-                raise ValueError("enum_values cannot contain more than 10 values")
+            if len(v) > 15:
+                raise ValueError("enum_values cannot contain more than 15 values")
             # Check for duplicates
             if len(v) != len(set(v)):
                 raise ValueError("enum_values cannot contain duplicate values")
@@ -59,7 +62,35 @@ class PropertyDefinition(BaseModel):
         return v
 
 class UserNodeType(BaseModel):
-    """User-defined node type"""
+    """
+    User-defined node type with optional inline constraint.
+
+    The `constraint` field allows defining default matching/creation behavior
+    directly within the node type definition. This replaces the need to put
+    constraints only in memory_policy.node_constraints.
+
+    Schema-level constraints:
+    - `node_type` is implicit (taken from parent UserNodeType.name)
+    - Defines default matching strategy via `search.properties`
+    - Can be overridden per-memory via memory_policy.node_constraints
+
+    Example:
+        UserNodeType(
+            name="Task",
+            label="Task",
+            properties={
+                "id": PropertyDefinition(type="string"),
+                "title": PropertyDefinition(type="string", required=True)
+            },
+            constraint=NodeConstraint(
+                search=SearchConfig(properties=[
+                    PropertyMatch(name="id", mode="exact"),
+                    PropertyMatch(name="title", mode="semantic", threshold=0.85)
+                ]),
+                create="auto"
+            )
+        )
+    """
     name: str = Field(..., pattern=r'^[A-Za-z][A-Za-z0-9_]*$')  # Valid identifier
     label: str  # Display name
     description: Optional[str] = None
@@ -68,17 +99,50 @@ class UserNodeType(BaseModel):
         description="Node properties (max 10 per node type)"
     )
     required_properties: List[str] = Field(default_factory=list)
-    
-    # Node merging/deduplication
+
+    # Node merging/deduplication (DEPRECATED: Use constraint.search.properties instead)
     unique_identifiers: List[str] = Field(
         default_factory=list,
-        description="Properties that uniquely identify this node type. Used for MERGE operations to avoid duplicates. Example: ['name', 'email'] for Customer nodes."
+        description="DEPRECATED: Use 'constraint.search.properties' instead. "
+                   "Properties that uniquely identify this node type. "
+                   "Example: ['name', 'email'] for Customer nodes."
     )
-    
+
+    # Node constraint - defines default matching/creation behavior for this node type
+    constraint: Optional["NodeConstraint"] = Field(
+        default=None,
+        description="Default constraint for this node type. Defines: "
+                   "1. search.properties - unique identifiers and how to match them "
+                   "2. create - 'upsert' (create if not found) or 'lookup' (controlled vocabulary) "
+                   "3. when - conditional application with logical operators "
+                   "4. set - default property values. "
+                   "Note: node_type is implicit (taken from this UserNodeType.name)."
+    )
+
+    # Resolution policy shorthand (equivalent to @upsert/@lookup decorator)
+    resolution_policy: Literal["upsert", "lookup"] = Field(
+        default="upsert",
+        description="Shorthand for constraint.create. "
+                   "'upsert': Create if not found (default). "
+                   "'lookup': Only link to existing nodes (controlled vocabulary). "
+                   "Equivalent to @upsert/@lookup decorators. If constraint is also provided, "
+                   "resolution_policy will set constraint.create accordingly."
+    )
+
+    # Link-only shorthand (DEPRECATED: Use resolution_policy='lookup' instead)
+    link_only: bool = Field(
+        default=False,
+        description="DEPRECATED: Use resolution_policy='lookup' instead. "
+                   "Shorthand for constraint with create='lookup'. "
+                   "When True, only links to existing nodes (controlled vocabulary). "
+                   "Equivalent to @lookup decorator. If constraint is also provided, "
+                   "link_only=True will override constraint.create to 'lookup'."
+    )
+
     # Visual/UI properties
     color: Optional[str] = "#3498db"  # Hex color for UI
     icon: Optional[str] = None  # Icon identifier
-    
+
     model_config = ConfigDict(extra='forbid')
     
     @field_validator('properties')
@@ -108,22 +172,116 @@ class UserNodeType(BaseModel):
                     raise ValueError(f"Unique identifier property '{unique_prop}' not found in properties")
         return v
 
+    def model_post_init(self, __context):
+        """Apply resolution_policy and link_only to constraint after initialization."""
+        # Import here to avoid circular dependency issues
+        from models.shared_types import NodeConstraint
+
+        # Handle deprecated link_only (takes precedence for backwards compatibility)
+        if self.link_only:
+            object.__setattr__(self, 'resolution_policy', 'lookup')
+
+        # Apply resolution_policy to constraint
+        if self.resolution_policy == "lookup":
+            if self.constraint is None:
+                # Create a new constraint with create='lookup'
+                object.__setattr__(self, 'constraint', NodeConstraint(create="lookup"))
+            else:
+                # Override the existing constraint's create field
+                object.__setattr__(self.constraint, 'create', 'lookup')
+
+
 class UserRelationshipType(BaseModel):
-    """User-defined relationship type"""
+    """
+    User-defined relationship type with optional inline constraint.
+
+    The `constraint` field allows defining default matching/creation behavior
+    directly within the relationship type definition. This mirrors the pattern
+    used in UserNodeType.constraint for nodes.
+
+    Schema-level edge constraints:
+    - `edge_type` is implicit (taken from parent UserRelationshipType.name)
+    - Defines default target node matching strategy via `search.properties`
+    - Can be overridden per-memory via memory_policy.edge_constraints
+
+    Example:
+        UserRelationshipType(
+            name="MITIGATES",
+            label="Mitigates",
+            allowed_source_types=["SecurityBehavior"],
+            allowed_target_types=["TacticDef"],
+            constraint=EdgeConstraint(
+                search=SearchConfig(properties=[
+                    PropertyMatch(name="name", mode="semantic", threshold=0.90)
+                ]),
+                create="never"  # Controlled vocabulary - only link to existing targets
+            )
+        )
+    """
     name: str = Field(..., pattern=r'^[A-Z][A-Z0-9_]*$')  # Convention: UPPER_CASE
     label: str  # Display name
     description: Optional[str] = None
     properties: Dict[str, PropertyDefinition] = Field(default_factory=dict)
-    
+
     # Relationship constraints
     allowed_source_types: List[str]  # Which node types can be source
     allowed_target_types: List[str]  # Which node types can be target
     cardinality: Literal["one-to-one", "one-to-many", "many-to-many"] = "many-to-many"
-    
+
+    # Edge constraint - defines default matching/creation behavior for this relationship type
+    constraint: Optional["EdgeConstraint"] = Field(
+        default=None,
+        description="Default constraint for this relationship type. Defines: "
+                   "1. search.properties - how to find existing target nodes "
+                   "2. create - 'upsert' (create if not found) or 'lookup' (controlled vocabulary) "
+                   "3. when - conditional application with logical operators "
+                   "4. set - default edge property values. "
+                   "Note: edge_type is implicit (taken from this UserRelationshipType.name)."
+    )
+
+    # Resolution policy shorthand (equivalent to @upsert/@lookup decorator)
+    resolution_policy: Literal["upsert", "lookup"] = Field(
+        default="upsert",
+        description="Shorthand for constraint.create. "
+                   "'upsert': Create target if not found (default). "
+                   "'lookup': Only link to existing targets (controlled vocabulary). "
+                   "Equivalent to @upsert/@lookup decorators. If constraint is also provided, "
+                   "resolution_policy will set constraint.create accordingly."
+    )
+
+    # Link-only shorthand (DEPRECATED: Use resolution_policy='lookup' instead)
+    link_only: bool = Field(
+        default=False,
+        description="DEPRECATED: Use resolution_policy='lookup' instead. "
+                   "Shorthand for constraint with create='lookup'. "
+                   "When True, only links to existing target nodes (controlled vocabulary). "
+                   "Equivalent to @lookup decorator. If constraint is also provided, "
+                   "link_only=True will override constraint.create to 'lookup'."
+    )
+
     # Visual/UI properties
     color: Optional[str] = "#e74c3c"  # Hex color for UI
-    
+
     model_config = ConfigDict(extra='forbid')
+
+    def model_post_init(self, __context):
+        """Apply resolution_policy and link_only to constraint after initialization."""
+        # Import here to avoid circular dependency issues
+        from models.shared_types import EdgeConstraint
+
+        # Handle deprecated link_only (takes precedence for backwards compatibility)
+        if self.link_only:
+            object.__setattr__(self, 'resolution_policy', 'lookup')
+
+        # Apply resolution_policy to constraint
+        if self.resolution_policy == "lookup":
+            if self.constraint is None:
+                # Create a new constraint with create='lookup'
+                object.__setattr__(self, 'constraint', EdgeConstraint(create="lookup"))
+            else:
+                # Override the existing constraint's create field
+                object.__setattr__(self.constraint, 'create', 'lookup')
+
 
 class SchemaStatus(str, Enum):
     DRAFT = "draft"
@@ -149,9 +307,28 @@ class UserGraphSchema(BaseModel):
     user_id: Optional[Union[str, Dict[str, Any]]] = None  # Set automatically from authentication (string or Parse Pointer)
     workspace_id: Optional[Union[str, Dict[str, Any]]] = None  # String or Parse Pointer (legacy)
     
-    # Multi-tenant ownership (NEW) - Parse Pointers
-    organization: Optional[Union[str, Dict[str, Any]]] = None  # Organization this schema belongs to (Parse Pointer)
-    namespace: Optional[Union[str, Dict[str, Any]]] = None     # Namespace this schema belongs to (Parse Pointer)
+    # Multi-tenant ownership (IDs, not Parse pointers)
+    organization_id: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("organization_id", "organization"),
+        description="Organization ID this schema belongs to. Accepts legacy 'organization' alias."
+    )
+    namespace_id: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("namespace_id", "namespace"),
+        description="Namespace ID this schema belongs to. Accepts legacy 'namespace' alias."
+    )
+    # Deprecated legacy fields (kept for backwards compatibility)
+    organization: Optional[Union[str, Dict[str, Any]]] = Field(
+        default=None,
+        description="DEPRECATED: Use 'organization_id' instead. Accepts Parse pointer or objectId.",
+        json_schema_extra={"deprecated": True}
+    )
+    namespace: Optional[Union[str, Dict[str, Any]]] = Field(
+        default=None,
+        description="DEPRECATED: Use 'namespace_id' instead. Accepts Parse pointer or objectId.",
+        json_schema_extra={"deprecated": True}
+    )
     
     # Schema definitions
     node_types: Dict[str, UserNodeType] = Field(
@@ -162,7 +339,15 @@ class UserGraphSchema(BaseModel):
         default_factory=dict,
         description="Custom relationship types (max 20 per schema)"
     )
-    
+
+    # Memory Policy - default processing rules for memories using this schema
+    memory_policy: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Default memory policy for memories using this schema. "
+                   "Includes mode ('auto', 'manual'), node_constraints (applied in auto mode when present), "
+                   "and OMO safety settings (consent, risk). Memory-level policies override schema-level."
+    )
+
     # Metadata
     status: SchemaStatus = SchemaStatus.DRAFT
     scope: SchemaScope = SchemaScope.ORGANIZATION  # Default to organization scope for multi-tenant isolation
@@ -194,6 +379,33 @@ class UserGraphSchema(BaseModel):
         if len(v) > 20:
             raise ValueError(f"Schema cannot have more than 20 relationship types (found {len(v)})")
         return v
+
+    @field_validator("organization_id", "namespace_id", mode="before")
+    @classmethod
+    def normalize_tenant_ids(cls, v):
+        """Accept Parse pointers or strings and normalize to objectId string."""
+        if isinstance(v, dict) and v.get("__type") == "Pointer":
+            return v.get("objectId")
+        return v
+
+    @model_validator(mode="after")
+    def handle_legacy_tenant_fields(self):
+        """Log deprecation warning when legacy organization/namespace are used."""
+        if self.organization is not None:
+            logger.warning(
+                "DEPRECATION WARNING: 'organization' is deprecated on UserGraphSchema. "
+                "Use 'organization_id' instead."
+            )
+            if self.organization_id is None:
+                self.organization_id = self.organization if isinstance(self.organization, str) else self.organization.get("objectId")
+        if self.namespace is not None:
+            logger.warning(
+                "DEPRECATION WARNING: 'namespace' is deprecated on UserGraphSchema. "
+                "Use 'namespace_id' instead."
+            )
+            if self.namespace_id is None:
+                self.namespace_id = self.namespace if isinstance(self.namespace, str) else self.namespace.get("objectId")
+        return self
 
 
     @field_validator('created_at', 'updated_at', 'last_used_at', mode='before')
@@ -228,3 +440,11 @@ class SchemaListResponse(BaseModel):
     code: int = 200
     total: int = 0
 
+
+# ============================================================================
+# Resolve forward references after all models are defined
+# ============================================================================
+# Import NodeConstraint and EdgeConstraint, then rebuild models to resolve forward references
+from models.shared_types import NodeConstraint, EdgeConstraint
+UserNodeType.model_rebuild()
+UserRelationshipType.model_rebuild()

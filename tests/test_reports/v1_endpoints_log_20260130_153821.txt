@@ -1,0 +1,222 @@
+V1 ENDPOINTS SEQUENTIAL TEST REPORT
+==================================================
+
+Timestamp: 2026-01-30T15:38:21.982585
+Total Tests: 91
+Passed: 53
+Failed: 37
+Skipped: 1
+Success Rate: 58.2%
+Total Duration: 7238.20s
+
+DETAILED RESULTS:
+------------------------------
+✅ Add Memory - Basic (368.27s)
+
+✅ Add Memory - API Key (293.81s)
+
+✅ Add Memory - External User ID + Custom Metadata (187.00s)
+
+✅ Add Memory - External User ID Only (197.96s)
+
+✅ Add Memory - External User ID + ACL (166.59s)
+
+✅ Add Memory - User ID from Created User (143.50s)
+
+✅ Batch Add Memory - Basic (351.07s)
+
+✅ Batch Add Memory - User ID (478.78s)
+
+✅ Batch Add Memory - External User ID (612.18s)
+
+✅ Batch Add Memory - Webhook Success (294.64s)
+
+✅ Batch Add Memory - Webhook Partial Success (221.67s)
+
+❌ Batch Add Memory - Webhook No URL (41.29s)
+    Error: Expected status code 200 or 207, got 408
+
+❌ Batch Add Memory - Webhook Azure Fallback (156.76s)
+    Error: Expected 'send_batch_completion_webhook' to have been called once. Called 0 times.
+
+✅ Batch Add Memory - Webhook Payload Structure (163.43s)
+
+✅ Batch Add Memory - Webhook Immediate (skip_background=True) (30.02s)
+
+✅ Batch Add Memory - Webhook With Background Processing (292.02s)
+
+❌ Update Memory - Basic (45.28s)
+    Error: Failed to retrieve added memory
+
+✅ Update Memory - API Key (34.01s)
+
+✅ Update Memory - ACL with Real Users (28.17s)
+
+✅ Get Memory - Basic (125.13s)
+
+❌ Search Memory - Basic (16.08s)
+    Error: Response should not have errors
+
+❌ Search Memory - User ID ACL (113.48s)
+    Error: user_id does not have read access in acl
+
+✅ Search Memory - External User ID ACL (180.20s)
+
+✅ Search Memory - New User Qwen Route (21.26s)
+
+✅ Search Memory - Custom Metadata Filter (Qwen Only) (246.54s)
+
+✅ Search Memory - Numeric Custom Metadata Filter (200.53s)
+
+✅ Search Memory - List Custom Metadata Filter (220.02s)
+
+✅ Search Memory - Boolean Custom Metadata Filter (237.32s)
+
+✅ Search Memory - Mixed Custom Metadata Types (109.30s)
+
+❌ Search Memory - Organization and Namespace Filter (287.09s)
+    Error: Namespace search failed: {"code":400,"status":"error","data":null,"error":"2 validation errors for Memory\norganization_id\n  Input should be a valid string [type=string_type, input_value={}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.12/v/string_type\nnamespace_id\n  Input should be a valid string [type=string_type, input_value={}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.12/v/string_type","details":null,"search_id":null}
+
+✅ Search Memory - Agentic Graph (225.89s)
+
+❌ Search Memory - Predicted Grouping Logging (72.64s)
+
+❌ Search Memory - Fixed User Cache Test (18.03s)
+    Error: Expected 2 timings, got 0: []
+
+❌ Search Memory - Low-similarity Performance (14.23s)
+    Error: Search failed: {"code":500,"status":"error","data":null,"error":"Memory search failed: [Errno 8] nodename nor servname provided, or not known","details":null,"search_id":null}
+
+❌ Auth/Dev Marking - APIKey Sets Developer (16.84s)
+    Error: [Errno 8] nodename nor servname provided, or not known
+
+❌ Auth/Dev Marking - Bearer Only Does Not Set Developer (20.05s)
+
+❌ Auth/Dev Marking - Anon End-User Not Marked Developer When Dev API Key Used (20.05s)
+
+❌ Delete Memory - Basic (20.05s)
+
+❌ Delete Memory - API Key (20.06s)
+
+❌ Delete All Memories - Complete Workflow (20.05s)
+
+✅ Delete All Memories - External User ID (18.89s)
+
+✅ Delete All Memories - No Memories Found (14.00s)
+
+✅ Upload Document V2 - API Key (11.17s)
+
+✅ Upload Document V2 - Session Token (0.81s)
+
+❌ Upload Document V2 - Real PDF File (54.76s)
+    Error: No Post created for this upload_id
+
+❌ Upload Document V2 - Real PDF with Custom Schema (261.80s)
+    Error: No memories linked to Post 1Bbz0yG8Lw
+
+✅ Upload Document V2 - Invalid File Type (0.66s)
+
+✅ Upload Document V2 - Malicious Content (0.02s)
+
+✅ Upload Document V2 - Large File (0.10s)
+
+✅ Upload Document V2 - With Webhook (0.33s)
+
+✅ Upload Document V2 - Multi-tenant (0.32s)
+
+✅ Upload Document V2 - Provider Preference (1.81s)
+
+✅ Upload Document V2 - Authentication Failure (0.88s)
+
+✅ Document Status Endpoint (0.06s)
+
+✅ Document Cancel Endpoint (0.06s)
+
+✅ Reducto Provider - Direct and Route (28.37s)
+
+✅ Reducto Provider - Simple Upload (41.33s)
+
+✅ Upload Document V2 - Gemini Provider (152.21s)
+
+❌ Upload Document V2 - TensorLake Provider (194.30s)
+    Error: TensorLake processing failed: Activity task failed
+
+❌ Create User - Basic (0.04s)
+    Error: Expected status code 200, got 401. Response: {"detail":"Invalid API key"}
+
+❌ Create User - Anonymous (0.01s)
+    Error: Expected status code 200, got 401. Response: {"detail":"Invalid API key"}
+
+❌ Create User - Batch (0.02s)
+    Error: Expected status code 200, got 401. Response: {"detail":"Invalid API key"}
+
+❌ Get User - Basic (0.01s)
+    Error: User creation failed: {"detail":"Invalid API key"}
+
+❌ Update User - Basic (0.01s)
+    Error: User creation failed: {"detail":"Invalid API key"}
+
+❌ Delete User - Basic (0.01s)
+    Error: User creation failed: {"detail":"Invalid API key"}
+
+❌ Delete User - By External ID (0.01s)
+    Error: User creation failed: {"detail":"Invalid API key"}
+
+❌ List Users - Basic (0.01s)
+    Error: User 1 creation failed: {"detail":"Invalid API key"}
+
+❌ Feedback - End to End (37.97s)
+    Error: Search failed: {"code":400,"status":"error","data":null,"error":"2 validation errors for Memory\norganization_id\n  Input should be a valid string [type=string_type, input_value={}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.12/v/string_type\nnamespace_id\n  Input should be a valid string [type=string_type, input_value={}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.12/v/string_type","details":null,"search_id":null}
+
+❌ Feedback - Get by ID (12.39s)
+    Error: Search failed: {"code":400,"status":"error","data":null,"error":"2 validation errors for Memory\norganization_id\n  Input should be a valid string [type=string_type, input_value={}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.12/v/string_type\nnamespace_id\n  Input should be a valid string [type=string_type, input_value={}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.12/v/string_type","details":null,"search_id":null}
+
+✅ Sync Tiers - Basic (28.83s)
+
+❌ Sync Tiers - With Embeddings (small) (20.07s)
+
+❌ Sync Delta - Cursor Pagination (20.09s)
+
+✅ QueryLog - Memory Metadata with Query Log Fields (0.00s)
+
+✅ QueryLog - Classification Data Detection (0.00s)
+
+✅ QueryLog - Search with Query Log Integration (0.00s)
+
+✅ QueryLog - Agentic Graph Log Model Creation (0.00s)
+
+✅ QueryLog - User Feedback Log Model Creation (0.00s)
+
+✅ QueryLog - Agentic Graph Log with Relations (0.00s)
+
+✅ QueryLog - User Feedback Log Minimal (0.00s)
+
+✅ QueryLog - Agentic Graph Log Storage Function (0.00s)
+
+✅ QueryLog - User Feedback Log Storage Function (0.00s)
+
+✅ QueryLog - Agentic Graph Log Data Preparation (0.00s)
+
+✅ QueryLog - User Feedback Log Data Preparation (0.00s)
+
+⏭️ QueryLog - Memory Retrieval Log Predicted Grouping (0.00s)
+    Skipped: Requires monkeypatch fixture
+
+❌ QueryLog - Persisted with Classification (3.22s)
+    Error: Search failed: 500 {"code":500,"status":"error","data":null,"error":"Memory search failed: [Errno 8] nodename nor servname provided, or not known","details":null,"search_id":null}
+
+❌ QueryLog - Real creation and memory increment (3.04s)
+
+❌ QueryLog - Cache hits increment on repeated search (3.04s)
+    Error: Search failed: 500 {"code":500,"status":"error","data":null,"error":"Memory search failed: [Errno 8] nodename nor servname provided, or not known","details":null,"search_id":null}
+
+❌ QueryLog - Fused confidence matches weight delta (10.08s)
+    Error: Search failed: 400 {"code":400,"status":"error","data":null,"error":"2 validation errors for Memory\norganization_id\n  Input should be a valid string [type=string_type, input_value={}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.12/v/string_type\nnamespace_id\n  Input should be a valid string [type=string_type, input_value={}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.12/v/string_type","details":null,"search_id":null}
+
+❌ QueryLog - Backfill Retrieval Counters Small Batch (3.03s)
+
+❌ QueryLog - Sync Tiers Returns Ranked Tier1 (3.03s)
+
+❌ TEST_SUITE_ERROR (7238.20s)
+    Error: Unhandled exception: name 'test_v1_create_security_schema' is not defined
+

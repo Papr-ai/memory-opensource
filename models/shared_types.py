@@ -1,11 +1,14 @@
 # Shared types for memory, parse_server, and structured_outputs
-from pydantic import BaseModel, Field, ConfigDict, field_validator
-from typing import Optional, List, Dict, Any, Union, Literal
+from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
+from typing import Optional, List, Dict, Any, Union, Literal, TYPE_CHECKING, ClassVar
 from enum import Enum
 import logging
 from datetime import datetime, timezone, UTC
 logger = logging.getLogger(__name__)
 import json
+
+if TYPE_CHECKING:
+    from models.omo import OpenMemoryObject
  
 
 # SchemaSpecificationMixin will be imported locally in UploadDocumentRequest to avoid circular imports
@@ -278,7 +281,7 @@ class PropertyOverrideRule(BaseModel):
 
 class MemoryMetadata(BaseModel):
     """Metadata for memory request"""
-    hierarchical_structures: Optional[str] = Field(
+    hierarchical_structures: Optional[Union[str, List]] = Field(
         None, 
         description="Hierarchical structures to enable navigation from broad topics to specific ones"
     )
@@ -286,6 +289,8 @@ class MemoryMetadata(BaseModel):
         default_factory=lambda: datetime.now(timezone.utc).isoformat(),
         description="ISO datetime when the memory was created"
     )
+
+
     location: Optional[str] = None
     topics: Optional[List[str]] = None
     emoji_tags: Optional[List[str]] = Field(None, alias="emoji tags")
@@ -303,30 +308,119 @@ class MemoryMetadata(BaseModel):
         description="Memory category based on role. For users: preference, task, goal, fact, context. For assistants: skills, learning, task, goal, fact, context."
     )
 
-    user_id: Optional[str] = None
-    external_user_id: Optional[str] = None
+    # DEPRECATED: Use request-level fields instead
+    # These fields are kept for backwards compatibility but will be removed in v2
+    user_id: Optional[str] = Field(
+        default=None,
+        deprecated=True,
+        description="DEPRECATED: Use 'external_user_id' at request level instead. "
+                   "This field will be removed in v2."
+    )
+    external_user_id: Optional[str] = Field(
+        default=None,
+        deprecated=True,
+        description="DEPRECATED: Use 'external_user_id' at request level instead. "
+                   "This field will be removed in v2."
+    )
 
-    # ACL fields for fine-grained access control
-    external_user_read_access: Optional[List[str]] = Field(default_factory=list)
-    external_user_write_access: Optional[List[str]] = Field(default_factory=list)
-    user_read_access: Optional[List[str]] = Field(default_factory=list)
-    user_write_access: Optional[List[str]] = Field(default_factory=list)
-    workspace_read_access: Optional[List[str]] = Field(default_factory=list)
-    workspace_write_access: Optional[List[str]] = Field(default_factory=list)
-    role_read_access: Optional[List[str]] = Field(default_factory=list)
-    role_write_access: Optional[List[str]] = Field(default_factory=list)
-    namespace_read_access: Optional[List[str]] = Field(default_factory=list)
-    namespace_write_access: Optional[List[str]] = Field(default_factory=list)
-    organization_read_access: Optional[List[str]] = Field(default_factory=list)
-    organization_write_access: Optional[List[str]] = Field(default_factory=list)
+    # =========================================================================
+    # INTERNAL: Granular ACL fields for vector store filtering
+    # =========================================================================
+    # These fields are auto-populated from memory_policy.acl and should NOT
+    # be set directly by developers. They enable efficient filtering in Qdrant/Pinecone.
+    # Developer-facing ACL should be set via memory_policy.acl at request level.
+    external_user_read_access: Optional[List[str]] = Field(
+        default_factory=list,
+        description="INTERNAL: Auto-populated for vector store filtering. Use memory_policy.acl instead."
+    )
+    external_user_write_access: Optional[List[str]] = Field(
+        default_factory=list,
+        description="INTERNAL: Auto-populated for vector store filtering. Use memory_policy.acl instead."
+    )
+    user_read_access: Optional[List[str]] = Field(
+        default_factory=list,
+        description="INTERNAL: Auto-populated for vector store filtering. Use memory_policy.acl instead."
+    )
+    user_write_access: Optional[List[str]] = Field(
+        default_factory=list,
+        description="INTERNAL: Auto-populated for vector store filtering. Use memory_policy.acl instead."
+    )
+    workspace_read_access: Optional[List[str]] = Field(
+        default_factory=list,
+        description="INTERNAL: Auto-populated for vector store filtering. Use memory_policy.acl instead."
+    )
+    workspace_write_access: Optional[List[str]] = Field(
+        default_factory=list,
+        description="INTERNAL: Auto-populated for vector store filtering. Use memory_policy.acl instead."
+    )
+    role_read_access: Optional[List[str]] = Field(
+        default_factory=list,
+        description="INTERNAL: Auto-populated for vector store filtering. Use memory_policy.acl instead."
+    )
+    role_write_access: Optional[List[str]] = Field(
+        default_factory=list,
+        description="INTERNAL: Auto-populated for vector store filtering. Use memory_policy.acl instead."
+    )
+    namespace_read_access: Optional[List[str]] = Field(
+        default_factory=list,
+        description="INTERNAL: Auto-populated for vector store filtering. Use memory_policy.acl instead."
+    )
+    namespace_write_access: Optional[List[str]] = Field(
+        default_factory=list,
+        description="INTERNAL: Auto-populated for vector store filtering. Use memory_policy.acl instead."
+    )
+    organization_read_access: Optional[List[str]] = Field(
+        default_factory=list,
+        description="INTERNAL: Auto-populated for vector store filtering. Use memory_policy.acl instead."
+    )
+    organization_write_access: Optional[List[str]] = Field(
+        default_factory=list,
+        description="INTERNAL: Auto-populated for vector store filtering. Use memory_policy.acl instead."
+    )
 
     pageId: Optional[str] = None
     sourceType: Optional[str] = None
     workspace_id: Optional[str] = None
     upload_id: Optional[str] = Field(None, description="Upload ID for document processing workflows")
     # Multi-tenant context (IDs only; pointers are set only in Parse payload)
-    organization_id: Optional[str] = None
-    namespace_id: Optional[str] = None
+    # DEPRECATED: Use request-level fields instead
+    organization_id: Optional[str] = Field(
+        default=None,
+        deprecated=True,
+        description="DEPRECATED: Use 'organization_id' at request level instead. "
+                   "This field will be removed in v2."
+    )
+    namespace_id: Optional[str] = Field(
+        default=None,
+        deprecated=True,
+        description="DEPRECATED: Use 'namespace_id' at request level instead. "
+                   "This field will be removed in v2."
+    )
+
+    # =========================================================================
+    # DEPRECATED: OMO fields - Use memory_policy at request level instead
+    # =========================================================================
+    # These fields are kept for backwards compatibility but will be removed in v2.
+    # Set OMO safety standards via memory_policy.consent, memory_policy.risk,
+    # and memory_policy.acl at request level.
+    consent: Optional[str] = Field(
+        default="implicit",
+        deprecated=True,
+        description="DEPRECATED: Use 'memory_policy.consent' at request level instead. "
+                   "Values: 'explicit', 'implicit' (default), 'terms', 'none'."
+    )
+    risk: Optional[str] = Field(
+        default="none",
+        deprecated=True,
+        description="DEPRECATED: Use 'memory_policy.risk' at request level instead. "
+                   "Values: 'none' (default), 'sensitive', 'flagged'."
+    )
+    acl: Optional[Dict[str, List[str]]] = Field(
+        default=None,
+        deprecated=True,
+        description="DEPRECATED: Use 'memory_policy.acl' at request level instead. "
+                   "Format: {'read': [...], 'write': [...]}."
+    )
 
     # QueryLog related fields
     sessionId: Optional[str] = None  # Session ID for tracking query context
@@ -446,7 +540,64 @@ class MemoryMetadata(BaseModel):
                 base[field] = []
         # Merge base and flattened custom
         return {**base, **flat_custom}
-    
+
+    def to_omo(
+        self,
+        memory_id: str,
+        content: str,
+        memory_type: str = "text",
+        memory_policy: Optional[Any] = None
+    ) -> "OpenMemoryObject":
+        """
+        Convert this MemoryMetadata to OMO (Open Memory Object) standard format.
+
+        This enables memory portability across OMO-compliant platforms.
+        Papr-specific fields are stored in ext.papr:* namespace.
+
+        Args:
+            memory_id: Unique memory identifier
+            content: Memory content
+            memory_type: Type (text, image, audio, video, file, code)
+            memory_policy: Optional MemoryPolicy instance
+
+        Returns:
+            OpenMemoryObject in OMO v1 format
+
+        Example:
+            >>> metadata = MemoryMetadata(external_user_id="user_123", consent="explicit")
+            >>> omo = metadata.to_omo("mem_abc", "Meeting notes...", "text")
+            >>> print(omo.model_dump_json())
+        """
+        from models.omo import memory_to_omo
+        return memory_to_omo(
+            memory_id=memory_id,
+            content=content,
+            memory_type=memory_type,
+            metadata=self,
+            memory_policy=memory_policy
+        )
+
+    @classmethod
+    def from_omo(cls, omo: "OpenMemoryObject") -> "MemoryMetadata":
+        """
+        Create MemoryMetadata from an OMO (Open Memory Object) standard format.
+
+        This enables importing memories from other OMO-compliant platforms.
+
+        Args:
+            omo: OpenMemoryObject instance
+
+        Returns:
+            MemoryMetadata instance with fields populated from OMO
+
+        Example:
+            >>> omo = OpenMemoryObject(id="mem_123", content="...", consent="explicit", ...)
+            >>> metadata = MemoryMetadata.from_omo(omo)
+        """
+        from models.omo import from_omo
+        papr_data = from_omo(omo)
+        metadata_dict = papr_data.get("metadata", {})
+        return cls(**metadata_dict)
 
     model_config = ConfigDict(
         from_attributes=True,
@@ -497,10 +648,7 @@ class UploadDocumentRequest(BaseModel):
         None,
         description="Schema ID to use for graph extraction. If not provided, system will auto-generate schema."
     )
-    simple_schema_mode: bool = Field(
-        default=False,
-        description="Enable simple schema mode for faster processing with basic graph extraction."
-    )
+
     graph_override: Optional[Dict[str, Any]] = Field(
         None,
         description="Override graph structure for custom schema enforcement. Not supported for documents (too complex for document processing)."
@@ -508,6 +656,10 @@ class UploadDocumentRequest(BaseModel):
     property_overrides: Optional[List[PropertyOverrideRule]] = Field(
         None,
         description="Property overrides for node customization with match conditions"
+    )
+    simple_schema_mode: Optional[bool] = Field(
+        None,
+        description="Deprecated. Kept for backward compatibility with older clients."
     )
     # Note: The file itself is handled by FastAPI's UploadFile, not Pydantic
 
@@ -537,8 +689,7 @@ class UploadDocumentRequest(BaseModel):
                 },
                 "preferred_provider": "reducto",
                 "hierarchical_enabled": True,
-                "schema_id": "schema_123",
-                "simple_schema_mode": False
+                "schema_id": "schema_123"
             }
         }
     )
@@ -617,3 +768,1845 @@ class FeedbackSource(str, Enum):
     SESSION_END = "session_end"
     MEMORY_CITATION = "memory_citation"
     ANSWER_PANEL = "answer_panel"
+
+
+# ============================================================================
+# Memory Policy Models (Memory-Oriented Policies)
+# ============================================================================
+# These models provide a unified way to control how memories are processed,
+# what graph nodes are created, and how they're constrained.
+
+class PolicyMode(str, Enum):
+    """
+    Memory processing mode - describes WHO controls graph generation.
+
+    - AUTO: LLM extracts entities freely (default)
+    - MANUAL: Developer provides exact nodes (no LLM extraction)
+
+    Note: 'structured' is accepted as a deprecated alias for 'manual'.
+    """
+    AUTO = "auto"
+    MANUAL = "manual"  # Renamed from STRUCTURED - developer provides exact nodes
+
+    # DEPRECATED: Keep for backwards compatibility (maps to MANUAL)
+    # Note: Can't have duplicate values in Enum, so we handle 'structured' via validation
+
+
+class SearchMode(str, Enum):
+    """Search mode for finding existing nodes."""
+    SEMANTIC = "semantic"  # Vector similarity search
+    EXACT = "exact"        # Exact property match
+    FUZZY = "fuzzy"        # Partial/fuzzy match
+
+
+class SpecialRef(BaseModel):
+    """
+    Represents a special reference in link_to DSL.
+
+    Special references allow linking to contextual nodes:
+    - $this: The Memory node being created
+    - $previous: User's most recent memory
+    - $context:N: Last N memories in conversation
+
+    Examples:
+        SpecialRef(ref="$this")
+        SpecialRef(ref="$previous", type="FOLLOWS")
+        SpecialRef(ref="$context", count=5)
+    """
+    ref: Literal["$this", "$previous", "$context"] = Field(
+        ...,
+        description="The special reference type: '$this' (current memory), "
+                   "'$previous' (user's last memory), '$context' (conversation context)"
+    )
+    count: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="For $context: number of previous memories to include. "
+                   "Only used when ref='$context'."
+    )
+    type: Optional[str] = Field(
+        default=None,
+        description="Relationship type to create. "
+                   "For $previous, defaults to 'FOLLOWS'. "
+                   "For $context, defines how to link context memories."
+    )
+
+    model_config = ConfigDict(
+        extra='forbid',
+        json_schema_extra={
+            "examples": [
+                {"ref": "$this"},
+                {"ref": "$previous", "type": "FOLLOWS"},
+                {"ref": "$context", "count": 5}
+            ]
+        }
+    )
+
+
+class PropertyMatch(BaseModel):
+    """
+    Property matching configuration.
+
+    Defines which property to match on and how.
+    When listed in search.properties, this property becomes a unique identifier.
+
+    **Shorthand Helpers** (recommended for common cases):
+        PropertyMatch.exact("id")                    # Exact match on id
+        PropertyMatch.exact("id", "TASK-123")        # Exact match with specific value
+        PropertyMatch.semantic("title")              # Semantic match with default threshold
+        PropertyMatch.semantic("title", 0.9)         # Semantic match with custom threshold
+        PropertyMatch.semantic("title", value="bug") # Semantic search for "bug"
+        PropertyMatch.fuzzy("name", 0.8)             # Fuzzy match
+
+    **Full Form** (when you need all options):
+        PropertyMatch(name="title", mode="semantic", threshold=0.9, value="auth bug")
+
+    **String Shorthand** (in SearchConfig.properties):
+        properties=["id", "email"]  # Equivalent to [PropertyMatch.exact("id"), PropertyMatch.exact("email")]
+    """
+    name: str = Field(
+        ...,
+        min_length=1,
+        description="Property name to match on (e.g., 'id', 'email', 'title')"
+    )
+    mode: SearchMode = Field(
+        default=SearchMode.EXACT,
+        description="Matching mode: 'exact' (string match), 'semantic' (embedding similarity), 'fuzzy' (Levenshtein distance)"
+    )
+    threshold: float = Field(
+        default=0.85,
+        ge=0.0,
+        le=1.0,
+        description="Similarity threshold for semantic/fuzzy modes (0.0-1.0). Ignored for exact mode."
+    )
+    value: Optional[Any] = Field(
+        default=None,
+        description="Runtime value override. If set, use this value for matching instead of extracting from content. "
+                   "Useful for memory-level overrides when you know the exact value to search for."
+    )
+
+    model_config = ConfigDict(
+        extra='forbid',
+        json_schema_extra={
+            "examples": [
+                {
+                    "name": "Exact ID match",
+                    "value": {"name": "id", "mode": "exact"}
+                },
+                {
+                    "name": "Semantic title match",
+                    "value": {"name": "title", "mode": "semantic", "threshold": 0.85}
+                },
+                {
+                    "name": "Memory-level with specific value",
+                    "value": {"name": "id", "mode": "exact", "value": "TASK-123"}
+                },
+                {
+                    "name": "Semantic search for specific text",
+                    "value": {"name": "title", "mode": "semantic", "value": "authentication bug"}
+                }
+            ]
+        }
+    )
+
+    # =========================================================================
+    # Shorthand Helpers - Make common cases easy
+    # =========================================================================
+
+    @classmethod
+    def exact(cls, name: str, value: Optional[Any] = None) -> "PropertyMatch":
+        """
+        Create an exact match PropertyMatch.
+
+        Args:
+            name: Property name to match on (e.g., "id", "email")
+            value: Optional specific value to match (for memory-level overrides)
+
+        Examples:
+            PropertyMatch.exact("id")              # Match on id property
+            PropertyMatch.exact("id", "TASK-123")  # Match id = "TASK-123"
+        """
+        return cls(name=name, mode=SearchMode.EXACT, value=value)
+
+    @classmethod
+    def semantic(
+        cls,
+        name: str,
+        threshold: float = 0.85,
+        value: Optional[Any] = None
+    ) -> "PropertyMatch":
+        """
+        Create a semantic (embedding similarity) match PropertyMatch.
+
+        Args:
+            name: Property name to match on (e.g., "title", "description")
+            threshold: Similarity threshold 0.0-1.0 (default 0.85)
+            value: Optional specific value to search for
+
+        Examples:
+            PropertyMatch.semantic("title")                    # Default threshold
+            PropertyMatch.semantic("title", 0.9)               # Stricter matching
+            PropertyMatch.semantic("title", value="auth bug")  # Search for "auth bug"
+        """
+        return cls(name=name, mode=SearchMode.SEMANTIC, threshold=threshold, value=value)
+
+    @classmethod
+    def fuzzy(
+        cls,
+        name: str,
+        threshold: float = 0.85,
+        value: Optional[Any] = None
+    ) -> "PropertyMatch":
+        """
+        Create a fuzzy (Levenshtein distance) match PropertyMatch.
+
+        Args:
+            name: Property name to match on
+            threshold: Similarity threshold 0.0-1.0 (default 0.85)
+            value: Optional specific value to match
+
+        Examples:
+            PropertyMatch.fuzzy("name")        # Fuzzy match on name
+            PropertyMatch.fuzzy("name", 0.7)   # More lenient fuzzy match
+        """
+        return cls(name=name, mode=SearchMode.FUZZY, threshold=threshold, value=value)
+
+class ConsentLevel(str, Enum):
+    """
+    How the data owner allowed this memory to be stored/used.
+
+    Aligned with Open Memory Object (OMO) standard.
+    """
+    EXPLICIT = "explicit"   # User explicitly agreed to store
+    IMPLICIT = "implicit"   # Inferred from usage context (default)
+    TERMS = "terms"         # Covered by Terms of Service
+    NONE = "none"          # No consent recorded
+
+
+class RiskLevel(str, Enum):
+    """
+    Post-ingest safety assessment of memory content.
+
+    Aligned with Open Memory Object (OMO) standard.
+    """
+    NONE = "none"           # Safe content (default)
+    SENSITIVE = "sensitive" # Contains PII, financial, health info
+    FLAGGED = "flagged"     # Requires human review before retrieval
+
+
+class SearchConfig(BaseModel):
+    """
+    Configuration for finding/selecting existing nodes.
+
+    Defines which properties to match on and how, in priority order.
+    The first matching property wins.
+
+    **String Shorthand** (simple cases - converts to exact match):
+        SearchConfig(properties=["id", "email"])
+        # Equivalent to:
+        SearchConfig(properties=[PropertyMatch.exact("id"), PropertyMatch.exact("email")])
+
+    **Mixed Form** (combine strings and PropertyMatch):
+        SearchConfig(properties=[
+            "id",                                    # String -> exact match
+            PropertyMatch.semantic("title", 0.9)     # Full control
+        ])
+
+    **Full Form** (maximum control):
+        SearchConfig(properties=[
+            PropertyMatch(name="id", mode="exact"),
+            PropertyMatch(name="title", mode="semantic", threshold=0.85)
+        ])
+
+    **To select a specific node by ID**:
+        SearchConfig(properties=[PropertyMatch.exact("id", "TASK-123")])
+    """
+
+    # === PROPERTY-BASED MATCHING ===
+    properties: Optional[List[PropertyMatch]] = Field(
+        default=None,
+        description="Properties to match on, in priority order (first match wins). "
+                   "Accepts strings (converted to exact match) or PropertyMatch objects. "
+                   "Use PropertyMatch with 'value' field for specific node selection."
+    )
+
+    # === RELATIONSHIP-BASED MATCHING (via_relationship) ===
+    via_relationship: Optional[List["RelationshipMatch"]] = Field(
+        default=None,
+        description="Search for nodes via their relationships. "
+                   "Example: Find tasks assigned to a specific person. "
+                   "Each RelationshipMatch specifies edge_type, target_type, and target_search. "
+                   "Multiple relationship matches are ANDed together."
+    )
+
+    # === DEFAULT SETTINGS ===
+    mode: SearchMode = Field(
+        default=SearchMode.SEMANTIC,
+        description="Default search mode when property doesn't specify one. "
+                   "'semantic' (vector similarity), 'exact' (property match), 'fuzzy' (partial match)."
+    )
+    threshold: float = Field(
+        default=0.85,
+        ge=0.0,
+        le=1.0,
+        description="Default similarity threshold for semantic/fuzzy matching (0.0-1.0). "
+                   "Used when property doesn't specify its own threshold."
+    )
+
+    @field_validator('properties', mode='before')
+    @classmethod
+    def normalize_properties(cls, v):
+        """
+        Convert string shorthand to PropertyMatch objects.
+
+        Allows:
+            properties=["id", "email"]  # Strings -> exact match
+            properties=[PropertyMatch.semantic("title")]  # Full objects
+            properties=["id", PropertyMatch.semantic("title")]  # Mixed
+        """
+        if v is None:
+            return v
+        if not isinstance(v, list):
+            return v
+
+        normalized = []
+        for item in v:
+            if isinstance(item, str):
+                # String shorthand -> exact match PropertyMatch
+                normalized.append(PropertyMatch(name=item, mode=SearchMode.EXACT))
+            elif isinstance(item, dict):
+                # Dict -> PropertyMatch (Pydantic will validate)
+                normalized.append(PropertyMatch(**item))
+            elif isinstance(item, PropertyMatch):
+                # Already a PropertyMatch
+                normalized.append(item)
+            else:
+                # Let Pydantic handle validation error
+                normalized.append(item)
+        return normalized
+
+    model_config = ConfigDict(
+        extra='forbid',
+        json_schema_extra={
+            "examples": [
+                {
+                    "name": "Schema Level - Multiple Match Strategies",
+                    "summary": "Try exact ID first, then semantic title",
+                    "value": {
+                        "properties": [
+                            {"name": "id", "mode": "exact"},
+                            {"name": "title", "mode": "semantic", "threshold": 0.85}
+                        ]
+                    }
+                },
+                {
+                    "name": "Memory Level - Select Specific Node",
+                    "summary": "Use PropertyMatch with value for direct selection",
+                    "value": {
+                        "properties": [
+                            {"name": "id", "mode": "exact", "value": "proj_123"}
+                        ]
+                    }
+                },
+                {
+                    "name": "Semantic Search with Value",
+                    "summary": "Search for nodes matching a description",
+                    "value": {
+                        "properties": [
+                            {"name": "title", "mode": "semantic", "value": "authentication bug"}
+                        ]
+                    }
+                },
+                {
+                    "name": "Person Matching",
+                    "summary": "Try email first, then name",
+                    "value": {
+                        "properties": [
+                            {"name": "email", "mode": "exact"},
+                            {"name": "name", "mode": "semantic", "threshold": 0.90}
+                        ]
+                    }
+                },
+                {
+                    "name": "Via Relationship - Find nodes through edges",
+                    "summary": "Find tasks via their ASSIGNED_TO relationship to Person",
+                    "value": {
+                        "via_relationship": [
+                            {
+                                "edge_type": "ASSIGNED_TO",
+                                "target_type": "Person",
+                                "target_search": {
+                                    "properties": [{"name": "email", "mode": "exact", "value": "alice@example.com"}]
+                                }
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+    )
+
+
+class RelationshipMatch(BaseModel):
+    """
+    Search for nodes via their relationships (for via_relationship in SearchConfig).
+
+    Enables finding nodes based on their connections to other nodes.
+    For example: "Find all Tasks assigned to person with email alice@example.com"
+
+    **Use Cases:**
+    - Find nodes connected to a specific node
+    - Navigate graph relationships during search
+    - Filter nodes by their relationship targets
+
+    **Example:**
+        RelationshipMatch(
+            edge_type="ASSIGNED_TO",
+            target_type="Person",
+            target_search=SearchConfig(properties=[
+                PropertyMatch.exact("email", "alice@example.com")
+            ])
+        )
+    """
+
+    edge_type: str = Field(
+        ...,
+        min_length=1,
+        description="The relationship type to traverse (e.g., 'ASSIGNED_TO', 'BELONGS_TO')"
+    )
+
+    target_type: str = Field(
+        ...,
+        min_length=1,
+        description="The target node type at the end of the relationship (e.g., 'Person', 'Project')"
+    )
+
+    target_search: "SearchConfig" = Field(
+        ...,
+        description="Search configuration for finding the target node. "
+                   "Uses the same PropertyMatch-based search as direct node search."
+    )
+
+    direction: Literal["outgoing", "incoming"] = Field(
+        default="outgoing",
+        description="Direction of the relationship from the node being searched. "
+                   "'outgoing': node --edge--> target (default). "
+                   "'incoming': target --edge--> node."
+    )
+
+    model_config = ConfigDict(
+        extra='forbid',
+        json_schema_extra={
+            "examples": [
+                {
+                    "name": "Find via ASSIGNED_TO",
+                    "summary": "Find nodes assigned to a specific person",
+                    "value": {
+                        "edge_type": "ASSIGNED_TO",
+                        "target_type": "Person",
+                        "target_search": {
+                            "properties": [{"name": "email", "mode": "exact", "value": "alice@example.com"}]
+                        }
+                    }
+                },
+                {
+                    "name": "Find via BELONGS_TO (incoming)",
+                    "summary": "Find project that tasks belong to",
+                    "value": {
+                        "edge_type": "BELONGS_TO",
+                        "target_type": "Task",
+                        "target_search": {
+                            "properties": [{"name": "id", "mode": "exact"}]
+                        },
+                        "direction": "incoming"
+                    }
+                }
+            ]
+        }
+    )
+
+
+# ============================================================================
+# Property Value Types for NodeConstraint.set
+# ============================================================================
+
+class TextMode(str, Enum):
+    """How to handle text/description property updates."""
+    REPLACE = "replace"  # Overwrite existing value (default)
+    APPEND = "append"    # Add to existing value
+    MERGE = "merge"      # LLM reads existing + generates new including both
+
+
+class PropertyValue(BaseModel):
+    """
+    Configuration for a property value in NodeConstraint.set.
+
+    Supports two modes:
+    1. Exact value: Just pass the value directly (e.g., "done", 123, True)
+    2. Auto-extract: {"mode": "auto"} - LLM extracts from memory content
+
+    For text properties, use text_mode to control how updates are applied.
+    """
+
+    mode: Literal["auto"] = Field(
+        default="auto",
+        description="'auto': LLM extracts value from memory content."
+    )
+
+    text_mode: TextMode = Field(
+        default=TextMode.REPLACE,
+        description="For text properties: 'replace' (overwrite), 'append' (add to), "
+                   "'merge' (LLM combines existing + new)."
+    )
+
+    model_config = ConfigDict(
+        extra='forbid',
+        json_schema_extra={
+            "examples": [
+                {"mode": "auto"},
+                {"mode": "auto", "text_mode": "merge"}
+            ]
+        }
+    )
+
+
+# Type alias for set field: either exact value or PropertyValue config
+SetValue = Union[str, int, float, bool, List[Any], Dict[str, Any], PropertyValue]
+
+
+class NodeConstraint(BaseModel):
+    """
+    Policy for how nodes of a specific type should be handled.
+
+    Used in two places:
+    1. **Schema level**: Inside `UserNodeType.constraint` - `node_type` is implicit from parent
+    2. **Memory level**: In `memory_policy.node_constraints[]` - `node_type` is required
+
+    Node constraints allow developers to control:
+    - Which node types can be created vs. linked
+    - How to find/select existing nodes (via `search`)
+    - What property values to set (exact or auto-extracted)
+    - When to apply the constraint (conditional with logical operators)
+
+    **The `search` field** handles node selection:
+    - Uses PropertyMatch list to define unique identifiers and matching strategy
+    - Example: `{"properties": [{"name": "id", "mode": "exact"}, {"name": "title", "mode": "semantic"}]}`
+    - For direct selection, use PropertyMatch with value: `{"name": "id", "mode": "exact", "value": "proj_123"}`
+
+    **The `set` field** controls property values:
+    - Exact value: `{"status": "done"}` - sets exact value
+    - Auto-extract: `{"status": {"mode": "auto"}}` - LLM extracts from content
+
+    **The `when` field** supports logical operators:
+    - Simple: `{"priority": "high"}`
+    - AND: `{"_and": [{"priority": "high"}, {"status": "active"}]}`
+    - OR: `{"_or": [{"status": "active"}, {"status": "pending"}]}`
+    - NOT: `{"_not": {"status": "completed"}}`
+    - Complex: `{"_and": [{"priority": "high"}, {"_or": [{"status": "active"}, {"urgent": true}]}]}`
+    """
+    # === WHAT ===
+    node_type: Optional[str] = Field(
+        default=None,
+        min_length=1,
+        description="Node type this constraint applies to (e.g., 'Task', 'Project', 'Person'). "
+                   "Optional at schema level (implicit from parent UserNodeType), "
+                   "required at memory level (in memory_policy.node_constraints)."
+    )
+
+    # === WHEN (conditional application with logical operators) ===
+    when: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Condition for when this constraint applies. "
+                   "Supports logical operators: '_and', '_or', '_not'. "
+                   "Examples: "
+                   "Simple: {'priority': 'high'} - matches when priority equals 'high'. "
+                   "AND: {'_and': [{'priority': 'high'}, {'status': 'active'}]} - all must match. "
+                   "OR: {'_or': [{'status': 'active'}, {'status': 'pending'}]} - any must match. "
+                   "NOT: {'_not': {'status': 'completed'}} - negation. "
+                   "Complex: {'_and': [{'priority': 'high'}, {'_or': [{'status': 'active'}, {'urgent': true}]}]}"
+    )
+
+    # === CREATION POLICY (renamed from auto/never to upsert/lookup) ===
+    create: Literal["upsert", "lookup", "auto", "never"] = Field(
+        default="upsert",
+        description="'upsert': Create if not found via search (default). "
+                   "'lookup': Only link to existing nodes (controlled vocabulary). "
+                   "Deprecated aliases: 'auto' -> 'upsert', 'never' -> 'lookup'."
+    )
+
+    # === ON_MISS BEHAVIOR (explicit resolution policy) ===
+    on_miss: Optional[Literal["create", "ignore", "error"]] = Field(
+        default=None,
+        description="Explicit behavior when no match found via search. "
+                   "'create': create new node (same as upsert). "
+                   "'ignore': skip node creation (same as lookup). "
+                   "'error': raise error if node not found. "
+                   "If specified, overrides 'create' field."
+    )
+
+    # === LINK-ONLY SHORTHAND (DEPRECATED: Use create='lookup' instead) ===
+    link_only: bool = Field(
+        default=False,
+        description="DEPRECATED: Use create='lookup' instead. "
+                   "Shorthand for create='lookup'. When True, only links to existing nodes (controlled vocabulary). "
+                   "Equivalent to @lookup decorator in schema definitions."
+    )
+
+    # === NODE SELECTION (property-based matching) ===
+    search: Optional[SearchConfig] = Field(
+        default=None,
+        description="How to find/select existing nodes. Uses PropertyMatch list to define: "
+                   "1. Which properties are unique identifiers "
+                   "2. How to match on each (exact, semantic, fuzzy) "
+                   "3. Order of matching (first match wins). "
+                   "Example: {'properties': [{'name': 'id', 'mode': 'exact'}, {'name': 'title', 'mode': 'semantic'}]}. "
+                   "For direct node selection, use PropertyMatch with value: "
+                   "{'properties': [{'name': 'id', 'mode': 'exact', 'value': 'proj_123'}]}"
+    )
+
+    # === PROPERTY VALUES (unified API) ===
+    set: Optional[Dict[str, SetValue]] = Field(
+        default=None,
+        description="Set property values on nodes. Supports: "
+                   "1. Exact value: {'status': 'done'} - sets exact value. "
+                   "2. Auto-extract: {'status': {'mode': 'auto'}} - LLM extracts from content. "
+                   "3. Text mode: {'summary': {'mode': 'auto', 'text_mode': 'merge'}} - controls text updates. "
+                   "For text properties, text_mode can be 'replace', 'append', or 'merge'."
+    )
+
+    model_config = ConfigDict(
+        extra='forbid',
+        json_schema_extra={
+            "examples": [
+                {
+                    "name": "Schema Level - Task with Multiple Match Strategies",
+                    "summary": "Define unique identifiers for Task nodes (node_type implicit at schema level)",
+                    "value": {
+                        "search": {
+                            "properties": [
+                                {"name": "id", "mode": "exact"},
+                                {"name": "title", "mode": "semantic", "threshold": 0.85}
+                            ]
+                        },
+                        "create": "auto"
+                    }
+                },
+                {
+                    "name": "Memory Level - Select Specific Node",
+                    "summary": "Use PropertyMatch with value for direct selection",
+                    "value": {
+                        "node_type": "Task",
+                        "search": {
+                            "properties": [
+                                {"name": "id", "mode": "exact", "value": "TASK-123"}
+                            ]
+                        },
+                        "set": {"status": {"mode": "auto"}}
+                    }
+                },
+                {
+                    "name": "Memory Level - Semantic Search with Value",
+                    "summary": "Search for nodes matching a description",
+                    "value": {
+                        "node_type": "Task",
+                        "search": {
+                            "properties": [
+                                {"name": "title", "mode": "semantic", "value": "authentication bug"}
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Controlled Vocabulary with Auto-Extract",
+                    "summary": "Link to existing nodes only, update properties from AI",
+                    "value": {
+                        "node_type": "Person",
+                        "create": "never",
+                        "search": {
+                            "properties": [
+                                {"name": "email", "mode": "exact"},
+                                {"name": "name", "mode": "semantic", "threshold": 0.90}
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Conditional with Logical Operators",
+                    "summary": "Apply constraint only when conditions match",
+                    "value": {
+                        "node_type": "Task",
+                        "when": {
+                            "_and": [
+                                {"priority": "high"},
+                                {"_not": {"status": "completed"}}
+                            ]
+                        },
+                        "create": "never",
+                        "set": {"urgent": True}
+                    }
+                },
+                {
+                    "name": "Text Merge Mode",
+                    "summary": "Merge new content with existing text",
+                    "value": {
+                        "node_type": "Document",
+                        "set": {
+                            "summary": {"mode": "auto", "text_mode": "merge"}
+                        }
+                    }
+                }
+            ]
+        }
+    )
+
+    # =========================================================================
+    # Validators - Better Error Messages
+    # =========================================================================
+
+    @field_validator('when', mode='before')
+    @classmethod
+    def validate_when_operators(cls, v):
+        """
+        Validate the 'when' clause and provide helpful error messages.
+        """
+        if v is None:
+            return v
+        if not isinstance(v, dict):
+            raise ValueError(
+                f"'when' must be a dictionary, got {type(v).__name__}.\n"
+                f"Examples:\n"
+                f"  Simple: {{'priority': 'high'}}\n"
+                f"  AND: {{'_and': [{{'priority': 'high'}}, {{'status': 'active'}}]}}\n"
+                f"  OR: {{'_or': [{{'status': 'active'}}, {{'status': 'pending'}}]}}\n"
+                f"  NOT: {{'_not': {{'status': 'completed'}}}}"
+            )
+
+        # Check for common mistakes
+        valid_operators = {'_and', '_or', '_not'}
+        for key in v.keys():
+            if key.startswith('_') and key not in valid_operators:
+                raise ValueError(
+                    f"Unknown operator '{key}' in 'when' clause.\n"
+                    f"Valid operators: _and, _or, _not\n"
+                    f"Did you mean one of: {', '.join(valid_operators)}?"
+                )
+
+        # Validate operator values
+        if '_and' in v and not isinstance(v['_and'], list):
+            raise ValueError(
+                f"'_and' operator requires a list of conditions.\n"
+                f"Got: {type(v['_and']).__name__}\n"
+                f"Example: {{'_and': [{{'priority': 'high'}}, {{'status': 'active'}}]}}"
+            )
+        if '_or' in v and not isinstance(v['_or'], list):
+            raise ValueError(
+                f"'_or' operator requires a list of conditions.\n"
+                f"Got: {type(v['_or']).__name__}\n"
+                f"Example: {{'_or': [{{'status': 'active'}}, {{'status': 'pending'}}]}}"
+            )
+        if '_not' in v and not isinstance(v['_not'], dict):
+            raise ValueError(
+                f"'_not' operator requires a dictionary condition.\n"
+                f"Got: {type(v['_not']).__name__}\n"
+                f"Example: {{'_not': {{'status': 'completed'}}}}"
+            )
+
+        return v
+
+    @model_validator(mode='after')
+    def apply_resolution_policy(self):
+        """Apply resolution policy based on create/on_miss/link_only fields.
+
+        Priority (highest to lowest):
+        1. on_miss (if specified, maps to create value)
+        2. link_only (if True, sets create='lookup')
+        3. create value with backwards compatibility mapping
+        """
+        # Backwards compatibility: map old values to new
+        create_mapping = {
+            "auto": "upsert",
+            "never": "lookup"
+        }
+
+        current_create = self.create
+
+        # Handle deprecated link_only
+        if self.link_only:
+            object.__setattr__(self, 'create', 'lookup')
+            return self
+
+        # on_miss overrides create if specified
+        if self.on_miss == "create":
+            object.__setattr__(self, 'create', 'upsert')
+        elif self.on_miss == "ignore":
+            object.__setattr__(self, 'create', 'lookup')
+        # on_miss="error" is handled in resolver - keeps current create value
+        elif current_create in create_mapping:
+            # Apply backwards compatibility mapping
+            object.__setattr__(self, 'create', create_mapping[current_create])
+
+        return self
+
+    # =========================================================================
+    # Helper Methods
+    # =========================================================================
+
+    def validate_for_memory_level(self) -> None:
+        """
+        Validate that this constraint is valid for memory-level usage.
+
+        Call this when using NodeConstraint in memory_policy.node_constraints[].
+        Raises ValueError with helpful message if validation fails.
+
+        Example:
+            constraint = NodeConstraint(search=SearchConfig(properties=["id"]))
+            constraint.validate_for_memory_level()  # Raises: node_type is required
+        """
+        if self.node_type is None:
+            raise ValueError(
+                "node_type is required at memory level.\n\n"
+                "You're using NodeConstraint inside memory_policy.node_constraints[].\n"
+                "At memory level, you must specify which node type this constraint applies to.\n\n"
+                "Fix: Add node_type to your constraint:\n"
+                "    NodeConstraint(\n"
+                "        node_type='Task',  # <-- Add this\n"
+                "        search=SearchConfig(properties=['id']),\n"
+                "        ...\n"
+                "    )\n\n"
+                "Note: At schema level (inside UserNodeType.constraint), node_type is implicit\n"
+                "from the parent UserNodeType and should be omitted."
+            )
+
+    # =========================================================================
+    # Shorthand Constructors
+    # =========================================================================
+
+    @classmethod
+    def for_controlled_vocabulary(
+        cls,
+        node_type: str,
+        match_on: List[Union[str, PropertyMatch]],
+        when: Optional[Dict[str, Any]] = None
+    ) -> "NodeConstraint":
+        """
+        Create a controlled vocabulary constraint (never create new nodes).
+
+        Use this when you only want to link to existing nodes, not create new ones.
+        Common for: Person, Category, Tag, SecurityPolicy, etc.
+
+        Args:
+            node_type: The node type (e.g., "Person", "Category")
+            match_on: Properties to match on (strings or PropertyMatch objects)
+            when: Optional conditional clause
+
+        Example:
+            NodeConstraint.for_controlled_vocabulary(
+                "Person",
+                ["email", PropertyMatch.semantic("name", 0.9)]
+            )
+        """
+        return cls(
+            node_type=node_type,
+            create="never",
+            search=SearchConfig(properties=match_on),
+            when=when
+        )
+
+    @classmethod
+    def for_update(
+        cls,
+        node_type: str,
+        node_id: str,
+        set_properties: Optional[Dict[str, SetValue]] = None
+    ) -> "NodeConstraint":
+        """
+        Create a constraint to update a specific node by ID.
+
+        Use this when you know the exact node ID and want to update it.
+
+        Args:
+            node_type: The node type (e.g., "Task", "Project")
+            node_id: The exact node ID to update
+            set_properties: Properties to set (exact values or {"mode": "auto"})
+
+        Example:
+            NodeConstraint.for_update(
+                "Task",
+                "TASK-123",
+                {"status": {"mode": "auto"}, "priority": "high"}
+            )
+        """
+        return cls(
+            node_type=node_type,
+            search=SearchConfig(properties=[PropertyMatch.exact("id", node_id)]),
+            set=set_properties
+        )
+
+    @classmethod
+    def for_semantic_search(
+        cls,
+        node_type: str,
+        property_name: str,
+        search_value: str,
+        threshold: float = 0.85,
+        set_properties: Optional[Dict[str, SetValue]] = None
+    ) -> "NodeConstraint":
+        """
+        Create a constraint to find and update nodes via semantic search.
+
+        Use this when you want to find nodes by semantic similarity.
+
+        Args:
+            node_type: The node type (e.g., "Task")
+            property_name: Property to search on (e.g., "title")
+            search_value: The text to search for
+            threshold: Similarity threshold (default 0.85)
+            set_properties: Properties to set on matched node
+
+        Example:
+            NodeConstraint.for_semantic_search(
+                "Task",
+                "title",
+                "authentication bug",
+                threshold=0.8,
+                set_properties={"status": {"mode": "auto"}}
+            )
+        """
+        return cls(
+            node_type=node_type,
+            search=SearchConfig(properties=[
+                PropertyMatch.semantic(property_name, threshold, value=search_value)
+            ]),
+            set=set_properties
+        )
+
+
+class EdgeConstraint(BaseModel):
+    """
+    Policy for how edges/relationships of a specific type should be handled.
+
+    Used in two places:
+    1. **Schema level**: Inside `UserRelationshipType.constraint` - `edge_type` is implicit from parent
+    2. **Memory level**: In `memory_policy.edge_constraints[]` - `edge_type` is required
+
+    Edge constraints allow developers to control:
+    - Which edge types can be created vs. linked to existing targets
+    - How to find/select target nodes (via `search`)
+    - What edge property values to set (exact or auto-extracted)
+    - When to apply the constraint (conditional with logical operators)
+    - Filter by source/target node types
+
+    **The `search` field** handles target node selection:
+    - Uses SearchConfig to define how to find existing target nodes
+    - Example: `{"properties": [{"name": "name", "mode": "semantic"}]}`
+    - For controlled vocabulary: find existing target, don't create new
+
+    **The `set` field** controls edge property values:
+    - Exact value: `{"weight": 1.0}` - sets exact value
+    - Auto-extract: `{"reason": {"mode": "auto"}}` - LLM extracts from content
+
+    **The `when` field** supports logical operators (same as NodeConstraint):
+    - Simple: `{"severity": "high"}`
+    - AND: `{"_and": [{"severity": "high"}, {"confirmed": true}]}`
+    - OR: `{"_or": [{"type": "MITIGATES"}, {"type": "PREVENTS"}]}`
+    - NOT: `{"_not": {"status": "deprecated"}}`
+    """
+
+    # === WHAT EDGE THIS APPLIES TO ===
+    edge_type: Optional[str] = Field(
+        default=None,
+        min_length=1,
+        description="Edge/relationship type this constraint applies to (e.g., 'MITIGATES', 'ASSIGNED_TO'). "
+                   "Optional at schema level (implicit from parent UserRelationshipType), "
+                   "required at memory level (in memory_policy.edge_constraints)."
+    )
+
+    # === FILTER BY NODE TYPES ===
+    source_type: Optional[str] = Field(
+        default=None,
+        description="Filter: only apply when source node is of this type. "
+                   "Example: source_type='SecurityBehavior' - only applies to edges from SecurityBehavior nodes."
+    )
+    target_type: Optional[str] = Field(
+        default=None,
+        description="Filter: only apply when target node is of this type. "
+                   "Example: target_type='TacticDef' - only applies to edges targeting TacticDef nodes."
+    )
+    direction: Literal["outgoing", "incoming", "both"] = Field(
+        default="outgoing",
+        description="Direction of edges this constraint applies to. "
+                   "'outgoing': edges where current node is source (default). "
+                   "'incoming': edges where current node is target. "
+                   "'both': applies in either direction."
+    )
+
+    # === WHEN (conditional application with logical operators) ===
+    when: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Condition for when this constraint applies. "
+                   "Supports logical operators: '_and', '_or', '_not'. "
+                   "Applied to edge properties or context. "
+                   "Example: {'_and': [{'severity': 'high'}, {'_not': {'status': 'deprecated'}}]}"
+    )
+
+    # === CREATION POLICY (renamed from auto/never to upsert/lookup) ===
+    create: Literal["upsert", "lookup", "auto", "never"] = Field(
+        default="upsert",
+        description="'upsert': Create target node if not found via search (default). "
+                   "'lookup': Only link to existing target nodes (controlled vocabulary). "
+                   "When 'lookup', edges to non-existing targets are skipped. "
+                   "Deprecated aliases: 'auto' -> 'upsert', 'never' -> 'lookup'."
+    )
+
+    # === ON_MISS BEHAVIOR (explicit resolution policy) ===
+    on_miss: Optional[Literal["create", "ignore", "error"]] = Field(
+        default=None,
+        description="Explicit behavior when no target match found via search. "
+                   "'create': create new target node (same as upsert). "
+                   "'ignore': skip edge creation (same as lookup). "
+                   "'error': raise error if target not found. "
+                   "If specified, overrides 'create' field."
+    )
+
+    # === LINK-ONLY SHORTHAND (DEPRECATED: Use create='lookup' instead) ===
+    link_only: bool = Field(
+        default=False,
+        description="DEPRECATED: Use create='lookup' instead. "
+                   "Shorthand for create='lookup'. When True, only links to existing target nodes. "
+                   "Equivalent to @lookup decorator in schema definitions."
+    )
+
+    # === TARGET NODE SELECTION ===
+    search: Optional[SearchConfig] = Field(
+        default=None,
+        description="How to find/select existing target nodes for this edge. "
+                   "Uses SearchConfig to define matching strategy. "
+                   "Example: {'properties': [{'name': 'name', 'mode': 'semantic', 'threshold': 0.90}]}. "
+                   "For controlled vocabulary (create='never'), this defines how to find valid targets."
+    )
+
+    # === EDGE PROPERTY VALUES ===
+    set: Optional[Dict[str, SetValue]] = Field(
+        default=None,
+        description="Set property values on edges. Supports: "
+                   "1. Exact value: {'weight': 1.0} - sets exact value. "
+                   "2. Auto-extract: {'reason': {'mode': 'auto'}} - LLM extracts from content. "
+                   "Edge properties are useful for relationship metadata (weight, timestamp, reason, etc.)."
+    )
+
+    model_config = ConfigDict(
+        extra='forbid',
+        json_schema_extra={
+            "examples": [
+                {
+                    "name": "Schema Level - Controlled Vocabulary Edge",
+                    "summary": "Link to existing targets only, don't create new (edge_type implicit)",
+                    "value": {
+                        "create": "never",
+                        "search": {
+                            "properties": [
+                                {"name": "name", "mode": "semantic", "threshold": 0.90}
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Memory Level - MITIGATES Edge Constraint",
+                    "summary": "SecurityBehavior->MITIGATES->TacticDef with controlled vocabulary",
+                    "value": {
+                        "edge_type": "MITIGATES",
+                        "source_type": "SecurityBehavior",
+                        "target_type": "TacticDef",
+                        "create": "never",
+                        "search": {
+                            "properties": [
+                                {"name": "name", "mode": "semantic", "threshold": 0.90}
+                            ]
+                        }
+                    }
+                },
+                {
+                    "name": "Edge with Auto-Extracted Properties",
+                    "summary": "Set edge properties from content",
+                    "value": {
+                        "edge_type": "ASSIGNED_TO",
+                        "set": {
+                            "assigned_date": {"mode": "auto"},
+                            "priority": {"mode": "auto"}
+                        }
+                    }
+                },
+                {
+                    "name": "Conditional Edge Constraint",
+                    "summary": "Apply constraint only for high-severity edges",
+                    "value": {
+                        "edge_type": "MITIGATES",
+                        "when": {
+                            "_and": [
+                                {"severity": "high"},
+                                {"_not": {"status": "deprecated"}}
+                            ]
+                        },
+                        "create": "never"
+                    }
+                }
+            ]
+        }
+    )
+
+    # =========================================================================
+    # Validators
+    # =========================================================================
+
+    @field_validator('when', mode='before')
+    @classmethod
+    def validate_when_operators(cls, v):
+        """Validate the 'when' clause (same logic as NodeConstraint)."""
+        if v is None:
+            return v
+        if not isinstance(v, dict):
+            raise ValueError(
+                f"'when' must be a dictionary, got {type(v).__name__}.\n"
+                f"Examples:\n"
+                f"  Simple: {{'severity': 'high'}}\n"
+                f"  AND: {{'_and': [{{'severity': 'high'}}, {{'confirmed': true}}]}}\n"
+                f"  OR: {{'_or': [{{'type': 'MITIGATES'}}, {{'type': 'PREVENTS'}}]}}"
+            )
+
+        valid_operators = {'_and', '_or', '_not'}
+        for key in v.keys():
+            if key.startswith('_') and key not in valid_operators:
+                raise ValueError(
+                    f"Unknown operator '{key}' in 'when' clause.\n"
+                    f"Valid operators: _and, _or, _not"
+                )
+
+        if '_and' in v and not isinstance(v['_and'], list):
+            raise ValueError("'_and' operator requires a list of conditions.")
+        if '_or' in v and not isinstance(v['_or'], list):
+            raise ValueError("'_or' operator requires a list of conditions.")
+        if '_not' in v and not isinstance(v['_not'], dict):
+            raise ValueError("'_not' operator requires a dictionary condition.")
+
+        return v
+
+    @model_validator(mode='after')
+    def apply_resolution_policy(self):
+        """Apply resolution policy based on create/on_miss/link_only fields.
+
+        Priority (highest to lowest):
+        1. on_miss (if specified, maps to create value)
+        2. link_only (if True, sets create='lookup')
+        3. create value with backwards compatibility mapping
+        """
+        # Backwards compatibility: map old values to new
+        create_mapping = {
+            "auto": "upsert",
+            "never": "lookup"
+        }
+
+        current_create = self.create
+
+        # Handle deprecated link_only
+        if self.link_only:
+            object.__setattr__(self, 'create', 'lookup')
+            return self
+
+        # on_miss overrides create if specified
+        if self.on_miss == "create":
+            object.__setattr__(self, 'create', 'upsert')
+        elif self.on_miss == "ignore":
+            object.__setattr__(self, 'create', 'lookup')
+        # on_miss="error" is handled in resolver - keeps current create value
+        elif current_create in create_mapping:
+            # Apply backwards compatibility mapping
+            object.__setattr__(self, 'create', create_mapping[current_create])
+
+        return self
+
+    # =========================================================================
+    # Helper Methods
+    # =========================================================================
+
+    def validate_for_memory_level(self) -> None:
+        """
+        Validate that this constraint is valid for memory-level usage.
+
+        Call this when using EdgeConstraint in memory_policy.edge_constraints[].
+        Raises ValueError with helpful message if validation fails.
+        """
+        if self.edge_type is None:
+            raise ValueError(
+                "edge_type is required at memory level.\n\n"
+                "You're using EdgeConstraint inside memory_policy.edge_constraints[].\n"
+                "At memory level, you must specify which edge type this constraint applies to.\n\n"
+                "Fix: Add edge_type to your constraint:\n"
+                "    EdgeConstraint(\n"
+                "        edge_type='MITIGATES',  # <-- Add this\n"
+                "        search=SearchConfig(properties=['name']),\n"
+                "        create='never'\n"
+                "    )\n\n"
+                "Note: At schema level (inside UserRelationshipType.constraint), edge_type is implicit\n"
+                "from the parent UserRelationshipType and should be omitted."
+            )
+
+    # =========================================================================
+    # Shorthand Constructors
+    # =========================================================================
+
+    @classmethod
+    def for_controlled_vocabulary(
+        cls,
+        edge_type: str,
+        target_search: List[Union[str, PropertyMatch]],
+        source_type: Optional[str] = None,
+        target_type: Optional[str] = None,
+        when: Optional[Dict[str, Any]] = None
+    ) -> "EdgeConstraint":
+        """
+        Create a controlled vocabulary edge constraint (never create new target nodes).
+
+        Use this when you only want to link to existing target nodes, not create new ones.
+        Common for: taxonomy links, reference data relationships, controlled terms.
+
+        Args:
+            edge_type: The edge type (e.g., "MITIGATES", "CATEGORIZED_AS")
+            target_search: Properties to match target nodes (strings or PropertyMatch objects)
+            source_type: Optional filter by source node type
+            target_type: Optional filter by target node type
+            when: Optional conditional clause
+
+        Example:
+            EdgeConstraint.for_controlled_vocabulary(
+                "MITIGATES",
+                [PropertyMatch.semantic("name", 0.90)],
+                source_type="SecurityBehavior",
+                target_type="TacticDef"
+            )
+        """
+        return cls(
+            edge_type=edge_type,
+            source_type=source_type,
+            target_type=target_type,
+            create="never",
+            search=SearchConfig(properties=target_search),
+            when=when
+        )
+
+    @classmethod
+    def for_semantic_target_match(
+        cls,
+        edge_type: str,
+        property_name: str,
+        threshold: float = 0.85,
+        source_type: Optional[str] = None,
+        target_type: Optional[str] = None
+    ) -> "EdgeConstraint":
+        """
+        Create an edge constraint with semantic matching on target nodes.
+
+        Args:
+            edge_type: The edge type (e.g., "REFERENCES", "RELATED_TO")
+            property_name: Target node property to match semantically
+            threshold: Similarity threshold (default 0.85)
+            source_type: Optional filter by source node type
+            target_type: Optional filter by target node type
+
+        Example:
+            EdgeConstraint.for_semantic_target_match(
+                "REFERENCES",
+                "title",
+                threshold=0.80
+            )
+        """
+        return cls(
+            edge_type=edge_type,
+            source_type=source_type,
+            target_type=target_type,
+            search=SearchConfig(properties=[
+                PropertyMatch.semantic(property_name, threshold)
+            ])
+        )
+
+
+class NodeSpec(BaseModel):
+    """
+    Specification for a node in manual mode.
+
+    Used when mode='manual' to define exact nodes to create.
+    """
+    id: str = Field(
+        ...,
+        min_length=1,
+        description="Unique identifier for this node"
+    )
+    type: str = Field(
+        ...,
+        min_length=1,
+        description="Node type/label (e.g., 'Transaction', 'Product', 'Person')"
+    )
+    properties: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Properties for this node"
+    )
+
+    model_config = ConfigDict(
+        extra='forbid',
+        json_schema_extra={
+            "examples": [
+                {
+                    "id": "txn_12345",
+                    "type": "Transaction",
+                    "properties": {"amount": 5.50, "product": "Latte", "timestamp": "2026-01-21T10:30:00Z"}
+                }
+            ]
+        }
+    )
+
+
+class RelationshipSpec(BaseModel):
+    """
+    Specification for a relationship in manual mode.
+
+    Used when mode='manual' to define exact relationships between nodes.
+    """
+    source: str = Field(
+        ...,
+        min_length=1,
+        description="ID of the source node"
+    )
+    target: str = Field(
+        ...,
+        min_length=1,
+        description="ID of the target node"
+    )
+    type: str = Field(
+        ...,
+        min_length=1,
+        description="Relationship type (e.g., 'PURCHASED', 'WORKS_AT', 'ASSIGNED_TO')"
+    )
+    properties: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Optional properties for this relationship"
+    )
+
+    model_config = ConfigDict(
+        extra='forbid',
+        json_schema_extra={
+            "examples": [
+                {
+                    "source": "txn_12345",
+                    "target": "product_latte",
+                    "type": "PURCHASED"
+                }
+            ]
+        }
+    )
+
+
+class MemoryPolicy(BaseModel):
+    """
+    Unified memory processing policy.
+
+    This is the SINGLE source of truth for how a memory should be processed,
+    combining graph generation control AND OMO (Open Memory Object) safety standards.
+
+    **Graph Generation Modes:**
+    - auto: LLM extracts entities freely (default)
+    - manual: Developer provides exact nodes (no LLM extraction)
+
+    **OMO Safety Standards:**
+    - consent: How data owner allowed storage (explicit, implicit, terms, none)
+    - risk: Safety assessment (none, sensitive, flagged)
+    - acl: Access control list for read/write permissions
+
+    **Schema Integration:**
+    - schema_id: Reference a schema that may have its own default memory_policy
+    - Schema-level policies are merged with request-level (request takes precedence)
+    """
+
+    # =========================================================================
+    # GRAPH GENERATION
+    # =========================================================================
+
+    mode: PolicyMode = Field(
+        default=PolicyMode.AUTO,
+        description="How to generate graph from this memory. "
+                   "'auto': LLM extracts entities freely. "
+                   "'manual': You provide exact nodes (no LLM). "
+                   "Note: 'structured' is accepted as deprecated alias for 'manual'."
+    )
+
+    # For MANUAL mode: Direct graph specification
+    nodes: Optional[List[NodeSpec]] = Field(
+        default=None,
+        description="For manual mode: Exact nodes to create (no LLM extraction). "
+                   "Required when mode='manual'. Each node needs id, type, and properties."
+    )
+    relationships: Optional[List[RelationshipSpec]] = Field(
+        default=None,
+        description="Relationships between nodes. Supports special placeholders: "
+                   "'$this' = the Memory node being created, "
+                   "'$previous' = the user's most recent memory. "
+                   "Examples: "
+                   "{source: '$this', target: '$previous', type: 'FOLLOWS'} links to previous memory. "
+                   "{source: '$this', target: 'mem_abc', type: 'REFERENCES'} links to specific memory."
+    )
+
+    # For AUTO mode: Node constraints (policies)
+    node_constraints: Optional[List[NodeConstraint]] = Field(
+        default=None,
+        description="Rules for how LLM-extracted nodes should be created/updated. "
+                   "Used in 'auto' mode when present. Controls creation policy, "
+                   "property forcing, and merge behavior."
+    )
+
+    # For AUTO mode: Edge constraints (policies)
+    edge_constraints: Optional[List["EdgeConstraint"]] = Field(
+        default=None,
+        description="Rules for how LLM-extracted edges/relationships should be created/handled. "
+                   "Used in 'auto' mode when present. Controls: "
+                   "- create: 'auto' (create target if not found) or 'never' (controlled vocabulary) "
+                   "- search: How to find existing target nodes "
+                   "- set: Edge property values (exact or auto-extracted) "
+                   "- source_type/target_type: Filter by connected node types "
+                   "Example: {edge_type: 'MITIGATES', create: 'never', search: {properties: ['name']}}"
+    )
+
+    # Schema reference
+    schema_id: Optional[str] = Field(
+        default=None,
+        description="Reference a UserGraphSchema by ID. The schema's memory_policy "
+                   "(if defined) will be used as defaults, with this request's "
+                   "settings taking precedence."
+    )
+
+    # =========================================================================
+    # MEMORY LINKING - Use 'relationships' field with $this and $previous
+    # =========================================================================
+    #
+    # Memory linking is now done declaratively via the 'relationships' field.
+    # Use these placeholders:
+    #   - '$this': References the Memory node being created
+    #   - '$previous': References the user's most recent memory
+    #
+    # Examples:
+    #   Link to previous: {"source": "$this", "target": "$previous", "type": "FOLLOWS"}
+    #   Link to specific: {"source": "$this", "target": "mem_abc", "type": "REFERENCES"}
+    #
+    # DEPRECATED: link_to_previous_memory and link_to_related_memories have been removed.
+    # Use the relationships field instead for more control over relationship types.
+
+
+    # =========================================================================
+    # OMO SAFETY STANDARDS
+    # =========================================================================
+
+    consent: ConsentLevel = Field(
+        default=ConsentLevel.IMPLICIT,
+        description="How the data owner allowed this memory to be stored/used. "
+                   "'explicit': User explicitly agreed. "
+                   "'implicit': Inferred from context (default). "
+                   "'terms': Covered by Terms of Service. "
+                   "'none': No consent - graph extraction will be SKIPPED."
+    )
+
+    risk: RiskLevel = Field(
+        default=RiskLevel.NONE,
+        description="Safety assessment for this memory. "
+                   "'none': Safe content (default). "
+                   "'sensitive': Contains PII or sensitive info. "
+                   "'flagged': Requires review - ACL will be restricted to owner only."
+    )
+
+    acl: Optional["ACLConfig"] = Field(
+        default=None,
+        description="Access control list (ACL) for this memory and its graph nodes. "
+                   "Conforms to Open Memory Object (OMO) standard. "
+                   "Use entity prefixes: 'external_user:', 'organization:', 'namespace:', "
+                   "'workspace:', 'role:', 'user:'. "
+                   "Example: acl=ACLConfig(read=['external_user:alice', 'organization:acme'], write=['external_user:alice']). "
+                   "If not provided, defaults based on external_user_id and developer. "
+                   "See: https://github.com/anthropics/open-memory-object"
+    )
+
+    # =========================================================================
+    # VALIDATION
+    # =========================================================================
+
+    @field_validator('mode', mode='before')
+    @classmethod
+    def normalize_mode(cls, v):
+        """
+        Normalize mode value, accepting 'structured' as deprecated alias for 'manual'.
+        """
+        if v == 'structured':
+            # Log deprecation warning (import logger at module level)
+            import logging
+            logging.getLogger(__name__).warning(
+                "mode='structured' is deprecated, use mode='manual' instead. "
+                "This alias will be removed in a future version."
+            )
+            return 'manual'
+        return v
+
+    @field_validator('consent', mode='before')
+    @classmethod
+    def normalize_consent(cls, v):
+        """Convert string to ConsentLevel enum for backwards compatibility."""
+        if v is None:
+            return ConsentLevel.IMPLICIT
+        if isinstance(v, ConsentLevel):
+            return v
+        if isinstance(v, str):
+            try:
+                return ConsentLevel(v.lower())
+            except ValueError:
+                valid = [e.value for e in ConsentLevel]
+                raise ValueError(f"consent must be one of {valid}, got '{v}'")
+        raise ValueError(f"consent must be a string or ConsentLevel, got {type(v)}")
+
+    @field_validator('risk', mode='before')
+    @classmethod
+    def normalize_risk(cls, v):
+        """Convert string to RiskLevel enum for backwards compatibility."""
+        if v is None:
+            return RiskLevel.NONE
+        if isinstance(v, RiskLevel):
+            return v
+        if isinstance(v, str):
+            try:
+                return RiskLevel(v.lower())
+            except ValueError:
+                valid = [e.value for e in RiskLevel]
+                raise ValueError(f"risk must be one of {valid}, got '{v}'")
+        raise ValueError(f"risk must be a string or RiskLevel, got {type(v)}")
+
+    @model_validator(mode='after')
+    def validate_mode_requirements(self):
+        """Validate that mode-specific fields are properly set."""
+        if self.mode == PolicyMode.MANUAL:
+            if not self.nodes:
+                raise ValueError(
+                    "mode='manual' requires 'nodes' to be provided. "
+                    "Use mode='auto' for LLM extraction or provide exact nodes."
+                )
+        return self
+
+    model_config = ConfigDict(
+        extra='forbid',
+        json_schema_extra={
+            "examples": [
+                {
+                    "name": "Auto Mode (Default)",
+                    "summary": "LLM extracts entities freely",
+                    "value": {
+                        "mode": "auto"
+                    }
+                },
+                {
+                    "name": "Manual Mode with Exact Nodes",
+                    "summary": "Developer provides exact graph structure",
+                    "value": {
+                        "mode": "manual",
+                        "nodes": [
+                            {"id": "txn_001", "type": "Transaction", "properties": {"amount": 5.50}}
+                        ],
+                        "relationships": [
+                            {"source": "txn_001", "target": "prod_001", "type": "PURCHASED"}
+                        ]
+                    }
+                },
+                {
+                    "name": "Auto Mode with Constraints",
+                    "summary": "LLM extracts with your rules applied",
+                    "value": {
+                        "mode": "auto",
+                        "node_constraints": [
+                            {
+                                "node_type": "Task",
+                                "create": "never",
+                                "set": {"status": {"mode": "auto", "apply_to": "existing"}}
+                            },
+                            {"node_type": "Person", "create": "never"}
+                        ]
+                    }
+                },
+                {
+                    "name": "Link to Previous Memory",
+                    "summary": "Use $previous placeholder in relationships",
+                    "value": {
+                        "mode": "auto",
+                        "relationships": [
+                            {"source": "$this", "target": "$previous", "type": "FOLLOWS"}
+                        ]
+                    }
+                },
+                {
+                    "name": "With OMO Safety Settings",
+                    "summary": "Explicit consent with restricted access",
+                    "value": {
+                        "mode": "auto",
+                        "consent": "explicit",
+                        "risk": "sensitive",
+                        "acl": {"read": ["user_alice"], "write": ["user_alice"]}
+                    }
+                },
+                {
+                    "name": "Using Schema Defaults",
+                    "summary": "Inherit policy from schema",
+                    "value": {
+                        "schema_id": "schema_project_mgmt_v1"
+                    }
+                }
+            ]
+        }
+    )
+
+
+# ============================================================================
+# OMO (Open Memory Object) Safety Standards
+# ============================================================================
+# ConsentLevel and RiskLevel enums are defined above (before MemoryPolicy)
+# to enable type references. ACLConfig is defined here.
+
+class ACLConfig(BaseModel):
+    """
+    Simplified Access Control List configuration.
+
+    Aligned with Open Memory Object (OMO) standard.
+    See: https://github.com/anthropics/open-memory-object
+
+    **Supported Entity Prefixes:**
+
+    | Prefix | Description | Validation |
+    |--------|-------------|------------|
+    | `user:` | Internal Papr user ID | Validated against Parse users |
+    | `external_user:` | Your app's user ID | Not validated (your responsibility) |
+    | `organization:` | Organization ID | Validated against your organizations |
+    | `namespace:` | Namespace ID | Validated against your namespaces |
+    | `workspace:` | Workspace ID | Validated against your workspaces |
+    | `role:` | Parse role ID | Validated against your roles |
+
+    **Examples:**
+    ```python
+    acl = ACLConfig(
+        read=["external_user:alice_123", "organization:org_acme"],
+        write=["external_user:alice_123"]
+    )
+    ```
+
+    **Validation Rules:**
+    - Internal entities (user, organization, namespace, workspace, role) are validated
+    - External entities (external_user) are NOT validated - your app is responsible
+    - Invalid internal entities will return an error
+    - Unprefixed values default to `external_user:` for backwards compatibility
+    """
+
+    # Supported entity prefixes for ACL
+    INTERNAL_PREFIXES: ClassVar[set] = {"user:", "organization:", "namespace:", "workspace:", "role:"}
+    EXTERNAL_PREFIXES: ClassVar[set] = {"external_user:"}
+    ALL_PREFIXES: ClassVar[set] = INTERNAL_PREFIXES | EXTERNAL_PREFIXES
+
+    read: List[str] = Field(
+        default_factory=list,
+        description="Entity IDs that can read this memory. "
+                   "Format: 'prefix:id' (e.g., 'external_user:alice', 'organization:org_123'). "
+                   "Supported prefixes: user, external_user, organization, namespace, workspace, role. "
+                   "Unprefixed values treated as external_user for backwards compatibility."
+    )
+    write: List[str] = Field(
+        default_factory=list,
+        description="Entity IDs that can write/modify this memory. "
+                   "Format: 'prefix:id' (e.g., 'external_user:alice'). "
+                   "Supported prefixes: user, external_user, organization, namespace, workspace, role."
+    )
+
+    @field_validator('read', 'write', mode='before')
+    @classmethod
+    def normalize_entity_ids(cls, v):
+        """
+        Normalize entity IDs to include prefix.
+        Unprefixed values default to external_user: for backwards compatibility.
+        """
+        if not v:
+            return v
+        normalized = []
+        for entity_id in v:
+            if not isinstance(entity_id, str):
+                continue
+            # Check if already has a valid prefix
+            has_prefix = any(entity_id.startswith(p) for p in cls.ALL_PREFIXES)
+            if has_prefix:
+                normalized.append(entity_id)
+            else:
+                # Default to external_user: for backwards compatibility
+                normalized.append(f"external_user:{entity_id}")
+        return normalized
+
+    @model_validator(mode='after')
+    def validate_entity_format(self):
+        """
+        Validate entity ID format.
+        Internal entities will be validated at request time against the database.
+        """
+        all_entities = (self.read or []) + (self.write or [])
+        for entity_id in all_entities:
+            if ':' not in entity_id:
+                raise ValueError(
+                    f"Invalid ACL entity format: '{entity_id}'. "
+                    f"Expected 'prefix:id' format. Supported prefixes: "
+                    f"{', '.join(sorted(self.ALL_PREFIXES))}"
+                )
+            prefix = entity_id.split(':')[0] + ':'
+            if prefix not in self.ALL_PREFIXES:
+                raise ValueError(
+                    f"Unknown ACL entity prefix: '{prefix}' in '{entity_id}'. "
+                    f"Supported prefixes: {', '.join(sorted(self.ALL_PREFIXES))}"
+                )
+        return self
+
+    def get_internal_entities(self) -> Dict[str, List[str]]:
+        """
+        Extract internal entities that need validation.
+        Returns dict grouped by prefix: {'user': [...], 'organization': [...], ...}
+        """
+        result = {prefix.rstrip(':'): [] for prefix in self.INTERNAL_PREFIXES}
+        for entity_id in (self.read or []) + (self.write or []):
+            for prefix in self.INTERNAL_PREFIXES:
+                if entity_id.startswith(prefix):
+                    entity_type = prefix.rstrip(':')
+                    entity_value = entity_id[len(prefix):]
+                    result[entity_type].append(entity_value)
+        return {k: v for k, v in result.items() if v}  # Remove empty
+
+    def get_external_entities(self) -> List[str]:
+        """
+        Extract external entities (not validated by Papr).
+        """
+        result = []
+        for entity_id in (self.read or []) + (self.write or []):
+            if entity_id.startswith("external_user:"):
+                result.append(entity_id[len("external_user:"):])
+        return result
+
+    def to_granular_acl(self) -> Dict[str, List[str]]:
+        """
+        Convert simplified ACL to granular ACL fields for vector store filtering.
+        Returns dict with keys like 'user_read_access', 'organization_read_access', etc.
+        """
+        granular = {
+            'user_read_access': [],
+            'user_write_access': [],
+            'external_user_read_access': [],
+            'external_user_write_access': [],
+            'organization_read_access': [],
+            'organization_write_access': [],
+            'namespace_read_access': [],
+            'namespace_write_access': [],
+            'workspace_read_access': [],
+            'workspace_write_access': [],
+            'role_read_access': [],
+            'role_write_access': [],
+        }
+
+        prefix_map = {
+            'user:': 'user',
+            'external_user:': 'external_user',
+            'organization:': 'organization',
+            'namespace:': 'namespace',
+            'workspace:': 'workspace',
+            'role:': 'role',
+        }
+
+        for entity_id in (self.read or []):
+            for prefix, key in prefix_map.items():
+                if entity_id.startswith(prefix):
+                    granular[f'{key}_read_access'].append(entity_id[len(prefix):])
+                    break
+
+        for entity_id in (self.write or []):
+            for prefix, key in prefix_map.items():
+                if entity_id.startswith(prefix):
+                    granular[f'{key}_write_access'].append(entity_id[len(prefix):])
+                    break
+
+        return granular
+
+    model_config = ConfigDict(
+        extra='forbid',
+        json_schema_extra={
+            "examples": [
+                {
+                    "description": "Share with specific user and entire organization",
+                    "read": ["external_user:alice_123", "organization:org_acme"],
+                    "write": ["external_user:alice_123"]
+                },
+                {
+                    "description": "Namespace-scoped access",
+                    "read": ["namespace:ns_production", "external_user:admin_bob"],
+                    "write": ["external_user:admin_bob"]
+                }
+            ]
+        }
+    )
+
+
+class OMOFilter(BaseModel):
+    """
+    Filter for Open Memory Object (OMO) safety standards in search/retrieval.
+
+    Use this to filter search results by consent level and/or risk level.
+    """
+    min_consent: Optional[ConsentLevel] = Field(
+        default=None,
+        description="Minimum consent level required. Excludes memories with lower consent levels. "
+                   "Order: explicit > implicit > terms > none. "
+                   "Example: min_consent='implicit' excludes 'none' consent memories."
+    )
+    exclude_consent: Optional[List[ConsentLevel]] = Field(
+        default=None,
+        description="Explicitly exclude memories with these consent levels. "
+                   "Example: exclude_consent=['none'] filters out all memories without consent."
+    )
+    max_risk: Optional[RiskLevel] = Field(
+        default=None,
+        description="Maximum risk level allowed. Excludes memories with higher risk. "
+                   "Order: none < sensitive < flagged. "
+                   "Example: max_risk='none' excludes 'sensitive' and 'flagged' memories."
+    )
+    exclude_risk: Optional[List[RiskLevel]] = Field(
+        default=None,
+        description="Explicitly exclude memories with these risk levels. "
+                   "Example: exclude_risk=['flagged'] filters out all flagged content."
+    )
+    require_consent: bool = Field(
+        default=False,
+        description="If true, only return memories with explicit consent (consent != 'none'). "
+                   "Shorthand for exclude_consent=['none']."
+    )
+    exclude_flagged: bool = Field(
+        default=False,
+        description="If true, exclude all flagged content (risk == 'flagged'). "
+                   "Shorthand for exclude_risk=['flagged']."
+    )
+
+    model_config = ConfigDict(
+        extra='forbid',
+        json_schema_extra={
+            "examples": [
+                {"require_consent": True, "exclude_flagged": True},
+                {"min_consent": "implicit", "max_risk": "sensitive"},
+                {"exclude_consent": ["none"], "exclude_risk": ["flagged"]}
+            ]
+        }
+    )
+
+
+# ============================================================================
+# Resolve forward references after all models are defined
+# ============================================================================
+# Rebuild models that have forward references to resolve them
+SearchConfig.model_rebuild()  # References RelationshipMatch via via_relationship
+RelationshipMatch.model_rebuild()  # References SearchConfig via target_search
+MemoryPolicy.model_rebuild()  # References EdgeConstraint via edge_constraints

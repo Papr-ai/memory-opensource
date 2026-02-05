@@ -73,6 +73,8 @@ if services_dir not in sys.path:
 
 from models.parse_server import PineconeMatch, ErrorDetail, SystemUpdateStatus, PineconeQueryResponse, ParseStoredMemory, ParseUserPointer, MemoryRetrievalResult, RelatedMemoriesSuccess, RelatedMemoriesError, DeleteMemoryResponse, DeleteMemoryResult, DeletionStatus, UpdateMemoryItem, UpdateMemoryResponse, MemoryParseServerUpdate, ParsePointer, DeveloperUserPointer
 from services.memory_management import store_memory_item, retrieve_memory_item_by_qdrant_id, retrieve_multiple_memory_items,retrieve_memory_item_parse, batch_store_memories, batch_store_memories_async, retrieve_memory_items_with_users_async
+from services.node_constraint_resolver import apply_node_constraints
+from services.edge_constraint_resolver import apply_edge_constraints
 from memory.memory_item import MemoryItem, TextMemoryItem, CodeSnippetMemoryItem, WebpageMemoryItem, CodeFileMemoryItem, MeetingMemoryItem, PluginMemoryItem, DocumentMemoryItem, IssueMemoryItem, CustomerMemoryItem, memory_item_to_dict
 from neo4j import GraphDatabase
 from scipy import spatial
@@ -695,6 +697,9 @@ class MemoryGraph:
         else:
             logger.warning("QDRANT_URL not set - Qdrant client will not be initialized")
         
+        # Track Qdrant warmup status
+        self.qdrant_warmed = False
+        
         # Initialize memory_items dictionary
         self.memory_items = {}
         
@@ -843,6 +848,43 @@ class MemoryGraph:
         except Exception as e:
             logger.error(f"❌ MongoDB warmup failed: {e}")
             self.mongodb_warmed = False
+
+    async def warm_qdrant_connection(self):
+        """
+        Warm up Qdrant connection to reduce first-search latency.
+        Performs a lightweight collection info fetch and a minimal search.
+        """
+        if not self.qdrant_client or not self.qdrant_collection:
+            logger.warning("Qdrant client or collection not available - skipping warmup")
+            return
+
+        if getattr(self, "qdrant_warmed", False):
+            logger.debug("Qdrant already warmed, skipping")
+            return
+
+        try:
+            logger.info("🔥 Warming up Qdrant connection...")
+            start_time = time.time()
+
+            collection_info = await self.qdrant_client.get_collection(self.qdrant_collection)
+            vector_size = collection_info.config.params.vectors.size
+
+            dummy_vector = [0.0] * vector_size
+            await self._qdrant_search_async(
+                collection_name=self.qdrant_collection,
+                query_vector=dummy_vector,
+                query_filter=None,
+                limit=1,
+                with_payload=False,
+                with_vectors=False,
+            )
+
+            total_time = (time.time() - start_time) * 1000
+            logger.info(f"🔥 Qdrant warmup completed in {total_time:.2f}ms")
+            self.qdrant_warmed = True
+        except Exception as e:
+            logger.warning(f"Qdrant warmup failed (non-critical): {e}")
+            self.qdrant_warmed = False
 
     def _warmup_api_key_lookup(self):
         """Warm up the exact API key lookup operation that happens during authentication"""
@@ -1105,8 +1147,16 @@ class MemoryGraph:
                     logger.info(f"Created optimized payload indexes for Qdrant collection {self.qdrant_collection}")
 
                 elif env.get("QDRANT_COLLECTION_QWEN0pt6B"):
-                    # Create basic payload indexes only once
-                    basic_index_fields = ["user_id", "user_read_access", "workspace_read_access", "role_read_access", "organization_read_access", "namespace_read_access"]
+                    # Create basic payload indexes only once - include ALL ACL fields (read AND write)
+                    basic_index_fields = [
+                        "user_id", 
+                        "user_read_access", "user_write_access",
+                        "workspace_read_access", "workspace_write_access",
+                        "role_read_access", "role_write_access",
+                        "organization_read_access", "organization_write_access",
+                        "namespace_read_access", "namespace_write_access",
+                        "external_user_read_access", "external_user_write_access"
+                    ]
                     
                     for field in basic_index_fields:
                         try:
@@ -1186,6 +1236,8 @@ class MemoryGraph:
                 "user_id", "workspace_id", "organization_id", "namespace_id",
                 "user_read_access", "workspace_read_access", "role_read_access",
                 "organization_read_access", "namespace_read_access",
+                "user_write_access", "workspace_write_access", "role_write_access",
+                "organization_write_access", "namespace_write_access", "external_user_read_access",
                 
                 # Source tracking and context
                 "source_node_id",
@@ -1214,6 +1266,8 @@ class MemoryGraph:
                     
         except Exception as e:
             logger.warning(f"Error creating property collection indexes: {e}")
+
+    
 
     async def _index_node_properties_with_sync_results(self, neo4j_results: List[Dict], memory_item: Dict, 
                                                      workspace_id: Optional[str], user_schema: Optional[Any],
@@ -2367,9 +2421,20 @@ class MemoryGraph:
                 # --- FIX: temporarily set metadata to neo4j_metadata ---
                 old_metadata = memory_item.metadata
                 memory_item.metadata = neo4j_metadata
-                await self.add_memory_item_to_neo4j(memory_item, neo_session, memoryChunkIds)
+                neo4j_result = await self.add_memory_item_to_neo4j(memory_item, neo_session, memoryChunkIds)
                 # --- Restore original metadata for Parse Server ---
                 memory_item.metadata = old_metadata
+                
+                # 🔒 CRITICAL: If an existing Memory node was found in Neo4j, use its ID
+                # This ensures relationships point to the correct node
+                if neo4j_result and 'id' in neo4j_result:
+                    actual_neo4j_id = neo4j_result['id']
+                    original_id = str(memory_item.id)
+                    if actual_neo4j_id != original_id:
+                        logger.info(f"📍 Using existing Neo4j Memory node ID: {actual_neo4j_id} (original ID was {original_id})")
+                        memory_item.id = actual_neo4j_id
+                    else:
+                        logger.debug(f"📍 Created new Neo4j Memory node with ID: {actual_neo4j_id}")
                 timings['neo4j_store'] = time.time() - neo4j_start
                 logger.info(f"Neo4j storage took {timings['neo4j_store']:.4f} seconds")
             except Exception as e:
@@ -2664,6 +2729,13 @@ class MemoryGraph:
         success = True
         error = None
 
+        # Extract tenant scoping from memory_item metadata
+        metadata = (json.loads(memory_item.metadata)
+                   if isinstance(memory_item.metadata, str)
+                   else memory_item.metadata)
+        organization_id = metadata.get('organization_id')
+        namespace_id = metadata.get('namespace_id')
+
         # Session management logic
         if neo_session is None:
             await self.ensure_async_connection()
@@ -2760,7 +2832,9 @@ class MemoryGraph:
                                 workspace_id,
                                 user_id,
                                 created_relationships,
-                                neo_session=neo_session
+                                neo_session=neo_session,
+                                organization_id=organization_id,
+                                namespace_id=namespace_id
                             )
                         continue
                     
@@ -2782,7 +2856,9 @@ class MemoryGraph:
                         workspace_id,
                         user_id,
                         created_relationships,
-                        neo_session=neo_session
+                        neo_session=neo_session,
+                        organization_id=organization_id,
+                        namespace_id=namespace_id
                     )
                     success = success and relationship_success
 
@@ -2808,7 +2884,9 @@ class MemoryGraph:
         workspace_id: Optional[str],
         user_id: str,
         created_relationships: List[LLMGraphRelationship],
-        neo_session: AsyncSession
+        neo_session: AsyncSession,
+        organization_id: Optional[str] = None,
+        namespace_id: Optional[str] = None
     ) -> bool:
         """Helper method to create a single relationship and update the relationships list"""
         try:
@@ -2818,7 +2896,9 @@ class MemoryGraph:
                 relation_type,
                 neo_session=neo_session,
                 workspace_id=workspace_id,
-                user_id=user_id
+                user_id=user_id,
+                organization_id=organization_id,
+                namespace_id=namespace_id
             )
             
             if result:
@@ -2876,6 +2956,267 @@ class MemoryGraph:
                 logger.error(f"Error in {operation_name}: {e}")
             return None
 
+    async def find_node_by_property(
+        self,
+        node_type: str,
+        property_name: str,
+        property_value: Any,
+        context: Optional[Dict[str, Any]] = None
+    ) -> Optional[Dict[str, Any]]:
+        """Find a node by exact property match with tenant + ACL scoping."""
+        if self.async_neo_conn.fallback_mode:
+            logger.warning("Neo4j in fallback mode, skipping find_node_by_property")
+            return None
+
+        if not node_type or not property_name:
+            return None
+
+        if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", property_name):
+            logger.warning(f"Invalid property name in find_node_by_property: {property_name}")
+            return None
+
+        metadata = (context or {}).get("metadata", {}) if context else {}
+        workspace_id = (context or {}).get("workspace_id") or metadata.get("workspace_id")
+        organization_id = metadata.get("organization_id")
+        namespace_id = metadata.get("namespace_id")
+        user_id = metadata.get("user_id")
+
+        tenant_conditions = []
+        if workspace_id:
+            tenant_conditions.append("n.workspace_id = $workspace_id")
+        if organization_id:
+            tenant_conditions.append("n.organization_id = $organization_id")
+        if namespace_id:
+            tenant_conditions.append("n.namespace_id = $namespace_id")
+
+        acl_conditions = []
+        if user_id:
+            acl_conditions.append("n.user_id = $user_id")
+            acl_conditions.append("$user_id IN n.user_read_access")
+        if workspace_id:
+            acl_conditions.append("$workspace_id IN n.workspace_read_access")
+        if organization_id:
+            acl_conditions.append("$organization_id IN n.organization_read_access")
+        if namespace_id:
+            acl_conditions.append("$namespace_id IN n.namespace_read_access")
+
+        where_parts = [f"n.{property_name} = $property_value"]
+        if tenant_conditions:
+            where_parts.append(f"({' AND '.join(tenant_conditions)})")
+        if acl_conditions:
+            where_parts.append(f"({' OR '.join(acl_conditions)})")
+
+        where_clause = f"WHERE {' AND '.join(where_parts)}"
+        query = f"""
+        MATCH (n:`{node_type}`)
+        {where_clause}
+        RETURN properties(n) AS props
+        LIMIT 1
+        """
+        params = {
+            "property_value": property_value,
+            "workspace_id": workspace_id,
+            "organization_id": organization_id,
+            "namespace_id": namespace_id,
+            "user_id": user_id
+        }
+
+        async with self.async_neo_conn.get_session() as session:
+            result = await self._safe_neo4j_run(session, query, params, "find_node_by_property")
+            if result is None:
+                return None
+            record = await result.single()
+            return record.get("props") if record else None
+
+    async def find_node_by_semantic_match(
+        self,
+        node_type: str,
+        property_name: str,
+        query_text: str,
+        threshold: float = 0.85,
+        context: Optional[Dict[str, Any]] = None
+    ) -> Optional[Dict[str, Any]]:
+        """Find a node by semantic match using property-indexed Qdrant search."""
+        if not query_text or not self.qdrant_client:
+            return None
+
+        metadata = (context or {}).get("metadata", {}) if context else {}
+        props = {
+            "user_id": metadata.get("user_id"),
+            "workspace_id": metadata.get("workspace_id"),
+            "organization_id": metadata.get("organization_id"),
+            "namespace_id": metadata.get("namespace_id")
+        }
+        # Reuse the property-indexed semantic search logic
+        result = await self._search_qdrant_for_similar_content(
+            node_label=node_type,
+            content=query_text,
+            selected_property=property_name,
+            props=props,
+            common_metadata=metadata
+        )
+        if not result or result.get("similarity_score", 0) < threshold:
+            return None
+
+        canonical_node_id = result.get("canonical_node_id")
+        if not canonical_node_id:
+            return None
+
+        return await self.find_node_by_property(
+            node_type=node_type,
+            property_name="id",
+            property_value=canonical_node_id,
+            context=context
+        )
+
+    async def find_node_by_fuzzy_match(
+        self,
+        node_type: str,
+        property_name: str,
+        query_text: str,
+        threshold: float = 0.7,
+        context: Optional[Dict[str, Any]] = None
+    ) -> Optional[Dict[str, Any]]:
+        """Find a node by fuzzy (substring) match with tenant + ACL scoping."""
+        if self.async_neo_conn.fallback_mode:
+            logger.warning("Neo4j in fallback mode, skipping find_node_by_fuzzy_match")
+            return None
+
+        if not node_type or not property_name or not query_text:
+            return None
+
+        if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", property_name):
+            logger.warning(f"Invalid property name in find_node_by_fuzzy_match: {property_name}")
+            return None
+
+        metadata = (context or {}).get("metadata", {}) if context else {}
+        workspace_id = (context or {}).get("workspace_id") or metadata.get("workspace_id")
+        organization_id = metadata.get("organization_id")
+        namespace_id = metadata.get("namespace_id")
+        user_id = metadata.get("user_id")
+
+        tenant_conditions = []
+        if workspace_id:
+            tenant_conditions.append("n.workspace_id = $workspace_id")
+        if organization_id:
+            tenant_conditions.append("n.organization_id = $organization_id")
+        if namespace_id:
+            tenant_conditions.append("n.namespace_id = $namespace_id")
+
+        acl_conditions = []
+        if user_id:
+            acl_conditions.append("n.user_id = $user_id")
+            acl_conditions.append("$user_id IN n.user_read_access")
+        if workspace_id:
+            acl_conditions.append("$workspace_id IN n.workspace_read_access")
+        if organization_id:
+            acl_conditions.append("$organization_id IN n.organization_read_access")
+        if namespace_id:
+            acl_conditions.append("$namespace_id IN n.namespace_read_access")
+
+        where_parts = [f"toLower(n.{property_name}) CONTAINS toLower($query_text)"]
+        if tenant_conditions:
+            where_parts.append(f"({' AND '.join(tenant_conditions)})")
+        if acl_conditions:
+            where_parts.append(f"({' OR '.join(acl_conditions)})")
+
+        where_clause = f"WHERE {' AND '.join(where_parts)}"
+        query = f"""
+        MATCH (n:`{node_type}`)
+        {where_clause}
+        RETURN properties(n) AS props
+        LIMIT 1
+        """
+        params = {
+            "query_text": query_text,
+            "workspace_id": workspace_id,
+            "organization_id": organization_id,
+            "namespace_id": namespace_id,
+            "user_id": user_id
+        }
+
+        async with self.async_neo_conn.get_session() as session:
+            result = await self._safe_neo4j_run(session, query, params, "find_node_by_fuzzy_match")
+            if result is None:
+                return None
+            record = await result.single()
+            return record.get("props") if record else None
+
+    async def find_node_via_relationship(
+        self,
+        node_type: str,
+        edge_type: str,
+        target_node_id: str,
+        direction: str = "outgoing",
+        context: Optional[Dict[str, Any]] = None
+    ) -> Optional[Dict[str, Any]]:
+        """Find a node via relationship to a target node with tenant + ACL scoping."""
+        if self.async_neo_conn.fallback_mode:
+            logger.warning("Neo4j in fallback mode, skipping find_node_via_relationship")
+            return None
+
+        metadata = (context or {}).get("metadata", {}) if context else {}
+        workspace_id = (context or {}).get("workspace_id") or metadata.get("workspace_id")
+        organization_id = metadata.get("organization_id")
+        namespace_id = metadata.get("namespace_id")
+        user_id = metadata.get("user_id")
+
+        tenant_conditions = []
+        if workspace_id:
+            tenant_conditions.append("n.workspace_id = $workspace_id")
+            tenant_conditions.append("t.workspace_id = $workspace_id")
+        if organization_id:
+            tenant_conditions.append("n.organization_id = $organization_id")
+            tenant_conditions.append("t.organization_id = $organization_id")
+        if namespace_id:
+            tenant_conditions.append("n.namespace_id = $namespace_id")
+            tenant_conditions.append("t.namespace_id = $namespace_id")
+
+        acl_conditions = []
+        if user_id:
+            acl_conditions.append("n.user_id = $user_id")
+            acl_conditions.append("$user_id IN n.user_read_access")
+            acl_conditions.append("t.user_id = $user_id")
+            acl_conditions.append("$user_id IN t.user_read_access")
+        if workspace_id:
+            acl_conditions.append("$workspace_id IN n.workspace_read_access")
+            acl_conditions.append("$workspace_id IN t.workspace_read_access")
+        if organization_id:
+            acl_conditions.append("$organization_id IN n.organization_read_access")
+            acl_conditions.append("$organization_id IN t.organization_read_access")
+        if namespace_id:
+            acl_conditions.append("$namespace_id IN n.namespace_read_access")
+            acl_conditions.append("$namespace_id IN t.namespace_read_access")
+
+        where_parts = ["t.id = $target_node_id"]
+        if tenant_conditions:
+            where_parts.append(f"({' AND '.join(tenant_conditions)})")
+        if acl_conditions:
+            where_parts.append(f"({' OR '.join(acl_conditions)})")
+
+        where_clause = f"WHERE {' AND '.join(where_parts)}"
+        rel_pattern = f"-[:{edge_type}]->" if direction == "outgoing" else f"<-[:{edge_type}]-"
+        query = f"""
+        MATCH (n:`{node_type}`){rel_pattern}(t)
+        {where_clause}
+        RETURN properties(n) AS props
+        LIMIT 1
+        """
+        params = {
+            "target_node_id": target_node_id,
+            "workspace_id": workspace_id,
+            "organization_id": organization_id,
+            "namespace_id": namespace_id,
+            "user_id": user_id
+        }
+
+        async with self.async_neo_conn.get_session() as session:
+            result = await self._safe_neo4j_run(session, query, params, "find_node_via_relationship")
+            if result is None:
+                return None
+            record = await result.single()
+            return record.get("props") if record else None
+
     async def memory_item_exists_async(self, session, memory_item_id: str) -> bool:
         """Async check if memory item exists in Neo4j"""
         result = await self._safe_neo4j_run(
@@ -2907,9 +3248,22 @@ class MemoryGraph:
         relation_type: str, 
         neo_session: AsyncSession,
         workspace_id: Optional[str] = None, 
-        user_id: Optional[str] = None
+        user_id: Optional[str] = None,
+        organization_id: Optional[str] = None,
+        namespace_id: Optional[str] = None
     ) -> bool:
-        """Async version of link_memory_items"""
+        """
+        Async version of link_memory_items with tenant scoping and ACL checks.
+        
+        SECURITY: Ensures both nodes:
+        1. Exist in Neo4j
+        2. Belong to the same tenant (workspace_id, organization_id, namespace_id - MUST match with AND)
+        3. User has write access to both nodes (user_id OR *_write_access - SHOULD match with OR)
+        
+        Follows the same pattern as _node_exists and _merge_node_by_unique_props:
+        - Tenant scoping (workspace_id, organization_id, namespace_id): MUST match (AND logic)
+        - ACL checks (user_id, *_write_access): SHOULD match (OR logic)
+        """
         if self.async_neo_conn.fallback_mode:
             logger.warning("Neo4j in fallback mode, cannot create relationships")
             return False
@@ -2922,50 +3276,148 @@ class MemoryGraph:
             logger.info(f"Original IDs: {item_id_1}, {item_id_2}")
             logger.info(f"Cleaned IDs: {clean_id_1}, {clean_id_2}")
 
-            # First verify both nodes exist
-            verify_query = """
+            # Build tenant scoping conditions (MUST - AND logic)
+            tenant_conditions_a = []
+            tenant_conditions_b = []
+            
+            if workspace_id:
+                tenant_conditions_a.append("a.workspace_id = $workspace_id")
+                tenant_conditions_b.append("b.workspace_id = $workspace_id")
+            if organization_id:
+                tenant_conditions_a.append("a.organization_id = $organization_id")
+                tenant_conditions_b.append("b.organization_id = $organization_id")
+            if namespace_id:
+                tenant_conditions_a.append("a.namespace_id = $namespace_id")
+                tenant_conditions_b.append("b.namespace_id = $namespace_id")
+            
+            # Build ACL conditions (SHOULD - OR logic) for each node
+            acl_conditions_a = []
+            acl_conditions_b = []
+            
+            if user_id:
+                acl_conditions_a.append("a.user_id = $user_id")
+                acl_conditions_a.append("$user_id IN a.user_write_access")
+                acl_conditions_b.append("b.user_id = $user_id")
+                acl_conditions_b.append("$user_id IN b.user_write_access")
+            
+            if workspace_id:
+                acl_conditions_a.append("$workspace_id IN a.workspace_write_access")
+                acl_conditions_b.append("$workspace_id IN b.workspace_write_access")
+            
+            if organization_id:
+                acl_conditions_a.append("$organization_id IN a.organization_write_access")
+                acl_conditions_b.append("$organization_id IN b.organization_write_access")
+            
+            if namespace_id:
+                acl_conditions_a.append("$namespace_id IN a.namespace_write_access")
+                acl_conditions_b.append("$namespace_id IN b.namespace_write_access")
+            
+            # Combine tenant scoping (MUST) and ACL (SHOULD) conditions
+            where_parts = []
+            
+            # Add tenant scoping for both nodes (MUST)
+            if tenant_conditions_a:
+                where_parts.append(f"({' AND '.join(tenant_conditions_a)})")
+            if tenant_conditions_b:
+                where_parts.append(f"({' AND '.join(tenant_conditions_b)})")
+            
+            # Add ACL checks for both nodes (SHOULD)
+            if acl_conditions_a:
+                where_parts.append(f"({' OR '.join(acl_conditions_a)})")
+            if acl_conditions_b:
+                where_parts.append(f"({' OR '.join(acl_conditions_b)})")
+            
+            where_clause = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
+            
+            # Verify both nodes exist WITH tenant scoping and ACL checks
+            verify_query = f"""
             MATCH (a:Memory)
             WHERE a.id = $item_id_1
             WITH a
             MATCH (b:Memory)
             WHERE b.id = $item_id_2
-            RETURN a.id as id1, b.id as id2
+            WITH a, b
+            {where_clause}
+            RETURN a.id as id1, b.id as id2, a.workspace_id as workspace_id, 
+                   a.organization_id as organization_id, a.namespace_id as namespace_id
             """
-            parameters = {'item_id_1': str(clean_id_1), 'item_id_2': str(clean_id_2)}
+            
+            parameters = {
+                'item_id_1': str(clean_id_1), 
+                'item_id_2': str(clean_id_2),
+                'workspace_id': workspace_id,
+                'user_id': user_id,
+                'organization_id': organization_id,
+                'namespace_id': namespace_id
+            }
 
-            logger.info(f"Executing verify query with parameters: {parameters}")
+            logger.info(f"🔒 Executing verify query with tenant scoping (MUST) and ACL checks (SHOULD)")
+            logger.info(f"Parameters: workspace_id={workspace_id}, org_id={organization_id}, namespace_id={namespace_id}, user_id={user_id}")
             result = await neo_session.run(verify_query, parameters)
             record = await result.single()
             logger.info(f"Verify query record: {record}")
 
-            # Check if both nodes were found
+            # Check if both nodes were found with proper access
             if not record or not record.get("id1") or not record.get("id2"):
-                error_msg = f"Memory items {clean_id_1} and/or {clean_id_2} not found, skipping relationship"
+                error_msg = f"Memory items {clean_id_1} and/or {clean_id_2} not found, not in same tenant, or user lacks write access"
                 logger.error(error_msg)
                 return False
+            
+            logger.info(f"✅ Both nodes exist in same tenant (workspace={record.get('workspace_id')}, org={record.get('organization_id')}, namespace={record.get('namespace_id')}) and user has write access")
 
-            # If we get here, both nodes exist, create relationship
+            # Build tenant scoping for create query (same conditions)
+            create_where_a = ["a.id = $item_id_1"]
+            create_where_b = ["b.id = $item_id_2"]
+            
+            if workspace_id:
+                create_where_a.append("a.workspace_id = $workspace_id")
+                create_where_b.append("b.workspace_id = $workspace_id")
+            if organization_id:
+                create_where_a.append("a.organization_id = $organization_id")
+                create_where_b.append("b.organization_id = $organization_id")
+            if namespace_id:
+                create_where_a.append("a.namespace_id = $namespace_id")
+                create_where_b.append("b.namespace_id = $namespace_id")
+            
+            # If we get here, both nodes exist with proper access, create relationship
+            # Build relationship properties - only include non-NULL tenant IDs
+            # (Neo4j cannot MERGE on NULL properties)
+            rel_props = []
+            rel_params = {
+                'item_id_1': str(clean_id_1),
+                'item_id_2': str(clean_id_2),
+                'relation_type': relation_type
+            }
+            
+            if workspace_id is not None:
+                rel_props.append("workspace_id: $workspace_id")
+                rel_params['workspace_id'] = workspace_id
+            if organization_id is not None:
+                rel_props.append("organization_id: $organization_id")
+                rel_params['organization_id'] = organization_id
+            if namespace_id is not None:
+                rel_props.append("namespace_id: $namespace_id")
+                rel_params['namespace_id'] = namespace_id
+            if user_id is not None:
+                rel_props.append("user_id: $user_id")
+                rel_params['user_id'] = user_id
+            
+            # Always include type and created_at
+            rel_props.append("type: $relation_type")
+            rel_props.append("created_at: datetime()")
+            
             create_query = f"""
             MATCH (a:Memory)
-            WHERE a.id = $item_id_1
+            WHERE {' AND '.join(create_where_a)}
             MATCH (b:Memory)
-            WHERE b.id = $item_id_2
+            WHERE {' AND '.join(create_where_b)}
             MERGE (a)-[r:{relation_type} {{
-                workspace_id: $workspace_id,
-                user_id: $user_id,
-                type: $relation_type,
-                created_at: datetime()
+                {', '.join(rel_props)}
             }}]->(b)
             RETURN type(r) as rel_type
             """
-            parameters = {
-                'item_id_1': str(clean_id_1),
-                'item_id_2': str(clean_id_2),
-                'relation_type': relation_type,
-                'workspace_id': workspace_id,
-                'user_id': user_id
-            }
-            logger.info(f"Executing create query with parameters: {parameters}")
+            parameters = rel_params
+            logger.info(f"Executing create query with tenant scoping")
             result = await neo_session.run(create_query, parameters)
             record = await result.single()
             logger.info(f"Create query record: {record}")
@@ -2976,7 +3428,7 @@ class MemoryGraph:
                 logger.error(error_msg)
                 return False
             
-            logger.info(f"Successfully created {relation_type} relationship between {clean_id_1} and {clean_id_2}")
+            logger.info(f"✅ Successfully created {relation_type} relationship between {clean_id_1} and {clean_id_2}")
             return True
         except Exception as e:
             logger.error(f"Error in link_memory_items_async: {str(e)}")
@@ -3431,7 +3883,7 @@ class MemoryGraph:
             if self.qdrant_client and self.qdrant_collection:
                 for embedding in qwen_embeddings:
                     search_tasks.append(
-                        self.qdrant_client.search(
+                        self._qdrant_search_async(
                             collection_name=self.qdrant_collection,
                             query_vector=embedding,
                             query_filter=acl_filter,
@@ -3458,10 +3910,15 @@ class MemoryGraph:
                             memory_item_id = str(match.id)
                             memory_item_ids.add(memory_item_id)
                             logger.info(f'Found memory item id {memory_item_id} from Pinecone for conversation content')
-                    elif hasattr(result, 'points'):  # Qdrant result
+                    elif hasattr(result, 'points'):  # Qdrant result (query_points format)
                         points = result.points
                         for point in points:
                             memory_item_id = str(point.id)
+                            memory_item_ids.add(memory_item_id)
+                            logger.info(f'Found memory item id {memory_item_id} from Qdrant for conversation content')
+                    elif isinstance(result, list):  # Qdrant _qdrant_search_async / search returns list of points
+                        for point in result:
+                            memory_item_id = str(getattr(point, 'id', point))
                             memory_item_ids.add(memory_item_id)
                             logger.info(f'Found memory item id {memory_item_id} from Qdrant for conversation content')
                     else:
@@ -3488,7 +3945,7 @@ class MemoryGraph:
             if self.qdrant_client and self.qdrant_collection:
                 for embedding in qwen_embeddings:
                     search_tasks.append(
-                        self.qdrant_client.search(
+                        self._qdrant_search_async(
                             collection_name=self.qdrant_collection,
                             query_vector=embedding,
                             query_filter=acl_filter,
@@ -3515,6 +3972,11 @@ class MemoryGraph:
                             memory_item_id = str(point.id)
                             memory_item_ids.add(memory_item_id)
                             logger.info(f'Found memory item id {memory_item_id} from Qdrant for conversation content')
+                    elif isinstance(result, list):  # _qdrant_search_async / search returns list of points
+                        for point in result:
+                            memory_item_id = str(getattr(point, 'id', point))
+                            memory_item_ids.add(memory_item_id)
+                            logger.info(f'Found memory item id {memory_item_id} from Qdrant for conversation content')
                     else:
                         logger.warning(f"Unknown Qdrant result type: {type(result)}")
                         
@@ -3525,7 +3987,7 @@ class MemoryGraph:
         logger.info(f'Total unique memory item ids found: {len(memory_item_ids)}')
         return list(memory_item_ids)  # Convert set back to list before returning
 
-    def add_memory_item(self, memory_item: MemoryItem, relationships_json: dict, sessionToken: str, user_id: str,  imageGenerationCategory=None, add_to_pinecone=True, workspace_id: str = None, api_key: Optional[str] = None, graph_override: Optional[Dict[str, Any]] = None, schema_id: Optional[str] = None, simple_schema_mode: bool = False, property_overrides: Optional[Dict[str, Dict[str, Any]]] = None):
+    def add_memory_item(self, memory_item: MemoryItem, relationships_json: dict, sessionToken: str, user_id: str,  imageGenerationCategory=None, add_to_pinecone=True, workspace_id: str = None, api_key: Optional[str] = None, graph_override: Optional[Dict[str, Any]] = None, schema_id: Optional[str] = None, property_overrides: Optional[Dict[str, Dict[str, Any]]] = None):
         import asyncio
         from services.user_utils import User
 
@@ -3596,7 +4058,6 @@ class MemoryGraph:
                             legacy_route=False,  # Use new route by default - this should be passed from caller
                             graph_override=graph_override,  # Pass graph_override to processing
                             schema_id=schema_id,  # Pass schema_id for enforcement
-                            simple_schema_mode=simple_schema_mode,  # Pass simple_schema_mode
                             property_overrides=property_overrides  # Pass property_overrides for node customization
                         )
 
@@ -3627,38 +4088,37 @@ class MemoryGraph:
 
         return [added_item_properties] if added_item_properties else []
     
-    def _extract_graph_generation_config(self, memory_dict: dict) -> tuple[Optional[Dict[str, Any]], Optional[str], bool, Optional[Dict[str, Dict[str, Any]]]]:
+    def _extract_graph_generation_config(self, memory_dict: dict) -> tuple[Optional[Dict[str, Any]], Optional[str], Optional[Dict[str, Dict[str, Any]]]]:
         """
         Extract graph generation configuration from memory_dict.
-        
+
         Returns:
-            tuple: (graph_override, schema_id, simple_schema_mode, property_overrides)
+            tuple: (graph_override, schema_id, property_overrides)
         """
         graph_generation = memory_dict.get('graph_generation')
         # Check for direct schema_id and property_overrides in memory_dict (added by add_memory_item_async)
         direct_schema_id = memory_dict.get('schema_id')
         direct_property_overrides = memory_dict.get('property_overrides')
-        
+
         if direct_schema_id or direct_property_overrides:
             logger.info(f"✅ EXTRACT: Found direct parameters - schema_id: {direct_schema_id}, property_overrides: {bool(direct_property_overrides)}")
-            return (None, direct_schema_id, False, direct_property_overrides)
-        
+            return (None, direct_schema_id, direct_property_overrides)
+
         # Handle default auto mode or explicit configuration
         if not graph_generation:
             logger.info("🤖 DEFAULT GRAPH GENERATION: No graph_generation specified, defaulting to auto mode")
             # Return auto mode configuration as default
-            return (None, None, False, None)  # This will trigger LLM generation in process_memory_item_async
-        
+            return (None, None, None)  # This will trigger LLM generation in process_memory_item_async
+
         # Handle both dict format (from API) and Pydantic object format (from default_factory)
         if isinstance(graph_generation, dict):
             mode = graph_generation.get('mode', 'auto')
-            
+
             if mode == 'manual':
                 manual_config = graph_generation.get('manual', {})
                 return (
                     manual_config,  # The manual config IS the graph_override
                     None,  # No schema_id in manual mode
-                    False,  # No simple_schema_mode in manual mode
                     None   # No property_overrides in manual mode
                 )
             else:  # auto mode
@@ -3666,19 +4126,17 @@ class MemoryGraph:
                 return (
                     None,  # No graph_override in auto mode
                     auto_config.get('schema_id'),
-                    auto_config.get('simple_schema_mode', False),
                     auto_config.get('property_overrides')
                 )
         else:
             # Pydantic GraphGeneration object
             mode = graph_generation.mode.value if hasattr(graph_generation.mode, 'value') else str(graph_generation.mode)
-            
+
             if mode == 'manual':
                 manual_config = graph_generation.manual.model_dump() if graph_generation.manual else {}
                 return (
                     manual_config,  # The manual config IS the graph_override
                     None,  # No schema_id in manual mode
-                    False,  # No simple_schema_mode in manual mode
                     None   # No property_overrides in manual mode
                 )
             else:  # auto mode (default)
@@ -3686,28 +4144,27 @@ class MemoryGraph:
                 return (
                     None,  # No graph_override in auto mode
                     auto_config.get('schema_id'),
-                    auto_config.get('simple_schema_mode', False),
                     auto_config.get('property_overrides')
                 )
-        
+
         # This should never be reached now
-        return (None, None, False, None)
+        return (None, None, None)
     
-    async def process_memory_item_async(self, session_token: str, memory_dict: dict, relationships_json: List[RelationshipItem] = None, workspace_id: str = None, user_id: str = None, user_workspace_ids: Optional[List[str]] = None, api_key: Optional[str] = None, neo_session: Optional[AsyncSession] = None, legacy_route: bool = True, graph_override: Optional[Dict[str, Any]] = None, schema_id: Optional[str] = None, simple_schema_mode: bool = False, property_overrides: Optional[Dict[str, Dict[str, Any]]] = None, developer_user_id: Optional[str] = None) -> ProcessMemoryResponse:
+    async def process_memory_item_async(self, session_token: str, memory_dict: dict, relationships_json: List[RelationshipItem] = None, workspace_id: str = None, user_id: str = None, user_workspace_ids: Optional[List[str]] = None, api_key: Optional[str] = None, neo_session: Optional[AsyncSession] = None, legacy_route: bool = True, graph_override: Optional[Dict[str, Any]] = None, schema_id: Optional[str] = None, property_overrides: Optional[Dict[str, Dict[str, Any]]] = None, developer_user_id: Optional[str] = None, memory_policy: Optional[Dict[str, Any]] = None) -> ProcessMemoryResponse:
         """
         Process a memory item asynchronously.
-        
+
         Parameters are passed directly from the API request via memory_service.py
         """
         # Use parameters passed directly instead of extracting from memory_dict
         # (The memory_dict doesn't contain graph_generation field - it's extracted in memory_service.py)
         logger.info(f"🔍 PROCESS_MEMORY_ASYNC: Using passed parameters directly")
-        logger.info(f"🔍 PASSED PARAMS: graph_override={graph_override is not None}, schema_id={schema_id}, simple_schema_mode={simple_schema_mode} property_overrides={property_overrides is not None}")
+        logger.info(f"🔍 PASSED PARAMS: graph_override={graph_override is not None}, schema_id={schema_id}, property_overrides={property_overrides is not None}")
         if property_overrides:
             logger.info(f"🔍 PASSED PROPERTY OVERRIDES: {property_overrides}")
-        
+
         logger.info(f"🔍 PROCESS_MEMORY_ASYNC: fallback_mode={self.async_neo_conn.fallback_mode}")
-        logger.info(f"🔍 GRAPH CONFIG: graph_override={graph_override is not None}, schema_id={schema_id}, simple_schema_mode={simple_schema_mode} property_overrides={property_overrides is not None}")
+        logger.info(f"🔍 GRAPH CONFIG: graph_override={graph_override is not None}, schema_id={schema_id}, property_overrides={property_overrides is not None}")
         if property_overrides:
             logger.info(f"🔍 PROPERTY OVERRIDES: {property_overrides}")
         
@@ -3735,9 +4192,9 @@ class MemoryGraph:
                     legacy_route=legacy_route,
                     graph_override=graph_override,
                     schema_id=schema_id,
-                    simple_schema_mode=simple_schema_mode,
                     property_overrides=property_overrides,
-                    developer_user_id=developer_user_id
+                    developer_user_id=developer_user_id,
+                    memory_policy=memory_policy
                 )
         except Exception as e:
             logger.error(f"Error in process_memory_item_async: {e}")
@@ -3749,7 +4206,7 @@ class MemoryGraph:
                 "data": None
             }
 
-    async def _index_memories_and_process(self, neo_session: AsyncSession, session_token: str, memory_dict: dict, relationships_json: List[RelationshipItem] = None, workspace_id: str = None, user_id: str = None, user_workspace_ids: Optional[List[str]] = None, api_key: Optional[str] = None, legacy_route: bool = True, graph_override: Optional[Dict[str, Any]] = None, schema_id: Optional[str] = None, simple_schema_mode: bool = False, property_overrides: Optional[Dict[str, Dict[str, Any]]] = None, developer_user_id: Optional[str] = None) -> ProcessMemoryResponse:
+    async def _index_memories_and_process(self, neo_session: AsyncSession, session_token: str, memory_dict: dict, relationships_json: List[RelationshipItem] = None, workspace_id: str = None, user_id: str = None, user_workspace_ids: Optional[List[str]] = None, api_key: Optional[str] = None, legacy_route: bool = True, graph_override: Optional[Dict[str, Any]] = None, schema_id: Optional[str] = None, property_overrides: Optional[Dict[str, Dict[str, Any]]] = None, developer_user_id: Optional[str] = None, memory_policy: Optional[Dict[str, Any]] = None) -> ProcessMemoryResponse:
         # Start timing the entire process
         process_start_time = time.time()
         
@@ -4173,46 +4630,85 @@ class MemoryGraph:
                 nodes = []
                 for node_data in graph_override_dict.get('nodes', []):
                     # Node ID is required (validated by Pydantic before reaching here)
-                    # Add the id to the properties so it gets stored in Neo4j
+                    # IMPORTANT: Store the manual ID in llmGenNodeId so relationships can find the nodes
+                    # The 'id' field will be replaced with a UUID during processing, but llmGenNodeId preserves the manual ID
                     properties = node_data['properties'].copy()
                     properties['id'] = node_data['id']
+                    properties['llmGenNodeId'] = node_data['id']  # Store manual ID for relationship matching
+
+                    # Support both 'label' and 'type' for node label (type is more intuitive for users)
+                    node_label = node_data.get('label') or node_data.get('type')
+                    if not node_label:
+                        raise ValueError(f"Node missing 'label' or 'type' field: {node_data}")
 
                     node = LLMGraphNode(
-                        label=node_data['label'],
+                        label=node_label,
                         properties=properties
                     )
                     nodes.append(node)
-                    logger.info(f"🎯 GRAPH OVERRIDE: Created {node.label} node with ID {node_data['id']}")
+                    logger.info(f"🎯 GRAPH OVERRIDE: Created {node.label} node with ID {node_data['id']} (stored in llmGenNodeId)")
                     logger.info(f"🔍 DEBUG: Node properties after ID assignment: {properties}")
                 
                 # Create relationships from graph_override
                 relationships = []
                 for rel_data in graph_override_dict.get('relationships', []):
+                    # Helper to get node label from either 'label' or 'type' field
+                    def get_node_label(node_id):
+                        for n in graph_override_dict['nodes']:
+                            if n.get('id') == node_id:
+                                return n.get('label') or n.get('type', 'Unknown')
+                        return 'Unknown'
+
+                    # Support both 'relationship_type' and 'type' for relationship type
+                    rel_type = rel_data.get('relationship_type') or rel_data.get('type')
+                    if not rel_type:
+                        raise ValueError(f"Relationship missing 'relationship_type' or 'type' field: {rel_data}")
+
+                    # Support both 'source_node_id' and 'source' for source node
+                    source_id = rel_data.get('source_node_id') or rel_data.get('source')
+                    if not source_id:
+                        raise ValueError(f"Relationship missing 'source_node_id' or 'source' field: {rel_data}")
+
+                    # Support both 'target_node_id' and 'target' for target node
+                    target_id = rel_data.get('target_node_id') or rel_data.get('target')
+                    if not target_id:
+                        raise ValueError(f"Relationship missing 'target_node_id' or 'target' field: {rel_data}")
+
                     relationship = LLMGraphRelationship(
-                        type=rel_data['relationship_type'],
+                        type=rel_type,
                         direction='->',
                         source=NodeReference(
-                            label=next((n['label'] for n in graph_override_dict['nodes'] if n.get('id') == rel_data['source_node_id']), 'Unknown'),
-                            id=rel_data['source_node_id']
+                            label=get_node_label(source_id),
+                            id=source_id
                         ),
                         target=NodeReference(
-                            label=next((n['label'] for n in graph_override_dict['nodes'] if n.get('id') == rel_data['target_node_id']), 'Unknown'),
-                            id=rel_data['target_node_id']
+                            label=get_node_label(target_id),
+                            id=target_id
                         )
                     )
                     relationships.append(relationship)
-                    logger.info(f"🎯 GRAPH OVERRIDE: Created {relationship.type} relationship: {rel_data['source_node_id']} -> {rel_data['target_node_id']}")
+                    logger.info(f"🎯 GRAPH OVERRIDE: Created {relationship.type} relationship: {source_id} -> {target_id}")
                 
                 # Store the graph override nodes and relationships directly
+                # For manual graphs, try to find registered schemas for node labels
+                # This allows using schema unique_identifiers for better deduplication
+                user_schema_for_manual = await self._get_schemas_for_manual_graph(
+                    nodes=nodes,
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                    metadata=memory_dict.get('metadata', {})
+                )
+                
                 await self.store_llm_generated_graph(
                     nodes=nodes,
                     relationships=relationships,
                     memory_item=memory_dict,
                     neo_session=neo_session,
                     workspace_id=workspace_id,
-                    user_schema=None  # Graph override doesn't use custom schemas
+                    user_schema=user_schema_for_manual,
+                    memory_policy=memory_policy
                 )
-                
+
                 logger.info("🎯 GRAPH OVERRIDE: Successfully stored developer-provided graph structure")
                 
                 # Create automatic EXTRACTED relationships from Memory to all manually created nodes
@@ -4222,38 +4718,56 @@ class MemoryGraph:
                     automatic_relationships = []
                     
                     for node in nodes:
-                        node_id = node.properties.get('id')
-                        if node_id:
+                        # Use llmGenNodeId for relationship matching (consistent with manual graph relationships)
+                        llm_gen_node_id = node.properties.get('llmGenNodeId')
+                        node_uuid = node.properties.get('id')
+                        if llm_gen_node_id:
                             # Create LLMGraphRelationship object for automatic connection
                             from models.structured_outputs import NodeReference
                             automatic_relationship = LLMGraphRelationship(
                                 type="EXTRACTED",
                                 direction="->",
                                 source=NodeReference(label="Memory", id=memory_id),
-                                target=NodeReference(label=node.label, id=node_id)
+                                target=NodeReference(label=node.label, id=llm_gen_node_id)
                             )
                             automatic_relationships.append(automatic_relationship)
-                            logger.info(f"🔗 AUTO-CONNECT (MANUAL): Will create Memory -> EXTRACTED -> {node.label}({node_id})")
+                            logger.info(f"🔗 AUTO-CONNECT (MANUAL): Will create Memory -> EXTRACTED -> {node.label}({llm_gen_node_id}, uuid={node_uuid})")
                     
                     if automatic_relationships:
                         logger.info(f"🔗 AUTO-CONNECT (MANUAL): Creating {len(automatic_relationships)} automatic EXTRACTED relationships")
                         
-                        # Create the automatic relationships in Neo4j with extraction metadata
+                        # CRITICAL: Use FULL metadata with all tenant IDs and ACL fields
+                        # The relationship creation needs tenant IDs to match nodes created in same session
+                        metadata_for_extraction = json.loads(memory_dict['metadata']) if isinstance(memory_dict.get('metadata'), str) else memory_dict.get('metadata', {})
                         extraction_metadata = {
                             "extraction_method": "manual_graph_override",
                             "extracted_at": datetime.now(timezone.utc).isoformat(),
-                            "workspace_id": workspace_id,
-                            "user_id": memory_dict.get('metadata', {}).get('user_id') if isinstance(memory_dict.get('metadata'), dict) else None
+                            "user_id": metadata_for_extraction.get("user_id"),
+                            "workspace_id": workspace_id or metadata_for_extraction.get("workspace_id"),
+                            "organization_id": metadata_for_extraction.get("organization_id"),
+                            "namespace_id": metadata_for_extraction.get("namespace_id"),
+                            "user_read_access": metadata_for_extraction.get("user_read_access", []),
+                            "user_write_access": metadata_for_extraction.get("user_write_access", []),
+                            "workspace_read_access": metadata_for_extraction.get("workspace_read_access", []),
+                            "workspace_write_access": metadata_for_extraction.get("workspace_write_access", []),
+                            "role_read_access": metadata_for_extraction.get("role_read_access", []),
+                            "role_write_access": metadata_for_extraction.get("role_write_access", []),
+                            "organization_read_access": metadata_for_extraction.get("organization_read_access", []),
+                            "organization_write_access": metadata_for_extraction.get("organization_write_access", []),
+                            "namespace_read_access": metadata_for_extraction.get("namespace_read_access", []),
+                            "namespace_write_access": metadata_for_extraction.get("namespace_write_access", []),
+                            "external_user_read_access": metadata_for_extraction.get("external_user_read_access", []),
+                            "external_user_write_access": metadata_for_extraction.get("external_user_write_access", []),
                         }
                         
                         for rel in automatic_relationships:
                             try:
-                                await self._create_relationship(
+                                result = await self._create_relationship(
                                     neo_session=neo_session, 
                                     relationship=rel, 
                                     common_metadata=extraction_metadata
                                 )
-                                logger.info(f"🔗 AUTO-CONNECT (MANUAL): ✅ Created EXTRACTED relationship: {rel.source.id} -> {rel.target.id}")
+                                # Don't log here - _create_relationship already logs success/failure
                             except Exception as rel_error:
                                 logger.error(f"🔗 AUTO-CONNECT (MANUAL): ❌ Failed to create relationship {rel.source.id} -> {rel.target.id}: {rel_error}")
                 
@@ -4294,14 +4808,12 @@ class MemoryGraph:
 
             try:
                 # Get developer's workspace ID for schema selection
-                developer_workspace_id = None
-                if developer_user_id:
-                    try:
-                        from services.user_utils import User
-                        developer_workspace_id = await User.get_selected_workspace_id_async(developer_user_id, api_key=api_key)
-                        logger.info(f"🔍 DEVELOPER WORKSPACE ID: {developer_workspace_id} for developer_user_id={developer_user_id}")
-                    except Exception as e:
-                        logger.warning(f"Failed to get developer workspace ID: {e}")
+                # Use the workspace_id that's already passed in - no need for redundant API call
+                developer_workspace_id = workspace_id
+                if developer_workspace_id:
+                    logger.info(f"🔍 DEVELOPER WORKSPACE ID: {developer_workspace_id} for developer_user_id={developer_user_id}")
+                else:
+                    logger.warning(f"No workspace_id available for developer_user_id={developer_user_id}")
                 
                 # Extract organization and namespace context from memory metadata
                 organization_id = memory_dict.get("metadata", {}).get("organization_id")
@@ -4311,7 +4823,7 @@ class MemoryGraph:
                 
                 schema_response = await chat_gpt.generate_memory_graph_schema_async(
                     memory_dict,
-                    usecase_memory_item,  
+                    usecase_memory_item,
                     neo_session,
                     workspace_id,
                     trimmed_related_memories,
@@ -4321,7 +4833,8 @@ class MemoryGraph:
                     developer_user_id=developer_user_id,  # Pass developer_user_id for schema selection
                     developer_workspace_id=developer_workspace_id,  # Pass developer's workspace ID for schema selection
                     organization_id=organization_id,  # Pass organization context for multi-tenant schema access
-                    namespace_id=namespace_id  # Pass namespace context for multi-tenant schema access
+                    namespace_id=namespace_id,  # Pass namespace context for multi-tenant schema access
+                    memory_policy=memory_policy  # Pass resolved memory_policy with constraints
                 )
 
                 if not schema_response:
@@ -4748,54 +5261,8 @@ class MemoryGraph:
         try:
             memory_id = str(memory_item.id)
             chunk_ids = memoryChunkIds if memoryChunkIds else [memory_id]
-            # Check if node exists
-            existing_id = await self._node_exists(
-                node_id=memory_id,
-                node_type=NodeLabel.Memory,
-                node_content=memory_item.content,
-                neo_session=neo_session
-            )
-            if existing_id:
-                logger.info(f"Memory node already exists with ID: {existing_id}")
-                # Update the existing node to use the new memory_id for consistency
-                try:
-                    update_query = """
-                        MATCH (n:Memory {id: $existing_id})
-                        SET n.id = $new_id
-                        RETURN n
-                    """
-                    result = await neo_session.run(update_query, existing_id=existing_id, new_id=memory_id)
-                    if result is None:
-                        logger.error("Neo4j session returned None result, connection may be closed")
-                        self.async_neo_conn.fallback_mode = True
-                        return {"id": memory_id}
-                    
-                    record = await result.single()
-                    if record:
-                        logger.info(f"Updated existing node from {existing_id} to {memory_id}")
-                        # If operation succeeded and we're in open-source with fallback_mode set, reset it
-                        if is_opensource and self.async_neo_conn.fallback_mode:
-                            logger.info("Successfully updated memory item in Neo4j - resetting fallback mode")
-                            self.async_neo_conn.fallback_mode = False
-                        return {"id": memory_id}
-                    else:
-                        logger.warning(f"Failed to update existing node from {existing_id} to {memory_id}")
-                        return {"id": memory_id}
-                except Exception as e:
-                    # Check if it's a connection error
-                    error_str = str(e).lower()
-                    if any(keyword in error_str for keyword in ['closed connection', 'connection', 'driver', 'session']):
-                        logger.error(f"Neo4j connection error updating existing node ID: {e}")
-                        # Only set fallback mode if we're in open-source
-                        if is_opensource:
-                            self.async_neo_conn.fallback_mode = True
-                    else:
-                        logger.error(f"Error updating existing node ID: {e}")
-                    return {"id": memory_id}
-            # Convert MemoryItem to Node
-            memory_node = memory_item_to_node(memory_item, chunk_ids)
-
-            # Extract metadata for common_metadata fields
+            
+            # Extract metadata for tenant scoping BEFORE node exists check
             metadata = (json.loads(memory_item.metadata)
                        if isinstance(memory_item.metadata, str)
                        else memory_item.metadata)
@@ -4804,13 +5271,92 @@ class MemoryGraph:
             # Populate common_metadata to preserve organization_id, namespace_id, and access control lists
             # These are top-level fields in MemoryMetadata, not in customMetadata
             common_metadata = {
+                "workspace_id": metadata.get("workspace_id"),
                 "organization_id": metadata.get("organization_id"),
                 "namespace_id": metadata.get("namespace_id"),
+                "user_id": metadata.get("user_id"),
                 "organization_read_access": metadata.get("organization_read_access"),
                 "organization_write_access": metadata.get("organization_write_access"),
                 "namespace_read_access": metadata.get("namespace_read_access"),
                 "namespace_write_access": metadata.get("namespace_write_access"),
             }
+            
+            # Check if node exists WITH TENANT SCOPING
+            existing_id = await self._node_exists(
+                node_id=memory_id,
+                node_type=NodeLabel.Memory,
+                node_content=memory_item.content,
+                neo_session=neo_session,
+                workspace_id=common_metadata.get("workspace_id"),
+                organization_id=common_metadata.get("organization_id"),
+                namespace_id=common_metadata.get("namespace_id"),
+                user_id=common_metadata.get("user_id")
+            )
+            if existing_id:
+                logger.info(f"Memory node already exists with ID: {existing_id}")
+                # 🔒 CRITICAL: Keep the existing node's ID - do NOT overwrite it!
+                # The existing ID is the stable identifier used in relationships
+                # Only update non-ACL/non-scoping properties (content, metadata, updatedAt, etc.)
+                try:
+                    # Prepare update properties (excluding id, and ACL/scoping fields)
+                    memory_node = memory_item_to_node(memory_item, chunk_ids)
+                    # memory_node.properties is already a dict (converted in memory_item_to_node)
+                    update_props = memory_node.properties if isinstance(memory_node.properties, dict) else memory_node.properties.model_dump(exclude_none=True)
+                    
+                    # Remove fields that should NOT be updated
+                    fields_to_preserve = [
+                        'id',  # NEVER change the ID of an existing node
+                        'workspace_id', 'organization_id', 'namespace_id',  # Tenant scoping
+                        'user_id',  # Owner
+                        'user_read_access', 'user_write_access',  # ACL
+                        'workspace_read_access', 'workspace_write_access',
+                        'organization_read_access', 'organization_write_access',
+                        'namespace_read_access', 'namespace_write_access',
+                        'role_read_access', 'role_write_access',
+                        'external_user_read_access', 'external_user_write_access',
+                        'createdAt'  # Don't change creation timestamp
+                    ]
+                    for field in fields_to_preserve:
+                        update_props.pop(field, None)
+                    
+                    # Add updatedAt timestamp
+                    update_props['updatedAt'] = datetime.now(timezone.utc).isoformat()
+                    
+                    update_query = """
+                        MATCH (n:Memory {id: $existing_id})
+                        SET n += $update_props
+                        RETURN n
+                    """
+                    result = await neo_session.run(update_query, existing_id=existing_id, update_props=update_props)
+                    if result is None:
+                        logger.error("Neo4j session returned None result, connection may be closed")
+                        self.async_neo_conn.fallback_mode = True
+                        return {"id": existing_id}  # Return existing ID, not new memory_id
+                    
+                    record = await result.single()
+                    if record:
+                        logger.info(f"✅ Updated existing Memory node {existing_id} (preserved ID, updated content/metadata)")
+                        # If operation succeeded and we're in open-source with fallback_mode set, reset it
+                        if is_opensource and self.async_neo_conn.fallback_mode:
+                            logger.info("Successfully updated memory item in Neo4j - resetting fallback mode")
+                            self.async_neo_conn.fallback_mode = False
+                        return {"id": existing_id}  # Return existing ID, not new memory_id
+                    else:
+                        logger.warning(f"Failed to update existing node {existing_id}")
+                        return {"id": existing_id}  # Return existing ID, not new memory_id
+                except Exception as e:
+                    # Check if it's a connection error
+                    error_str = str(e).lower()
+                    if any(keyword in error_str for keyword in ['closed connection', 'connection', 'driver', 'session']):
+                        logger.error(f"Neo4j connection error updating existing node: {e}")
+                        # Only set fallback mode if we're in open-source
+                        if is_opensource:
+                            self.async_neo_conn.fallback_mode = True
+                    else:
+                        logger.error(f"Error updating existing node: {e}")
+                    return {"id": existing_id}  # Return existing ID, not new memory_id
+            # Convert MemoryItem to Node
+            memory_node = memory_item_to_node(memory_item, chunk_ids)
 
             # Use existing _create_node method
             result = await self._create_node(
@@ -5225,8 +5771,9 @@ class MemoryGraph:
             neo_time = (time.time() - start_neo_time) * 1000
             logger.warning(f"Neo4j connection ensure took {neo_time:.2f}ms (fallback_mode: {self.async_neo_conn.fallback_mode})")
             if self.async_neo_conn.fallback_mode:
-                logger.warning("Neo4j in fallback mode, skipping Neo4j query")
-                return result
+                logger.warning("Neo4j in fallback mode, skipping Neo4j query but continuing with Qdrant search")
+                # Set skip_neo to True so we skip Neo4j operations but continue with Qdrant search
+                skip_neo = True
 
         # Only use the query for better accuracy
         query_context_combined = query
@@ -5282,19 +5829,28 @@ class MemoryGraph:
             acl_conditions.append(qmodels.FieldCondition(key="organization_read_access", match=qmodels.MatchAny(any=user_organization_ids)))
         
         # Add namespace_read_access to ACL conditions (OR logic - user has access to these namespaces)
-        # NOTE: We do NOT add namespace_id as a MUST condition to allow legacy memories without namespace_id
-        # User access is determined by user_id OR user_read_access, regardless of namespace_id
+        # Namespace scoping uses MUST match when namespace_id is explicitly present.
         user_namespace_ids = []
         if search_request and getattr(search_request, 'namespace_id', None):
             ns_id = getattr(search_request, 'namespace_id')
             if isinstance(ns_id, str):
                 user_namespace_ids.append(ns_id)
-                # Add to ACL conditions (OR) but NOT as scoping condition (MUST)
-                # This allows memories with matching namespace_id OR legacy memories without namespace_id
-                logger.info(f"Including namespace_read_access filter for namespace_id={ns_id} (optional, includes legacy)")
+                logger.info(f"Including namespace_read_access filter for namespace_id={ns_id}")
         
         if user_namespace_ids and len(user_namespace_ids) <= 10:
             acl_conditions.append(qmodels.FieldCondition(key="namespace_read_access", match=qmodels.MatchAny(any=user_namespace_ids)))
+        
+        # Namespace scoping (AND logic) - enforce when namespace_id is set on request/metadata
+        scoped_namespace_id = None
+        if metadata and getattr(metadata, "namespace_id", None):
+            scoped_namespace_id = getattr(metadata, "namespace_id")
+        elif search_request and getattr(search_request, "namespace_id", None):
+            scoped_namespace_id = getattr(search_request, "namespace_id")
+        if isinstance(scoped_namespace_id, str):
+            scoping_conditions.append(
+                qmodels.FieldCondition(key="namespace_id", match=qmodels.MatchValue(value=scoped_namespace_id))
+            )
+            logger.info(f"Applying namespace scoping filter: namespace_id={scoped_namespace_id}")
         
         # Combine filters: ACL conditions with OR, scoping conditions with AND
         # Final filter structure: (acl_condition1 OR acl_condition2 OR ...) AND scoping_condition1 AND scoping_condition2 AND ...
@@ -5650,10 +6206,22 @@ class MemoryGraph:
             logger.debug(f'Processed memory IDs: {processed_memory_ids}')
         else:
             # Only run Qwen/Qdrant
-            query_qdrant_embedding_list, _ = await self.embedding_model.get_qwen_embedding_4b(
-                query_context_combined, max_retries=3, retry_delay=1
-            )
-            query_qdrant_embedding = query_qdrant_embedding_list[0] if query_qdrant_embedding_list else None
+            # Cache search embeddings to avoid repeated network calls for identical queries
+            from services.cache_utils import search_embedding_cache
+            import hashlib
+
+            cache_key = f"qwen_search:{hashlib.sha256(query_context_combined.encode()).hexdigest()[:24]}"
+            query_qdrant_embedding = search_embedding_cache.get(cache_key)
+            if query_qdrant_embedding:
+                logger.info(f"Search embedding cache HIT (qwen only): {cache_key}")
+            else:
+                query_qdrant_embedding_list, _ = await self.embedding_model.get_qwen_embedding_4b(
+                    query_context_combined, max_retries=3, retry_delay=1
+                )
+                query_qdrant_embedding = query_qdrant_embedding_list[0] if query_qdrant_embedding_list else None
+                if query_qdrant_embedding:
+                    search_embedding_cache.set(cache_key, query_qdrant_embedding)
+                    logger.info(f"Search embedding cache SET (qwen only): {cache_key}")
             embedding_time = (time.time() - embedding_start) * 1000
             logger.warning(f"Embedding generation (qwen only) took {embedding_time:.2f}ms")
             search_start = time.time()
@@ -5662,17 +6230,19 @@ class MemoryGraph:
                 chunk_factor = 3  # Assume average 3 chunks per memory
                 vector_top_k = top_k * chunk_factor  # Get 3x more from Qdrant
                 
-                # Run both main search and fallback search in parallel
-                qdrant_embeddings_results, qdrant_fallback_results = await asyncio.gather(
-                    self.get_qdrant_related_memories_async(
+                # Run main search first; fallback only if main returns no results
+                qdrant_embeddings_results = await self.get_qdrant_related_memories_async(
                         query_qdrant_embedding,
                         final_filter,
                         top_k=vector_top_k  # Increased for chunking
-                    ),
-                    self.get_qdrant_related_memories_async_fallback(
+                )
+                if qdrant_embeddings_results.get('matches'):
+                    qdrant_fallback_results = {"matches": []}
+                    logger.info("Skipping Qdrant fallback search (main results found)")
+                else:
+                    qdrant_fallback_results = await self.get_qdrant_related_memories_async_fallback(
                         final_filter,
                         top_k=vector_top_k  # Increased for chunking
-                    )
                 )
                 
                 # Log raw results from both Qdrant searches
@@ -5782,11 +6352,10 @@ class MemoryGraph:
         if not skip_neo:
             # Check circuit breaker before attempting Neo4j operations
             if not await self.async_neo_conn.circuit_breaker.can_try():
-                logger.warning("Circuit breaker is open, skipping Neo4j operations")
+                logger.warning("Circuit breaker is open, skipping Neo4j operations but continuing with Qdrant results")
                 self.async_neo_conn.fallback_mode = True
-                # Return early with existing results
-                result.total_fetch_time = time.time() - fetch_start
-                return result
+                # Set skip_neo to True so we skip Neo4j operations but continue to fetch Qdrant memory items
+                skip_neo = True
             
             # Create Neo4j session if we don't have one, using proper context manager
             if not neo_session:
@@ -5819,12 +6388,21 @@ class MemoryGraph:
                         except asyncio.TimeoutError:
                             # Record failure in circuit breaker for timeout
                             await self.async_neo_conn.circuit_breaker.record_failure()
-                            logger.error("Neo4j operation timed out after 60 seconds, recording failure")
+                            logger.error("Neo4j operation timed out after 30 seconds, recording failure")
                             self.async_neo_conn.fallback_mode = True
-                            # Return early with existing results (no total_fetch_time field in RelatedMemoryResult)
-                            return result
-                        result.neo_nodes = other_nodes
-                        result.neo_context = text_context
+                            # Set skip_neo to True and continue to fetch Qdrant memory items
+                            skip_neo = True
+                            # Set empty neo results and variables to prevent errors
+                            memory_nodes = []
+                            other_nodes = []
+                            text_context = None
+                            result.neo_nodes = []
+                            result.neo_context = None
+                            result.neo_query = None
+                        else:
+                            # Only set these if the operation succeeded (not in timeout handler)
+                            result.neo_nodes = other_nodes
+                            result.neo_context = text_context
                         
                         # Add memory nodes to memory_items if they exist
                         if memory_nodes:
@@ -5845,6 +6423,9 @@ class MemoryGraph:
                     except asyncio.TimeoutError:
                         logger.warning("Neo4j operation timed out after 60 seconds. Continuing without Neo4j results.")
                         # Reset Neo4j related fields to empty/None values
+                        memory_nodes = []
+                        other_nodes = []
+                        text_context = None
                         result.neo_nodes = []
                         result.neo_context = None
                         result.neo_query = None
@@ -5852,7 +6433,10 @@ class MemoryGraph:
                         pass
                     except Exception as e:
                         logger.warning(f"Error querying Neo4j: {e}. Continuing without Neo4j results.")
-                        # Reset Neo4j related fields to empty/None values
+                        # Reset Neo4j related fields to empty/None values and initialize variables
+                        memory_nodes = []
+                        other_nodes = []
+                        text_context = None
                         result.neo_nodes = []
                         result.neo_context = None
                         result.neo_query = None
@@ -5890,11 +6474,19 @@ class MemoryGraph:
                         await self.async_neo_conn.circuit_breaker.record_failure()
                         logger.error("Neo4j operation timed out after 30 seconds, recording failure")
                         self.async_neo_conn.fallback_mode = True
-                        # Return early with existing results
-                        result.total_fetch_time = time.time() - fetch_start
-                        return result
-                    result.neo_nodes = other_nodes
-                    result.neo_context = text_context
+                        # Set skip_neo to True and continue to fetch Qdrant memory items
+                        skip_neo = True
+                        # Set empty neo results and variables to prevent errors
+                        memory_nodes = []
+                        other_nodes = []
+                        text_context = None
+                        result.neo_nodes = []
+                        result.neo_context = None
+                        result.neo_query = None
+                    else:
+                        # Only set these if the operation succeeded (not in timeout handler)
+                        result.neo_nodes = other_nodes
+                        result.neo_context = text_context
                     
                     # Add memory nodes to memory_items if they exist
                     if memory_nodes:
@@ -5914,7 +6506,10 @@ class MemoryGraph:
 
                 except asyncio.TimeoutError:
                     logger.warning("Neo4j operation timed out after 60 seconds. Continuing without Neo4j results.")
-                    # Reset Neo4j related fields to empty/None values
+                    # Reset Neo4j related fields to empty/None values and initialize variables
+                    memory_nodes = []
+                    other_nodes = []
+                    text_context = None
                     result.neo_nodes = []
                     result.neo_context = None
                     result.neo_query = None
@@ -5922,7 +6517,10 @@ class MemoryGraph:
                     pass
                 except Exception as e:
                     logger.warning(f"Error querying Neo4j: {e}. Continuing without Neo4j results.")
-                    # Reset Neo4j related fields to empty/None values
+                    # Reset Neo4j related fields to empty/None values and initialize variables
+                    memory_nodes = []
+                    other_nodes = []
+                    text_context = None
                     result.neo_nodes = []
                     result.neo_context = None
                     result.neo_query = None
@@ -5943,6 +6541,10 @@ class MemoryGraph:
         memory_base_ids = [get_base_id(mid) for mid in memory_item_ids]
         #bigbird_base_ids = [get_base_id(mid) for mid in predicted_grouped_memory_ids]
         neo_base_ids = [get_base_id(mid) for mid in neo_memory_ids]
+        
+        # Initialize combined_memory_item_ids_unsorted to ensure it's always defined
+        # This will be populated by stratified sampling below, or fallback to memory_item_ids if needed
+        combined_memory_item_ids_unsorted = []
         
         # STRATIFIED SAMPLING FOR DIVERSITY ACROSS SOURCES
         # Extract IDs from each source separately for quota-based sampling
@@ -6107,6 +6709,12 @@ class MemoryGraph:
                 logger.info(f"After adaptive filling: {len(combined_memory_item_ids_unsorted)} total memories")
         
         logger.info(f'Stratified sampling: {len(combined_memory_item_ids_unsorted)} unique IDs after quota-based sampling')
+        
+        # Fallback: If stratified sampling didn't populate any IDs (e.g., Neo4j timeout prevented execution),
+        # use memory_item_ids directly from Qdrant results
+        if not combined_memory_item_ids_unsorted and memory_item_ids:
+            logger.warning(f"Stratified sampling produced no results, falling back to memory_item_ids: {len(memory_item_ids)} IDs")
+            combined_memory_item_ids_unsorted = memory_item_ids.copy()
         
         # Sort combined memory IDs by similarity score (highest first) for quality within diversity
         # This ensures we get the best results within our diversified sample
@@ -6395,42 +7003,88 @@ class MemoryGraph:
                         return msgs
                     sem = asyncio.Semaphore(len(result.memory_items))      # tune to your key's RPM limit
                     
+                    # Track rerank errors to avoid log spam
+                    rerank_error_count = {"count": 0, "first_error": None}
+
                     async def score_one(item):
                         async with sem:
                             # Use fallback wrapper with backoff to survive 429s/quota
-                            resp = await chat_gpt._create_completion_with_fallback_async(
-                                model=reranking_config.reranking_model,
-                                messages=build_msg(query, item.content),
-                                max_tokens=int(env.get("RERANK_COMPLETION_TOKENS", "20")),
-                                temperature=0,
-                                response_format={"type":"json_object"}, 
-                            )
-                            content = resp.choices[0].message.content                            
+                            model_name = reranking_config.reranking_model
+                            messages = build_msg(query, item.content)
+                            is_gpt5 = model_name.startswith("gpt-5")
+
+                            # GPT-5 reasoning models need much larger token budget (2000+)
+                            # because reasoning tokens consume most of the budget
+                            if is_gpt5:
+                                token_budget = int(env.get("RERANK_GPT5_COMPLETION_TOKENS", "2000"))
+                            else:
+                                token_budget = int(env.get("RERANK_COMPLETION_TOKENS", "100"))
+
+                            logger.debug(f"LLM rerank calling model={model_name}, is_gpt5={is_gpt5}, token_budget={token_budget}")
+                            try:
+                                api_kwargs = {
+                                    "model": model_name,
+                                    "messages": messages,
+                                    "response_format": {"type": "json_object"},
+                                }
+
+                                if is_gpt5:
+                                    # For gpt-5 reasoning models: use max_completion_tokens + reasoning_effort
+                                    api_kwargs["max_completion_tokens"] = token_budget
+                                    api_kwargs["reasoning_effort"] = "low"  # low effort for simple scoring task
+                                else:
+                                    api_kwargs["max_tokens"] = token_budget
+                                    api_kwargs["temperature"] = 0
+
+                                resp = await chat_gpt._create_completion_with_fallback_async(**api_kwargs)
+                                content = resp.choices[0].message.content
+                                logger.debug(f"LLM rerank response (model={model_name}): '{content}' finish_reason={resp.choices[0].finish_reason}")
+                            except Exception as api_err:
+                                # Track errors but only log the first one to avoid log spam
+                                rerank_error_count["count"] += 1
+                                if rerank_error_count["first_error"] is None:
+                                    rerank_error_count["first_error"] = str(api_err)
+                                    logger.warning(f"LLM rerank API error (will suppress duplicates): {api_err}")
+                                return 5, 0.5, item  # Return neutral score on API error
                             try:
                                 # Try JSON first - now expecting both score and confidence
                                 parsed = json.loads(content)
                                 score = float(parsed.get("score", 0))
                                 confidence = float(parsed.get("confidence", 0.5))  # Default confidence if not provided
-                            except Exception:
+                                logger.debug(f"LLM parsed score={score}, confidence={confidence}")
+                            except Exception as e:
+                                logger.warning(f"LLM JSON parse failed: {e}, content: {content}")
                                 # Fallback: extract numbers with regex
-                                matches = re.findall(r"(\d+(\.\d+)?)", content)
-                                score = float(matches[0]) if matches else 0
-                                confidence = float(matches[1]) if len(matches) > 1 else 0.5
+                                matches = re.findall(r"(\d+(?:\.\d+)?)", content)
+                                score = float(matches[0][0]) if matches else 0
+                                confidence = float(matches[1][0]) if len(matches) > 1 else 0.5
+                                logger.debug(f"LLM regex fallback score={score}, confidence={confidence}")
                             return score, confidence, item
                     start_rerank_sem = time.perf_counter()
                     scores = await asyncio.gather(*(score_one(m) for m in result.memory_items))
                     time_rerank_sem = time.perf_counter() - start_rerank_sem
                     logger.warning(f"Reranking with semaphore took {time_rerank_sem:.2f}s")
+
+                    # Log summary of rerank errors if any occurred
+                    if rerank_error_count["count"] > 0:
+                        logger.warning(f"LLM rerank: {rerank_error_count['count']} API calls failed with error: {rerank_error_count['first_error']}. "
+                                      f"Used neutral scores (0.5) for failed items.")
                     
-                    # Sort by score and extract confidence scores
+                    # Sort by score and extract both scores and confidences
                     sorted_results = sorted(scores, key=lambda x: x[0], reverse=True)
                     result.memory_items = [item for _, _, item in sorted_results]
-                    confidence_scores = [confidence for _, confidence, _ in sorted_results]
-                    
-                    # Store confidence scores in the result for later use
-                    result.confidence_scores = confidence_scores
-                    
-                    logger.info("Successfully reranked memory items using OpenAI")
+
+                    # Normalize LLM scores (1-10) to 0-1 range for consistency with Cohere
+                    # Store normalized scores in confidence_scores for downstream use as reranker_score
+                    normalized_scores = [(score / 10.0) for score, _, _ in sorted_results]
+                    confidence_values = [confidence for _, confidence, _ in sorted_results]
+
+                    # Use normalized relevance scores as the primary signal (what we call confidence_scores for legacy reasons)
+                    result.confidence_scores = normalized_scores
+                    # Also store raw confidence for potential future use
+                    result.llm_confidence_scores = confidence_values
+
+                    logger.info(f"Successfully reranked memory items using OpenAI - scores: {normalized_scores[:3]}, confidences: {confidence_values[:3]}")
             except Exception as e:
                 logger.error(f"Error during reranking: {e}", exc_info=True)
                 # Keep original order if reranking fails
@@ -6897,6 +7551,8 @@ class MemoryGraph:
             List[ParseStoredMemory]: A list of final memory items after processing.
         """
         
+        fetch_source = env.get("MEMORY_FETCH_SOURCE", "mongo").lower()
+        
         # Process memory IDs to handle both legacy and chunked formats
         base_memory_ids = set()  # Use set to avoid duplicates
         chunk_id_mapping = {}  # Map to track original chunked IDs
@@ -6920,65 +7576,331 @@ class MemoryGraph:
         all_memory_ids = list(set(memory_item_ids + processed_memory_ids))
 
         try:
-            # Only fetch from Parse Server (no Neo4j)
-            memory_class: str = "Memory"
-            parse_response = await self.fetch_parse_server_async(
-                session_token, 
-                all_memory_ids, 
-                processed_memory_ids, 
-                memory_class, 
+            if fetch_source == "mongo":
+                logger.info("Memory fetch source: mongo")
+                try:
+                    mongo_items = await self.fetch_memory_items_from_sources_mongo(
+                        memory_item_ids=all_memory_ids,
+                        user_id=user_id
+                    )
+                    return mongo_items
+                except Exception as mongo_error:
+                    logger.warning(f"Mongo fetch failed, falling back to Parse: {mongo_error}")
+                    memory_items_parse = await self._fetch_memory_items_from_parse(
+                        session_token=session_token,
+                        all_memory_ids=all_memory_ids,
+                        processed_memory_ids=processed_memory_ids,
+                        api_key=api_key
+                    )
+                    return memory_items_parse
+
+            if fetch_source == "compare":
+                logger.info("Memory fetch source: compare (parse vs mongo)")
+                parse_start = time.time()
+                memory_items_parse = await self._fetch_memory_items_from_parse(
+                    session_token=session_token,
+                    all_memory_ids=all_memory_ids,
+                    processed_memory_ids=processed_memory_ids,
+                    api_key=api_key
+                )
+                parse_duration_ms = (time.time() - parse_start) * 1000
+
+                mongo_start = time.time()
+                memory_items_mongo = await self.fetch_memory_items_from_sources_mongo(
+                    memory_item_ids=all_memory_ids,
+                    user_id=user_id
+                )
+                mongo_duration_ms = (time.time() - mongo_start) * 1000
+
+                parse_ids = {item.memoryId for item in memory_items_parse if item.memoryId}
+                mongo_ids = {item.memoryId for item in memory_items_mongo if item.memoryId}
+                missing_in_mongo = list(parse_ids - mongo_ids)
+                missing_in_parse = list(mongo_ids - parse_ids)
+
+                logger.info(
+                    "Memory fetch compare results - parse: %s items (%.2fms), mongo: %s items (%.2fms)",
+                    len(memory_items_parse),
+                    parse_duration_ms,
+                    len(memory_items_mongo),
+                    mongo_duration_ms,
+                )
+                logger.info(
+                    "Memory fetch compare - missing_in_mongo=%s, missing_in_parse=%s",
+                    missing_in_mongo[:10],
+                    missing_in_parse[:10],
+                )
+
+                # Return Parse results as source of truth while comparing.
+                return memory_items_parse
+
+            logger.info("Memory fetch source: parse")
+            memory_items_parse = await self._fetch_memory_items_from_parse(
+                session_token=session_token,
+                all_memory_ids=all_memory_ids,
+                processed_memory_ids=processed_memory_ids,
                 api_key=api_key
             )
+            return memory_items_parse
 
-            # Handle potential exceptions
-            if isinstance(parse_response, Exception):
-                logger.error(f"Parse Server query failed: {parse_response}")
-                return []
-
-            # Extract Parse Server results
-            memory_items_parse: List[ParseStoredMemory] = parse_response['results']
-            missing_memory_ids: List[str] = parse_response['missing_memory_ids']
-
-            logger.info(f'Parse Server fetched {len(memory_items_parse)} items.')
-            logger.info(f'Parse Server missing {len(missing_memory_ids)} items.')
-
-            # Since we're only using Parse Server, no need to normalize/merge with Neo4j
-            # Just use the Parse Server results directly
-            normalized_memory_items: List[ParseStoredMemory] = memory_items_parse
-            
-            # Process final items with chunk handling
-            final_memory_items: List[ParseStoredMemory] = []
-            for item in normalized_memory_items:
-                # Optionally, set matchingChunkIds if you want to indicate which chunks matched
-                if item.memoryChunkIds:
-                    matching_chunks = [
-                        chunk_id for chunk_id in item.memoryChunkIds 
-                        if chunk_id in memory_item_ids
-                    ]
-                    if matching_chunks:
-                        updated_item = item.model_copy()
-                        setattr(updated_item, 'matchingChunkIds', matching_chunks)
-                        final_memory_items.append(updated_item)
-                        continue
-                final_memory_items.append(item)
-
-            logger.info(f'Final Memory Items Count: {len(final_memory_items)}')
-
-            # Validation is handled by ParseStoredMemory model, but we can still log if needed
-            items_without_content = [
-                item.memoryId for item in final_memory_items 
-                if not item.content
-            ]
-            if items_without_content:
-                logger.error(f"Final memory items missing content: {items_without_content}")
-
-            logger.info(f'Final memory items: {final_memory_items}')
-
-            return final_memory_items
-        
         except Exception as e:
             logger.error(f"Error in fetch_memory_items_from_sources_async_fast: {e}")
             return []
+
+    async def _fetch_memory_items_from_parse(
+        self,
+        session_token: str,
+        all_memory_ids: List[str],
+        processed_memory_ids: List[str],
+        api_key: Optional[str] = None,
+    ) -> List[ParseStoredMemory]:
+        """Internal helper to fetch memory items from Parse and normalize."""
+        memory_class: str = "Memory"
+        parse_response = await self.fetch_parse_server_async(
+            session_token, 
+            all_memory_ids, 
+            processed_memory_ids, 
+            memory_class, 
+            api_key=api_key
+        )
+
+        if isinstance(parse_response, Exception):
+            logger.error(f"Parse Server query failed: {parse_response}")
+            return []
+
+        memory_items_parse: List[ParseStoredMemory] = parse_response['results']
+        missing_memory_ids: List[str] = parse_response['missing_memory_ids']
+
+        logger.info(f'Parse Server fetched {len(memory_items_parse)} items.')
+        logger.info(f'Parse Server missing {len(missing_memory_ids)} items.')
+
+        final_memory_items: List[ParseStoredMemory] = []
+        for item in memory_items_parse:
+            if item.memoryChunkIds:
+                matching_chunks = [
+                    chunk_id for chunk_id in item.memoryChunkIds 
+                if chunk_id in all_memory_ids
+                ]
+                if matching_chunks:
+                    updated_item = item.model_copy()
+                    setattr(updated_item, 'matchingChunkIds', matching_chunks)
+                    final_memory_items.append(updated_item)
+                    continue
+            final_memory_items.append(item)
+
+        logger.info(f'Final Memory Items Count: {len(final_memory_items)}')
+
+        items_without_content = [
+            item.memoryId for item in final_memory_items 
+            if not item.content
+        ]
+        if items_without_content:
+            logger.error(f"Final memory items missing content: {items_without_content}")
+
+        return final_memory_items
+        
+    async def fetch_memory_items_from_sources_mongo(
+        self,
+        memory_item_ids: List[str],
+        user_id: str
+    ) -> List[ParseStoredMemory]:
+        """
+        Fetch memory items directly from MongoDB (Parse database) and expand pointers.
+        Intended to mimic Parse Server response shape as closely as possible.
+        """
+        if self.db is None:
+            logger.warning("MongoDB not available; falling back to empty results")
+            return []
+
+        # Strip grouped suffixes to match Parse storage conventions
+        def strip_grouped_suffix(memory_id: str) -> str:
+            return re.sub(r'_grouped(?=_\d+$|$)', '', memory_id)
+
+        stripped_ids = [strip_grouped_suffix(mid) for mid in memory_item_ids]
+        unique_ids = list(set(stripped_ids))
+
+        # Query by memoryId or memoryChunkIds (and _id as safety)
+        query = {
+            "$or": [
+                {"memoryId": {"$in": unique_ids}},
+                {"memoryChunkIds": {"$in": unique_ids}},
+                {"_id": {"$in": unique_ids}},
+            ]
+        }
+
+        projection = {
+            "_id": 1,
+            "_created_at": 1,
+            "_updated_at": 1,
+            "_acl": 1,
+            "_p_user": 1,
+            "_p_workspace": 1,
+            "_p_post": 1,
+            "_p_postMessage": 1,
+            "_p_developerUser": 1,
+            "_p_organization": 1,
+            "_p_namespace": 1,
+            "content": 1,
+            "metadata": 1,
+            "customMetadata": 1,
+            "sourceType": 1,
+            "context": 1,
+            "title": 1,
+            "location": 1,
+            "emojiTags": 1,
+            "hierarchicalStructures": 1,
+            "type": 1,
+            "sourceUrl": 1,
+            "conversationId": 1,
+            "role": 1,
+            "category": 1,
+            "memoryId": 1,
+            "topics": 1,
+            "steps": 1,
+            "current_step": 1,
+            "memoryChunkIds": 1,
+            "external_user_read_access": 1,
+            "external_user_write_access": 1,
+            "user_read_access": 1,
+            "user_write_access": 1,
+            "workspace_read_access": 1,
+            "workspace_write_access": 1,
+            "role_read_access": 1,
+            "role_write_access": 1,
+            "namespace_read_access": 1,
+            "namespace_write_access": 1,
+            "organization_read_access": 1,
+            "organization_write_access": 1,
+            # Relevance scores (stored in DB)
+            "predicted_importance": 1,
+            "behavioral_score": 1,
+            "relevance_score": 1,  # Deprecated, kept for backward compatibility
+        }
+
+        def _fetch_docs():
+            return list(self.db["Memory"].find(query, projection))
+
+        memory_docs = await asyncio.to_thread(_fetch_docs)
+
+        def parse_pointer(pointer_value: Optional[str]) -> Optional[Dict[str, Any]]:
+            if not pointer_value or not isinstance(pointer_value, str):
+                return None
+            if "$" not in pointer_value:
+                return None
+            class_name, object_id = pointer_value.split("$", 1)
+            return {"__type": "Pointer", "className": class_name, "objectId": object_id}
+
+        # Expand user pointers
+        user_ids: List[str] = []
+        for doc in memory_docs:
+            user_ptr = doc.get("_p_user")
+            if isinstance(user_ptr, str) and "$" in user_ptr:
+                _, object_id = user_ptr.split("$", 1)
+                user_ids.append(object_id)
+        user_ids = list(set(user_ids))
+
+        user_map: Dict[str, Dict[str, Any]] = {}
+        if user_ids:
+            def _fetch_users():
+                return list(
+                    self.db["_User"].find(
+                        {"_id": {"$in": user_ids}},
+                        {
+                            "_id": 1,
+                            "displayName": 1,
+                            "fullname": 1,
+                            "profileimage": 1,
+                            "title": 1,
+                            "isOnline": 1,
+                            "user_type": 1,
+                            "organization_id": 1,
+                            "developer_organization_id": 1,
+                            "external_id": 1,
+                        },
+                    )
+                )
+            user_docs = await asyncio.to_thread(_fetch_users)
+            for user_doc in user_docs:
+                user_map[user_doc["_id"]] = user_doc
+
+        results: List[ParseStoredMemory] = []
+        for doc in memory_docs:
+            user_pointer = None
+            user_ptr = parse_pointer(doc.get("_p_user"))
+            if user_ptr:
+                user_doc = user_map.get(user_ptr["objectId"])
+                if user_doc:
+                    user_pointer = {
+                        "__type": "Pointer",
+                        "className": "_User",
+                        "objectId": user_doc["_id"],
+                        "displayName": user_doc.get("displayName"),
+                        "fullname": user_doc.get("fullname"),
+                        "profileimage": user_doc.get("profileimage"),
+                        "title": user_doc.get("title"),
+                        "isOnline": user_doc.get("isOnline"),
+                    }
+                else:
+                    user_pointer = {
+                        "__type": "Pointer",
+                        "className": "_User",
+                        "objectId": user_ptr["objectId"],
+                    }
+
+            data = {
+                "objectId": str(doc.get("_id")),
+                "createdAt": doc.get("_created_at"),
+                "updatedAt": doc.get("_updated_at"),
+                "ACL": doc.get("_acl", {}) or {},
+                "content": doc.get("content") or "",
+                "metadata": doc.get("metadata") or {},
+                "customMetadata": doc.get("customMetadata"),
+                "sourceType": doc.get("sourceType", "papr"),
+                "context": doc.get("context") or [],
+                "title": doc.get("title"),
+                "location": doc.get("location"),
+                "emojiTags": doc.get("emojiTags") or [],
+                "hierarchicalStructures": doc.get("hierarchicalStructures") or "",
+                "type": doc.get("type") or "TextMemoryItem",
+                "sourceUrl": doc.get("sourceUrl") or "",
+                "conversationId": doc.get("conversationId") or "",
+                "role": doc.get("role"),
+                "category": doc.get("category"),
+                "memoryId": doc.get("memoryId") or str(doc.get("_id")),
+                "topics": doc.get("topics") or [],
+                "steps": doc.get("steps") or [],
+                "current_step": doc.get("current_step"),
+                "memoryChunkIds": doc.get("memoryChunkIds") or [],
+                "user": user_pointer,
+                "developerUser": parse_pointer(doc.get("_p_developerUser")),
+                "workspace": parse_pointer(doc.get("_p_workspace")),
+                "post": parse_pointer(doc.get("_p_post")),
+                "postMessage": parse_pointer(doc.get("_p_postMessage")),
+                "organization": parse_pointer(doc.get("_p_organization")),
+                "namespace": parse_pointer(doc.get("_p_namespace")),
+                "external_user_read_access": doc.get("external_user_read_access") or [],
+                "external_user_write_access": doc.get("external_user_write_access") or [],
+                "user_read_access": doc.get("user_read_access") or [],
+                "user_write_access": doc.get("user_write_access") or [],
+                "workspace_read_access": doc.get("workspace_read_access") or [],
+                "workspace_write_access": doc.get("workspace_write_access") or [],
+                "role_read_access": doc.get("role_read_access") or [],
+                "role_write_access": doc.get("role_write_access") or [],
+                "namespace_read_access": doc.get("namespace_read_access") or [],
+                "namespace_write_access": doc.get("namespace_write_access") or [],
+                "organization_read_access": doc.get("organization_read_access") or [],
+                "organization_write_access": doc.get("organization_write_access") or [],
+                # Relevance scores (stored in DB)
+                "predicted_importance": doc.get("predicted_importance"),
+                "behavioral_score": doc.get("behavioral_score"),
+                "relevance_score": doc.get("relevance_score"),  # Deprecated
+            }
+            try:
+                results.append(ParseStoredMemory.from_dict(data))
+            except Exception as e:
+                logger.error(f"Failed to parse Mongo memory doc {doc.get('_id')}: {e}")
+
+        logger.info(f'Mongo fetched {len(results)} items.')
+        return results
 
     async def get_pinecone_related_memories_async(self, query_embedding, acl_filter: dict, top_k=20):
         """
@@ -7104,6 +8026,62 @@ class MemoryGraph:
             logger.warning(f"Error converting Qdrant filter to Pinecone: {e}")
             return {}
 
+    async def _qdrant_search_async(
+        self,
+        collection_name: str,
+        query_vector,
+        query_filter=None,
+        limit: int = 10,
+        with_payload: bool = True,
+        with_vectors: bool = False,
+        score_threshold: Optional[float] = None,
+        search_params=None,
+    ):
+        """
+        Async Qdrant search with fallback for API compatibility.
+        Uses search() if available, otherwise query_points() (some qdrant-client versions).
+        Returns a list of results (ScoredPoint-like: .id, .score, .payload).
+        """
+        if not self.qdrant_client:
+            return []
+        search_fn = getattr(self.qdrant_client, "search", None)
+        if search_fn is not None:
+            kwargs = dict(
+                collection_name=collection_name,
+                query_vector=query_vector,
+                query_filter=query_filter,
+                limit=limit,
+                with_payload=with_payload,
+                with_vectors=with_vectors,
+            )
+            if score_threshold is not None:
+                kwargs["score_threshold"] = score_threshold
+            if search_params is not None:
+                kwargs["search_params"] = search_params
+            return await search_fn(**kwargs)
+        query_fn = getattr(self.qdrant_client, "query_points", None)
+        if query_fn is not None:
+            kwargs = dict(
+                collection_name=collection_name,
+                query=query_vector,
+                query_filter=query_filter,
+                limit=limit,
+                with_payload=with_payload,
+                with_vectors=with_vectors,
+            )
+            if score_threshold is not None:
+                kwargs["score_threshold"] = score_threshold
+            if search_params is not None:
+                kwargs["search_params"] = search_params
+            res = await query_fn(**kwargs)
+            return getattr(res, "points", res) if res is not None else []
+        logger.error(
+            "Qdrant client has no 'search' or 'query_points'. "
+            "Available: %s",
+            [m for m in dir(self.qdrant_client) if not m.startswith("_") and ("search" in m.lower() or "query" in m.lower())],
+        )
+        return []
+
     async def get_qdrant_related_memories_async(self, query_embedding, acl_filter: qmodels.Filter, top_k=20):
         """
         Async method to get related memories from Qdrant index with resilient error handling
@@ -7118,6 +8096,11 @@ class MemoryGraph:
         """
         if not query_embedding:
             logger.warning("No query embedding provided to get_qdrant_related_memories_async.")
+            return {"matches": []}
+        
+        # Check if Qdrant client is available
+        if not self.qdrant_client:
+            logger.warning("Qdrant client not initialized, cannot perform search.")
             return {"matches": []}
         
         # Retry configuration for connection issues
@@ -7142,24 +8125,18 @@ class MemoryGraph:
                     if acl_filter:
                         logger.info(f"Qdrant ACL filter: {acl_filter}")
                 
-                # Use optimized search parameters for speed
+                # Use _qdrant_search_async (handles search vs query_points API compatibility)
                 from qdrant_client import models as qmodels
-                
-                # Add timeout wrapper around the Qdrant operation
                 results = await asyncio.wait_for(
-                    self.qdrant_client.search(
+                    self._qdrant_search_async(
                         collection_name=self.qdrant_collection,
                         query_vector=query_embedding,
                         query_filter=acl_filter,
                         limit=top_k,
                         with_payload=True,
                         with_vectors=False,
-                        # Optimize for speed while maintaining reasonable accuracy
-                        score_threshold=0.15,  # Lower threshold for academic queries
-                        search_params=qmodels.SearchParams(
-                            hnsw_ef=128,  # Increased for better recall on academic queries
-                            exact=False   # Use approximate search for speed
-                        )
+                        score_threshold=0.15,
+                        search_params=qmodels.SearchParams(hnsw_ef=128, exact=False)
                     ),
                     timeout=timeout_seconds
                 )
@@ -7849,6 +8826,11 @@ class MemoryGraph:
                 neo_session=neo_session  # Pass neo_session for node count checks in property enhancement
             )
             logger.warning(f"LLM query generation took: {time.time() - llm_start:.2f}s")
+            
+            # ALWAYS log the generated query, even if empty or invalid
+            logger.warning(f"🔍 GENERATED CYPHER QUERY (is_llm_generated={is_llm_generated}): {cipher_query}")
+            logger.warning(f"🔍 QUERY LENGTH: {len(cipher_query) if cipher_query else 0} characters")
+            
             if enhancement_params:
                 logger.info(f"🔧 ENHANCEMENT PARAMS: Received {len(enhancement_params)} parameters from property enhancement: {list(enhancement_params.keys())}")
 
@@ -8144,6 +9126,9 @@ class MemoryGraph:
             
             except asyncio.TimeoutError:
                 logger.error("Neo4j query timed out after 180 seconds")
+                logger.error(f"⏱️ TIMEOUT - Cypher query that timed out: {cipher_query}")
+                logger.error(f"⏱️ TIMEOUT - Query parameters: {parameters}")
+                logger.error(f"⏱️ TIMEOUT - Query length: {len(cipher_query) if cipher_query else 0} characters")
                 # Record failure in circuit breaker for timeout
                 await self.async_neo_conn.circuit_breaker.record_failure()
                 # Record failure in circuit breaker for timeout
@@ -8154,8 +9139,11 @@ class MemoryGraph:
 
             except Exception as e:
                 logger.error(f"Error executing Neo4j query: {str(e)}")
-                logger.error(f"Failed query: {cipher_query}")
-                logger.error(f"Failed parameters: {parameters}")
+                logger.error(f"❌ FAILED - Cypher query: {cipher_query}")
+                logger.error(f"❌ FAILED - Query parameters: {parameters}")
+                logger.error(f"❌ FAILED - Query length: {len(cipher_query) if cipher_query else 0} characters")
+                logger.error(f"❌ FAILED - Exception type: {type(e).__name__}")
+                logger.error(f"❌ FAILED - Exception details: {str(e)}")
                 
                 # FALLBACK: If query failed and we have property filters, retry without them
                 if enhancement_params:
@@ -9385,8 +10373,23 @@ class MemoryGraph:
 
     
    
-    async def _node_exists(self, node_id: str, neo_session: AsyncSession, node_type: Optional[NodeLabel] = None, node_content: Optional[str] = None) -> Union[str, bool]:
-        """Check if a node exists in Neo4j by ID or content, with robust fallback and error handling."""
+    async def _node_exists(
+        self, 
+        node_id: str, 
+        neo_session: AsyncSession, 
+        node_type: Optional[NodeLabel] = None, 
+        node_content: Optional[str] = None,
+        workspace_id: Optional[str] = None,
+        organization_id: Optional[str] = None,
+        namespace_id: Optional[str] = None,
+        user_id: Optional[str] = None
+    ) -> Union[str, bool]:
+        """
+        Check if a node exists in Neo4j by ID or content, with tenant scoping and ACL checks.
+        
+        CRITICAL: For Memory nodes, tenant scoping (workspace_id, organization_id, namespace_id) 
+        is REQUIRED to prevent cross-tenant data leakage.
+        """
         if self.async_neo_conn.fallback_mode:
             logger.warning("Neo4j in fallback mode, skipping _node_exists")
             return False
@@ -9396,9 +10399,52 @@ class MemoryGraph:
             if node_type and node_content:
                 # Simplified queries that check by content/name first
                 if node_type == NodeLabel.Memory:
-                    query = """
+                    # CRITICAL: Memory nodes MUST have tenant scoping to prevent cross-tenant matching
+                    if not workspace_id and not organization_id and not namespace_id:
+                        logger.error(f"🚨 SECURITY: _node_exists called for Memory node without tenant scoping! This will match across ALL tenants.")
+                    
+                    # Build MUST conditions (content + tenant scoping with AND)
+                    must_conditions = ["n.content = $node_content"]
+                    
+                    # Add tenant scoping - all provided tenant IDs MUST match (AND logic)
+                    tenant_conditions = []
+                    if workspace_id:
+                        tenant_conditions.append("n.workspace_id = $workspace_id")
+                    if organization_id:
+                        tenant_conditions.append("n.organization_id = $organization_id")
+                    if namespace_id:
+                        tenant_conditions.append("n.namespace_id = $namespace_id")
+                    
+                    if tenant_conditions:
+                        must_conditions.extend(tenant_conditions)
+                        logger.info(f"🔒 Memory node exists check with tenant scoping (MUST): {tenant_conditions}")
+                    
+                    # Build ACL write access conditions (SHOULD match - OR logic)
+                    # User has write access if they are the owner OR in any write access list
+                    acl_conditions = []
+                    if user_id:
+                        acl_conditions.append("n.user_id = $user_id")
+                        acl_conditions.append("$user_id IN n.user_write_access")
+                    if workspace_id:
+                        acl_conditions.append("$workspace_id IN n.workspace_write_access")
+                    if organization_id:
+                        acl_conditions.append("$organization_id IN n.organization_write_access")
+                    if namespace_id:
+                        acl_conditions.append("$namespace_id IN n.namespace_write_access")
+                    
+                    # Combine: MUST conditions AND (any ACL condition)
+                    if acl_conditions:
+                        acl_clause = f"({' OR '.join(acl_conditions)})"
+                        where_clause = f"{' AND '.join(must_conditions)} AND {acl_clause}"
+                        logger.info(f"🔒 Memory node exists check with ACL (SHOULD match any): {len(acl_conditions)} conditions")
+                    else:
+                        # No ACL conditions provided - just use tenant scoping
+                        where_clause = " AND ".join(must_conditions)
+                        logger.warning(f"⚠️ Memory node exists check without ACL conditions - only tenant scoping applied")
+                    
+                    query = f"""
                     MATCH (n:Memory) 
-                    WHERE n.content = $node_content
+                    WHERE {where_clause}
                     RETURN n.id as existing_id, COUNT(n) as count
                     """
                 elif node_type in [NodeLabel.Person, NodeLabel.Company, NodeLabel.Project]:
@@ -9425,7 +10471,18 @@ class MemoryGraph:
                 # If no type/content provided, just check by ID
                 query = "MATCH (n) WHERE n.id = $node_id RETURN n.id as existing_id, COUNT(n) as count"
 
-            params = {"node_id": node_id, "node_content": node_content} if node_content else {"node_id": node_id}
+            # Build params dict with all available parameters
+            params = {"node_id": node_id}
+            if node_content:
+                params["node_content"] = node_content
+            if workspace_id:
+                params["workspace_id"] = workspace_id
+            if organization_id:
+                params["organization_id"] = organization_id
+            if namespace_id:
+                params["namespace_id"] = namespace_id
+            if user_id:
+                params["user_id"] = user_id
             logger.debug(f"Node exists query: {query}")
             logger.debug(f"Node exists params: {params}")
             
@@ -9522,9 +10579,15 @@ class MemoryGraph:
                 existing_entity = await self._search_qdrant_for_existing_entity(node.label, props, unique_identifiers, user_schema)
                 
                 # Step 3: Neo4j MERGE with canonical values or new entity
-                return await self._merge_node_with_sync_results(
+                merge_result = await self._merge_node_with_sync_results(
                     node.label, props, unique_identifiers, existing_entity, neo_session
                 )
+                if merge_result:
+                    return merge_result
+
+                # If MERGE was skipped (e.g., unique identifiers are null), fall back to content-based creation
+                logger.info(f"🔄 SYNC STEP 3: Falling back to content-based creation for {node.label}")
+                return await self._create_node_with_content_check(node, common_metadata, neo_session)
             else:
                 # Fall back to content-based approach for nodes without unique_identifiers
                 logger.info(f"No unique_identifiers found for {node.label}, falling back to content-based approach")
@@ -9534,6 +10597,79 @@ class MemoryGraph:
             logger.error(f"Error in _merge_node_with_unique_identifiers: {e}")
             # Fall back to content-based approach on error
             return await self._create_node_with_content_check(node, common_metadata, neo_session)
+
+    async def _get_schemas_for_manual_graph(
+        self,
+        nodes: List[Any],
+        user_id: str,
+        workspace_id: str,
+        metadata: Dict[str, Any]
+    ) -> Optional[Any]:
+        """
+        For manual graph override, try to find registered schemas that match the node labels.
+        This allows manual graphs to benefit from schema-defined unique_identifiers.
+        
+        Returns a combined schema object that includes node_types from any matching registered schemas.
+        """
+        try:
+            # Extract multi-tenant context from metadata
+            if isinstance(metadata, str):
+                import json
+                metadata = json.loads(metadata)
+            
+            organization_id = metadata.get('organization_id')
+            namespace_id = metadata.get('namespace_id')
+            
+            # Get all registered schemas for this user/workspace
+            from services.schema_service import SchemaService
+            schema_service = SchemaService()
+            
+            user_schemas = await schema_service.get_active_schemas(
+                user_id=user_id,
+                workspace_id=workspace_id,
+                organization_id=organization_id,
+                namespace_id=namespace_id
+            )
+            
+            if not user_schemas:
+                logger.info("📋 MANUAL GRAPH: No registered schemas found for this user/workspace")
+                return None
+            
+            logger.info(f"📋 MANUAL GRAPH: Found {len(user_schemas)} registered schemas")
+            
+            # Extract unique node labels from manual graph
+            manual_node_labels = set(node.label for node in nodes)
+            logger.info(f"📋 MANUAL GRAPH: Node labels in manual graph: {manual_node_labels}")
+            
+            # Build a combined schema with matching node types
+            combined_node_types = {}
+            
+            for schema in user_schemas:
+                if hasattr(schema, 'node_types'):
+                    for node_name, node_type in schema.node_types.items():
+                        # If this schema defines a node type that's in the manual graph
+                        if node_name in manual_node_labels:
+                            combined_node_types[node_name] = node_type
+                            unique_ids = getattr(node_type, 'unique_identifiers', [])
+                            logger.info(f"📋 MANUAL GRAPH: Found schema for {node_name} with unique_identifiers: {unique_ids}")
+            
+            if not combined_node_types:
+                logger.info("📋 MANUAL GRAPH: No matching schemas found for manual node labels")
+                return None
+            
+            # Create a simple object to hold the combined schema
+            class CombinedSchema:
+                def __init__(self, node_types):
+                    self.node_types = node_types
+            
+            combined_schema = CombinedSchema(combined_node_types)
+            logger.info(f"📋 MANUAL GRAPH: Created combined schema with {len(combined_node_types)} node types")
+            return combined_schema
+            
+        except Exception as e:
+            logger.warning(f"📋 MANUAL GRAPH: Error fetching schemas for manual graph: {e}")
+            logger.debug(f"Schema fetch error details", exc_info=True)
+            return None
 
     def _get_unique_identifiers_for_node_type(self, node_label: str, user_schema: Optional[Any]) -> List[str]:
         """
@@ -9765,53 +10901,69 @@ class MemoryGraph:
                 namespace_id = props.get('namespace_id')
                 role_read_access = props.get('role_read_access', [])
                 
-                # CRITICAL: namespace_id and user_id are REQUIRED for multi-tenant isolation
-                if not namespace_id:
-                    raise ValueError(f"namespace_id is required for Qdrant search but was None. Node: {node_label}, uid_name: {uid_name}")
-                if not user_id:
-                    raise ValueError(f"user_id is required for Qdrant search but was None. Node: {node_label}, uid_name: {uid_name}")
+                # GRACEFUL FALLBACK: If namespace_id or user_id is None, skip Qdrant search
+                # This can happen with Session token auth where namespace context isn't available
+                # Fall back to Neo4j-only processing (which still enforces tenant isolation)
+                if not namespace_id or not user_id:
+                    logger.warning(f"🔄 SYNC STEP 2: Skipping Qdrant semantic search - namespace_id={namespace_id}, user_id={user_id}. "
+                                  f"Will use Neo4j MERGE with exact values for {node_label}.{uid_name}")
+                    # Return None to trigger fallback to Neo4j MERGE with exact values
+                    return None
                 
-                # Build must conditions: property_key AND namespace_id AND user_id (per-user isolation)
+                # Build must conditions: property_key AND namespace_id AND organization_id AND workspace_id (tenant scoping)
+                # NOTE: user_id is NOT in MUST - it's in SHOULD for write access check (consistent with Neo4j)
                 must_conditions = [
                     models.FieldCondition(key="property_key", match=models.MatchValue(value=f"{node_label}.{uid_name}")),
-                    models.FieldCondition(key="namespace_id", match=models.MatchValue(value=namespace_id)),
-                    models.FieldCondition(key="user_id", match=models.MatchValue(value=user_id))
+                    models.FieldCondition(key="namespace_id", match=models.MatchValue(value=namespace_id))
                 ]
                 
-                # Build should conditions (OR): user has access if ANY of these match
+                # Add organization_id and workspace_id to MUST conditions if available
+                if organization_id:
+                    must_conditions.append(models.FieldCondition(key="organization_id", match=models.MatchValue(value=organization_id)))
+                if workspace_id:
+                    must_conditions.append(models.FieldCondition(key="workspace_id", match=models.MatchValue(value=workspace_id)))
+                
+                # Build should conditions (OR): user has WRITE access if ANY of these match
+                # This is for deduplication during node creation (write operation), so check *_write_access
                 should_conditions = []
                 if user_id:
                     should_conditions.append(
                         models.FieldCondition(key="user_id", match=models.MatchValue(value=user_id))
                     )
                     should_conditions.append(
-                        models.FieldCondition(key="user_read_access", match=models.MatchAny(any=[user_id]))
+                        models.FieldCondition(key="user_write_access", match=models.MatchAny(any=[user_id]))
                     )
                 else:
                     should_conditions.append(
-                        models.FieldCondition(key="user_read_access", match=models.MatchAny(any=[]))
+                        models.FieldCondition(key="user_write_access", match=models.MatchAny(any=[]))
                     )
                 
-                # Add ACL filtering
+                # Add write access ACL filtering (consistent with Neo4j Node MERGE)
                 if workspace_id:
-                    should_conditions.append(models.FieldCondition(key="workspace_read_access", match=models.MatchAny(any=[workspace_id])))
+                    should_conditions.append(models.FieldCondition(key="workspace_write_access", match=models.MatchAny(any=[workspace_id])))
                 if organization_id:
-                    should_conditions.append(models.FieldCondition(key="organization_read_access", match=models.MatchAny(any=[organization_id])))
+                    should_conditions.append(models.FieldCondition(key="organization_write_access", match=models.MatchAny(any=[organization_id])))
                 if namespace_id:
-                    should_conditions.append(models.FieldCondition(key="namespace_read_access", match=models.MatchAny(any=[namespace_id])))
+                    should_conditions.append(models.FieldCondition(key="namespace_write_access", match=models.MatchAny(any=[namespace_id])))
                 if role_read_access:
+                    # Note: role uses read_access for property lookup (roles are for reading, not writing)
                     should_conditions.append(models.FieldCondition(key="role_read_access", match=models.MatchAny(any=role_read_access)))
                 
                 # Log detailed ACL filter information
                 logger.info(f"🔄 SYNC STEP 2: Searching for unique identifier in collection '{self.qdrant_property_collection}'")
-                logger.info(f"🔄 ACL FILTER - MUST (AND): property_key='{node_label}.{uid_name}' AND namespace_id='{namespace_id}' AND user_id='{user_id}'")
-                logger.info(f"🔄 ACL FILTER - SHOULD (OR): {len(should_conditions)} conditions - user_read_access=[{user_id}], workspace_read_access=[{workspace_id}], organization_read_access=[{organization_id}], namespace_read_access=[{namespace_id}], role_read_access={role_read_access}")
+                must_fields = f"property_key='{node_label}.{uid_name}' AND namespace_id='{namespace_id}'"
+                if organization_id:
+                    must_fields += f" AND organization_id='{organization_id}'"
+                if workspace_id:
+                    must_fields += f" AND workspace_id='{workspace_id}'"
+                logger.info(f"🔄 ACL FILTER - MUST (AND - Tenant Scoping): {must_fields}")
+                logger.info(f"🔄 ACL FILTER - SHOULD (OR - Write Access): {len(should_conditions)} conditions - user_id='{user_id}', user_write_access=[{user_id}], workspace_write_access=[{workspace_id}], organization_write_access=[{organization_id}], namespace_write_access=[{namespace_id}]")
                 
                 # ACL filter: must match (property_key AND user_id) AND (user has access via ANY of the should conditions)
                 # Handle embedding as list (HuggingFace API) or numpy array (local models)
                 uid_embedding_list = uid_embedding.tolist() if hasattr(uid_embedding, 'tolist') else uid_embedding
                 
-                search_results = await self.qdrant_client.search(
+                search_results = await self._qdrant_search_async(
                     collection_name=self.qdrant_property_collection,
                     query_vector=uid_embedding_list,
                     query_filter=models.Filter(
@@ -9926,7 +11078,9 @@ class MemoryGraph:
                     logger.info(f"🔄 SYNC STEP 3: ✅ {'Created' if was_created_in_neo4j else 'Updated'} {node_label} node: {result.get('id')} (Neo4j was_created={was_created_in_neo4j})")
                     return result
             
-            logger.error(f"🔄 SYNC STEP 3: MERGE operation failed")
+            # MERGE returned None - this happens when unique identifiers are all null
+            # This is expected behavior, not an error - the node will be handled by content-based fallback
+            logger.info(f"🔄 SYNC STEP 3: MERGE skipped (unique identifiers likely null) - will use content-based fallback for {node_label}")
             return None
             
         except Exception as e:
@@ -9967,18 +11121,13 @@ class MemoryGraph:
                 logger.debug(f"No non-null unique identifier values found for {node_label}, falling back to content-based approach (null is acceptable, node may be skipped)")
                 return None
 
-            # CRITICAL: Add workspace_id and user_id for multi-tenant isolation
-            # This ensures nodes are NEVER merged across different users or workspaces
+            # CRITICAL: Add workspace_id, organization_id, namespace_id for multi-tenant isolation
+            # This ensures nodes are NEVER merged across different tenants
             if 'workspace_id' in props and props['workspace_id'] is not None:
                 unique_props['workspace_id'] = props['workspace_id']
             else:
                 logger.error(f"workspace_id missing in props for {node_label} - multi-tenant isolation may be compromised!")
-
-            if 'user_id' in props and props['user_id'] is not None:
-                unique_props['user_id'] = props['user_id']
-            else:
-                logger.error(f"user_id missing in props for {node_label} - multi-tenant isolation may be compromised!")
-
+            
             if 'organization_id' in props and props['organization_id'] is not None:
                 unique_props['organization_id'] = props['organization_id']
             else:
@@ -9989,98 +11138,94 @@ class MemoryGraph:
             else:
                 logger.error(f"namespace_id missing in props for {node_label} - multi-tenant isolation may be compromised!")
 
-            if 'organization_read_access' in props and props['organization_read_access'] is not None:
-                unique_props['organization_read_access'] = props['organization_read_access']
-            else:
-                logger.error(f"org_read_access missing in props for {node_label} - multi-tenant isolation may be compromised!")
-
-            if 'organization_write_access' in props and props['organization_write_access'] is not None:
-                unique_props['organization_write_access'] = props['organization_write_access']
-            else:
-                logger.error(f"organization_write_access missing in props for {node_label} - multi-tenant isolation may be compromised!")
-
-            if 'namespace_read_access' in props and props['namespace_read_access'] is not None:
-                unique_props['namespace_read_access'] = props['namespace_read_access']
-            else:
-                logger.error(f"namespace_read_access missing in props for {node_label} - multi-tenant isolation may be compromised!")
-
-            if 'namespace_write_access' in props and props['namespace_write_access'] is not None:
-                unique_props['namespace_write_access'] = props['namespace_write_access']
-            else:
-                logger.error(f"user_write_access missing in props for {node_label} - multi-tenant isolation may be compromised!")
-
-            if 'workspace_write_access' in props and props['workspace_write_access'] is not None:
-                unique_props['workspace_write_access'] = props['workspace_write_access']
-            else:
-                logger.error(f"workspace_write_access missing in props for {node_label} - multi-tenant isolation may be compromised!")
+            # ACL Model (TWO-STEP PROCESS):
+            # Step 1: Search for existing node with write access check (MATCH + WHERE)
+            # Step 2a: If found → Update with MERGE (no WHERE, just tenant scoping)
+            # Step 2b: If not found → Create new node with CREATE
+            # This avoids Cypher syntax issues with WHERE in complex queries
             
-            if 'workspace_read_access' in props and props['workspace_read_access'] is not None:
-                unique_props['workspace_read_access'] = props['workspace_read_access']
-            else:
-                logger.error(f"workspace_read_access missing in props for {node_label} - multi-tenant isolation may be compromised!")
-
-            if 'role_read_access' in props and props['role_read_access'] is not None:
-                unique_props['role_read_access'] = props['role_read_access']
-            else:
-                logger.error(f"role_read_access missing in props for {node_label} - multi-tenant isolation may be compromised!")
-
-            if 'role_write_access' in props and props['role_write_access'] is not None:
-                unique_props['role_write_access'] = props['role_write_access']
-            else:
-                logger.error(f"role_write_access missing in props for {node_label} - multi-tenant isolation may be compromised!")
-
-            if 'external_user_write_access' in props and props['external_user_write_access'] is not None:
-                unique_props['external_user_write_access'] = props['external_user_write_access']
-            else:
-                logger.error(f"external_user_write_access missing in props for {node_label} - multi-tenant isolation may be compromised!")
-
-            if 'external_user_read_access' in props and props['external_user_read_access'] is not None:
-                unique_props['external_user_read_access'] = props['external_user_read_access']
-            else:
-                logger.error(f"external_user_read_access missing in props for {node_label} - multi-tenant isolation may be compromised!")
-
-            if 'user_read_access' in props and props['user_read_access'] is not None:
-                unique_props['user_read_access'] = props['user_read_access']
-            else:
-                logger.error(f"user_read_access missing in props for {node_label} - multi-tenant isolation may be compromised!")
-
-            if 'user_write_access' in props and props['user_write_access'] is not None:
-                unique_props['user_write_access'] = props['user_write_access']
-            else:
-                logger.error(f"user_write_access missing in props for {node_label} - multi-tenant isolation may be compromised!")
+            logger.info(f"🔒 Node operation with tenant scoping: {node_label} using {list(unique_props.keys())}")
+            logger.info(f"🔒 Write access check: user_id OR *_write_access arrays")
             
-            logger.info(f"🔒 MERGE with tenant isolation: {node_label} using {list(unique_props.keys())}")
-
-            # Build MERGE query with was_created flag for synchronization
+            # Build MATCH conditions for unique properties + tenant scoping
             unique_conditions = ', '.join([f"{k}: ${k}" for k in unique_props.keys()])
-            query = f"""
-                MERGE (n:{node_label} {{{unique_conditions}}})
-                ON CREATE SET n += $all_properties, n.was_created_flag = true
-                ON MATCH SET n += $update_properties, n.was_created_flag = false
-                RETURN n, n.was_created_flag as was_created
-            """
-
-            # Separate properties for CREATE vs MATCH
+            
+            # Extract ACL values for WHERE clause
+            user_id = props.get('user_id')
+            workspace_id = props.get('workspace_id')
+            organization_id = props.get('organization_id')
+            namespace_id = props.get('namespace_id')
+            
+            # Build WHERE clause for write access check
+            where_conditions = []
+            if user_id:
+                where_conditions.append("n.user_id = $user_id")
+                where_conditions.append("$user_id IN n.user_write_access")
+            if workspace_id:
+                where_conditions.append("$workspace_id IN n.workspace_write_access")
+            if organization_id:
+                where_conditions.append("$organization_id IN n.organization_write_access")
+            if namespace_id:
+                where_conditions.append("$namespace_id IN n.namespace_write_access")
+            
+            where_clause = f"WHERE {' OR '.join(where_conditions)}" if where_conditions else ""
+            
+            # Separate properties for CREATE vs UPDATE
             all_properties = props.copy()
             update_properties = {k: v for k, v in props.items() if k not in unique_props}
-            
-            # Add updatedAt for MATCH case
             update_properties['updatedAt'] = datetime.now(timezone.utc).isoformat()
-
-            # Execute query
+            
             params = {
                 **unique_props,
                 'all_properties': all_properties,
-                'update_properties': update_properties
+                'update_properties': update_properties,
+                'user_id': user_id,
+                'workspace_id': workspace_id,
+                'organization_id': organization_id,
+                'namespace_id': namespace_id
             }
-
-            logger.info(f"Executing MERGE query for {node_label}: {query}")
-            logger.info(f"🔍 DEBUG MERGE: all_properties contains 'id': {'id' in all_properties}")
-            logger.info(f"🔍 DEBUG MERGE: all_properties['id'] = {all_properties.get('id', 'NOT_FOUND')}")
-            logger.debug(f"Query parameters: {params}")
-
-            result = await neo_session.run(query, params)
-            record = await result.single()
+            
+            # STEP 1: Search for existing node with write access
+            search_query = f"""
+                OPTIONAL MATCH (n:{node_label} {{{unique_conditions}}})
+                {where_clause}
+                RETURN n
+            """
+            
+            logger.info(f"🔍 STEP 1: Searching for existing {node_label} with write access")
+            logger.debug(f"Search query: {search_query}")
+            
+            result = await neo_session.run(search_query, params)
+            existing_node = await result.single()
+            
+            if existing_node and existing_node.get('n'):
+                # STEP 2a: Node found with write access → Update it
+                logger.info(f"✅ STEP 1: Found existing {node_label} - will update")
+                
+                update_query = f"""
+                    MERGE (n:{node_label} {{{unique_conditions}}})
+                    SET n += $update_properties
+                    RETURN n, false as was_created
+                """
+                
+                logger.info(f"🔄 STEP 2a: Updating existing {node_label}")
+                result = await neo_session.run(update_query, params)
+                record = await result.single()
+            else:
+                # STEP 2b: Node not found or no write access → Create new node
+                logger.info(f"❌ STEP 1: No existing {node_label} found with write access - will create new")
+                
+                create_query = f"""
+                    CREATE (n:{node_label})
+                    SET n = $all_properties
+                    RETURN n, true as was_created
+                """
+                
+                logger.info(f"➕ STEP 2b: Creating new {node_label}")
+                logger.info(f"🔍 DEBUG: all_properties contains 'id': {'id' in all_properties}")
+                logger.info(f"🔍 DEBUG: all_properties['id'] = {all_properties.get('id', 'NOT_FOUND')}")
+                result = await neo_session.run(create_query, params)
+                record = await result.single()
 
             if record and record.get('n'):
                 node_data = dict(record['n'])
@@ -10174,16 +11319,44 @@ class MemoryGraph:
                 logger.info(f"🔍 Creating custom label enum for {node.label}")
                 node_type_enum = type('CustomNodeLabel', (), {'value': node.label})()
 
-            existing_id = await self._node_exists(
-                node_id=node_id,
-                neo_session=neo_session,
-                node_type=node_type_enum,
-                node_content=node_content,
-            )
+            # For Memory nodes, MUST include tenant scoping to prevent cross-tenant matches
+            if node.label == 'Memory' or (hasattr(node_type_enum, 'value') and node_type_enum.value == 'Memory'):
+                existing_id = await self._node_exists(
+                    node_id=node_id,
+                    neo_session=neo_session,
+                    node_type=node_type_enum,
+                    node_content=node_content,
+                    workspace_id=common_metadata.get("workspace_id"),
+                    organization_id=common_metadata.get("organization_id"),
+                    namespace_id=common_metadata.get("namespace_id"),
+                    user_id=common_metadata.get("user_id")
+                )
+            else:
+                existing_id = await self._node_exists(
+                    node_id=node_id,
+                    neo_session=neo_session,
+                    node_type=node_type_enum,
+                    node_content=node_content,
+                )
 
             if existing_id:
                 logger.info(f"✅ {node.label} node with exact content match already exists with id {existing_id}")
-                return {"id": existing_id, "was_created": False, "sync_operation": "existing"}
+                # Update the existing node with new properties (e.g., llmGenNodeId from manual graph override)
+                result = await self._merge_node_with_updated_content(
+                    node_label=node.label,
+                    new_props=dict(node.properties),
+                    existing_node_id=existing_id,
+                    common_metadata=common_metadata,
+                    neo_session=neo_session
+                )
+                if result:
+                    result['was_created'] = False
+                    result['sync_operation'] = 'update'
+                    logger.info(f"✅ Updated existing {node.label} node with new properties, id: {result.get('id')}")
+                    return result
+                else:
+                    # Fallback if update fails
+                    return {"id": existing_id, "was_created": False, "sync_operation": "existing"}
 
             # Step 4: Create new node
             logger.info(f"🆕 Creating new {node.label} node with content '{node_content[:50] if node_content else 'None'}...'")
@@ -10291,11 +11464,14 @@ class MemoryGraph:
             # For content-based deduplication, focus on name, title, description, and content properties (in priority order)
             content_property_keys = [f"{node_label}.name", f"{node_label}.title", f"{node_label}.description", f"{node_label}.content"]
             
-            # CRITICAL: namespace_id and user_id are REQUIRED for multi-tenant isolation
-            if not namespace_id:
-                raise ValueError(f"namespace_id is required for Qdrant search but was None. Node: {node_label}, props keys: {list(props.keys())}")
-            if not user_id:
-                raise ValueError(f"user_id is required for Qdrant search but was None. Node: {node_label}, props keys: {list(props.keys())}")
+            # GRACEFUL FALLBACK: If namespace_id or user_id is None, skip Qdrant search
+            # This can happen with Session token auth where namespace context isn't available
+            # Fall back to traditional content-based Neo4j deduplication
+            if not namespace_id or not user_id:
+                logger.warning(f"🔍 Skipping Qdrant semantic search for content dedup - namespace_id={namespace_id}, user_id={user_id}. "
+                              f"Will use Neo4j content-based deduplication for {node_label}")
+                # Return None to trigger traditional Neo4j content-based deduplication
+                return None
             
             # Build must conditions: property_key AND namespace_id AND user_id (per-user isolation)
             must_conditions = [
@@ -10367,7 +11543,7 @@ class MemoryGraph:
             # Handle embedding as list (HuggingFace API) or numpy array (local models)
             content_embedding_list = content_embedding.tolist() if hasattr(content_embedding, 'tolist') else content_embedding
             
-            search_results = await self.qdrant_client.search(
+            search_results = await self._qdrant_search_async(
                 collection_name=self.qdrant_property_collection,
                 query_vector=content_embedding_list,
                 query_filter=search_filter,
@@ -10399,7 +11575,7 @@ class MemoryGraph:
                 logger.info(f"🔍 SEMANTIC SEARCH: No results with {content_similarity_threshold} threshold, trying 0.5 threshold for debugging...")
                 logger.info(f"🔍 DEBUG SEARCH: Using same filter with lower threshold: {search_filter}")
                 
-                debug_results = await self.qdrant_client.search(
+                debug_results = await self._qdrant_search_async(
                     collection_name=self.qdrant_property_collection,
                     query_vector=content_embedding_list,
                     query_filter=search_filter,
@@ -10436,7 +11612,7 @@ class MemoryGraph:
                 logger.info(f"🔍 ANY PROPERTIES SEARCH: Looking for property_keys={possible_property_keys}")
                 logger.info(f"🔍 ANY PROPERTIES FILTER: {any_node_properties_filter}")
                 
-                any_props_results = await self.qdrant_client.search(
+                any_props_results = await self._qdrant_search_async(
                     collection_name=self.qdrant_property_collection,
                     query_vector=content_embedding_list,
                     query_filter=any_node_properties_filter,
@@ -10627,12 +11803,20 @@ class MemoryGraph:
         nodes: List[LLMGraphNode],
         relationships: List[LLMGraphRelationship],
         memory_item: Dict[str, Any],
-        neo_session: AsyncSession, 
+        neo_session: AsyncSession,
         workspace_id: Optional[str] = None,
-        user_schema: Optional[Any] = None
+        user_schema: Optional[Any] = None,
+        memory_policy: Optional[Dict[str, Any]] = None
     ):
         """
         Stores the LLM-generated graph structure in Neo4j, applying proper metadata and access controls.
+        Integrates with OMO (Open Memory Object) safety standards for consent, risk, and audit tracking.
+
+        Now also applies node_constraints and edge_constraints from memory_policy to control:
+        - Which nodes/edges can be created (create: auto/never)
+        - How to find existing nodes/edges (search config)
+        - Property values to set (set config)
+        - Conditional application (when clause)
         """
         # Fallback mode check: skip Neo4j operations if in fallback
         if self.async_neo_conn.fallback_mode:
@@ -10644,6 +11828,30 @@ class MemoryGraph:
 
         # Extract customMetadata for multi-tenant fields
         custom_metadata = metadata.get('customMetadata', {})
+
+        # OMO Safety Standards: Extract consent, risk, and ACL from metadata
+        omo_consent = metadata.get("consent", "implicit")  # Default to implicit consent
+        omo_risk = metadata.get("risk", "none")  # Default to no risk
+        acl = metadata.get("acl")  # Optional explicit ACL
+        external_user_id = metadata.get("external_user_id")
+        memory_id = memory_item.get("id") or memory_item.get("memoryId")
+
+        # OMO Consent Enforcement: Skip graph extraction if consent is 'none'
+        if omo_consent == "none":
+            logger.warning(
+                f"Memory {memory_id} has consent='none' - skipping graph storage. "
+                "Memories with no consent should not have graph nodes created."
+            )
+            return
+
+        # OMO Audit Trail: Track extraction metadata
+        omo_audit = {
+            "source_memory_id": memory_id,
+            "extracted_at": datetime.now(timezone.utc).isoformat(),
+            "consent": omo_consent,
+            "risk": omo_risk,
+            "extraction_method": "llm"  # This function handles LLM-extracted graphs
+        }
 
         # Common metadata fields to include for all nodes
         common_metadata = {
@@ -10668,8 +11876,39 @@ class MemoryGraph:
             "namespace_write_access": metadata.get("namespace_write_access", []),
             "external_user_read_access": metadata.get("external_user_read_access", []),
             "external_user_write_access": metadata.get("external_user_write_access", []),
-            "createdAt": metadata.get("createdAt") or datetime.now(timezone.utc).isoformat()
+            "createdAt": metadata.get("createdAt") or datetime.now(timezone.utc).isoformat(),
+            # OMO Safety Standard annotations
+            "_omo_consent": omo_consent,
+            "_omo_risk": omo_risk,
+            "_omo_source_memory_id": memory_id,
+            "_omo_audit": json.dumps(omo_audit) if omo_audit else None
         }
+
+        custom_metadata = metadata.get("customMetadata")
+        if isinstance(custom_metadata, dict):
+            for key, value in custom_metadata.items():
+                if key not in common_metadata:
+                    common_metadata[key] = value
+
+        # OMO Risk Enforcement: For flagged content, restrict ACL to owner only
+        if omo_risk == "flagged":
+            logger.warning(f"Memory {memory_id} has risk='flagged' - restricting ACL to owner only")
+            common_metadata["_omo_requires_review"] = True
+            if external_user_id:
+                # Override ACL to restrict to owner only
+                common_metadata["external_user_read_access"] = [external_user_id]
+                common_metadata["external_user_write_access"] = [external_user_id]
+
+        # OMO ACL Propagation: Use explicit ACL if provided
+        if acl:
+            logger.debug(f"Using explicit acl for memory {memory_id}: {acl}")
+            if isinstance(acl, dict):
+                if acl.get("read"):
+                    common_metadata["external_user_read_access"] = acl["read"]
+                if acl.get("write"):
+                    common_metadata["external_user_write_access"] = acl["write"]
+
+        logger.info(f"OMO Safety: Processing graph for memory {memory_id} with consent={omo_consent}, risk={omo_risk}")
 
         # Convert dictionary nodes to Node objects if needed
         nodes_objects = [
@@ -10698,15 +11937,63 @@ class MemoryGraph:
 
         # Create nodes first and collect results for property indexing
         neo4j_results = []
-        
+        skipped_node_ids = set()  # Track nodes skipped due to constraints
+
+        # Extract node constraints from memory_policy
+        node_constraints = []
+        if memory_policy:
+            node_constraints = memory_policy.get('node_constraints', [])
+            if node_constraints:
+                logger.info(f"🔧 NODE CONSTRAINTS: {len(node_constraints)} constraints to apply")
+
         for node in nodes_objects:
             node_id = node.properties.get('id', str(uuid4()))
             node_content = node.properties.get('content') or node.properties.get('name')
+            node_label = node.label.value if hasattr(node.label, 'value') else str(node.label)
 
-            logger.info(f"Processing {node.label} node with content: {node_content}")
-            
+            logger.info(f"Processing {node_label} node with content: {node_content}")
+
             try:
-                # Memory nodes: Keep existing content-based deduplication
+                # Apply node constraints if configured
+                if node_constraints and node_label != 'Memory':  # Don't constraint-check Memory nodes
+                    node_props = node.properties.model_dump() if hasattr(node.properties, 'model_dump') else dict(node.properties)
+                    should_create, existing_node, final_props = await apply_node_constraints(
+                        node={'type': node_label, 'properties': node_props},
+                        node_type=node_label,
+                        node_constraints=node_constraints,
+                        memory_graph=self,
+                        extracted_node_properties=node_props,
+                        context={'workspace_id': workspace_id, 'metadata': common_metadata}
+                    )
+
+                    if not should_create and not existing_node:
+                        # Node skipped: create='never' and no existing found
+                        logger.info(f"⏭️ CONSTRAINT SKIP: Node {node_label} skipped - create='never' and no existing found")
+                        skipped_node_ids.add(node_id)
+                        skipped_node_ids.add(node_props.get('llmGenNodeId', node_id))
+                        continue
+
+                    if existing_node:
+                        # Use existing node instead of creating
+                        logger.info(f"🔗 CONSTRAINT LINK: Using existing {node_label} node: {existing_node.get('id')}")
+                        node.properties['id'] = existing_node.get('id')
+                        neo4j_results.append({
+                            'label': node_label,
+                            'properties': existing_node,
+                            'was_created': False,
+                            'sync_operation': 'constraint_link',
+                            'node_id': existing_node.get('id')
+                        })
+                        continue
+
+                    # Apply final_props if set values were configured
+                    if final_props and final_props != node_props:
+                        for key, value in final_props.items():
+                            if hasattr(node.properties, key):
+                                setattr(node.properties, key, value)
+                            elif isinstance(node.properties, dict):
+                                node.properties[key] = value
+                # Memory nodes: Keep existing content-based deduplication with tenant scoping
                 if node.label == 'Memory':
                     logger.info(f"Processing Memory node with existing logic")
                     # Handle both system and custom node labels
@@ -10717,11 +12004,16 @@ class MemoryGraph:
                         logger.info(f"🔧 CUSTOM LABEL: Using custom node label '{node.label}' directly")
                         node_type_enum = type('CustomNodeLabel', (), {'value': node.label})()
                     
+                    # CRITICAL: Memory nodes MUST have tenant scoping to prevent cross-tenant matching
                     existing_id = await self._node_exists(
                         node_id=node_id,
                         neo_session=neo_session,
                         node_type=node_type_enum,
                         node_content=node_content,
+                        workspace_id=common_metadata.get("workspace_id"),
+                        organization_id=common_metadata.get("organization_id"),
+                        namespace_id=common_metadata.get("namespace_id"),
+                        user_id=common_metadata.get("user_id")
                     )
                     
                     if existing_id:
@@ -10783,9 +12075,139 @@ class MemoryGraph:
                 logger.error(f"Error processing node {node.label} with content '{node_content}': {e}")
                 raise
 
-        # Create relationships after nodes
+        # Build ID mapping ONLY from successfully created/merged nodes
+        # Use neo4j_results which contains only nodes that were successfully processed
+        id_mapping = {}
+        for result in neo4j_results:
+            neo4j_uuid = result.get('node_id')
+            properties = result.get('properties', {})
+            llm_gen_id = properties.get('llmGenNodeId')
+            
+            if neo4j_uuid:
+                # Map llmGenNodeId to UUID (for auto mode and manual mode with unique identifiers)
+                if llm_gen_id:
+                    id_mapping[llm_gen_id] = neo4j_uuid
+                    logger.debug(f"📍 ID MAPPING: {llm_gen_id} -> {neo4j_uuid}")
+                # Also map UUID to itself (for Memory nodes and nodes with custom IDs)
+                id_mapping[neo4j_uuid] = neo4j_uuid
+        
+        # CRITICAL FIX: Add Memory node ID to mapping for EXTRACTED relationships
+        # The Memory node was created earlier (in add_memory_item_to_neo4j) and is NOT in neo4j_results
+        # EXTRACTED relationships use the Memory node's UUID as source ID
+        if memory_item and hasattr(memory_item, 'id'):
+            memory_node_id = str(memory_item.id)
+            id_mapping[memory_node_id] = memory_node_id
+            logger.info(f"📍 ID MAPPING: Added Memory node ID to mapping: {memory_node_id}")
+
+        # Ensure LLM-generated IDs map to final IDs even when nodes were constraint-linked
+        for node in nodes_objects:
+            try:
+                node_props = node.properties.model_dump() if hasattr(node.properties, 'model_dump') else dict(node.properties)
+            except Exception:
+                node_props = dict(getattr(node, "properties", {}) or {})
+            llm_gen_id = node_props.get("llmGenNodeId")
+            node_id_val = node_props.get("id")
+            if not llm_gen_id or not node_id_val:
+                continue
+            if llm_gen_id in skipped_node_ids:
+                continue
+            # Only map when the final node_id is known to be valid
+            if node_id_val in id_mapping and llm_gen_id not in id_mapping:
+                id_mapping[llm_gen_id] = node_id_val
+                logger.debug(f"📍 ID MAPPING: Added llmGenNodeId {llm_gen_id} -> {node_id_val}")
+        
+        logger.info(f"📍 ID MAPPING: Built mapping for {len(id_mapping)} successfully created node IDs")
+
+        # Extract edge constraints from memory_policy
+        edge_constraints = []
+        if memory_policy:
+            edge_constraints = memory_policy.get('edge_constraints', [])
+            if edge_constraints:
+                logger.info(f"🔧 EDGE CONSTRAINTS: {len(edge_constraints)} constraints to apply")
+
+        # Filter relationships - only create for nodes that were successfully created
+        valid_relationships = []
+        skipped_count = 0
+
         for rel in relationship_objects:
+            source_original_id = rel.source.id
+            target_original_id = rel.target.id
+
+            # Check if source or target was skipped due to node constraints
+            if source_original_id in skipped_node_ids:
+                logger.debug(f"⚠️  Skipping relationship {rel.type}: source node '{source_original_id}' was skipped by constraint")
+                skipped_count += 1
+                continue
+            if target_original_id in skipped_node_ids:
+                logger.debug(f"⚠️  Skipping relationship {rel.type}: target node '{target_original_id}' was skipped by constraint")
+                skipped_count += 1
+                continue
+
+            # Check if both source and target nodes were successfully created
+            if source_original_id not in id_mapping:
+                logger.debug(f"⚠️  Skipping relationship {rel.type}: source node '{source_original_id}' was not created")
+                skipped_count += 1
+                continue
+            if target_original_id not in id_mapping:
+                logger.debug(f"⚠️  Skipping relationship {rel.type}: target node '{target_original_id}' was not created")
+                skipped_count += 1
+                continue
+
+            # Update relationship IDs to Neo4j UUIDs
+            rel.source.id = id_mapping[source_original_id]
+            rel.target.id = id_mapping[target_original_id]
+            valid_relationships.append(rel)
+
+        if skipped_count > 0:
+            logger.warning(f"⚠️  Skipped {skipped_count} relationships - nodes were not created/skipped")
+        logger.info(f"✅ Creating {len(valid_relationships)} relationships for successfully created nodes")
+
+        # Create only valid relationships (with edge constraint checking)
+        edge_skipped_count = 0
+        for rel in valid_relationships:
+            rel_type = rel.type.value if hasattr(rel.type, 'value') else str(rel.type)
+            source_label = rel.source.label.value if hasattr(rel.source.label, 'value') else str(rel.source.label)
+            target_label = rel.target.label.value if hasattr(rel.target.label, 'value') else str(rel.target.label)
+
+            # Apply edge constraints if configured
+            if edge_constraints:
+                # Get node dicts for constraint evaluation
+                source_node = {'type': source_label, 'properties': {'id': rel.source.id}}
+                target_node = {'type': target_label, 'properties': {'id': rel.target.id}}
+
+                # Get relationship properties if any
+                rel_props = rel.properties.model_dump() if hasattr(rel, 'properties') and hasattr(rel.properties, 'model_dump') else {}
+
+                should_create, final_target, final_props = await apply_edge_constraints(
+                    source_node=source_node,
+                    target_node=target_node,
+                    edge_type=rel_type,
+                    edge_constraints=edge_constraints,
+                    memory_graph=self,
+                    extracted_edge_properties=rel_props,
+                    context={'workspace_id': workspace_id, 'metadata': common_metadata}
+                )
+
+                if not should_create:
+                    logger.info(f"⏭️ EDGE CONSTRAINT SKIP: Relationship {rel_type} skipped - create='never' and no existing target found")
+                    edge_skipped_count += 1
+                    continue
+
+                if final_target and final_target.get('id') != rel.target.id:
+                    # Use different target node found by constraint search
+                    logger.info(f"🔗 EDGE CONSTRAINT LINK: Using existing target for {rel_type}: {final_target.get('id')}")
+                    rel.target.id = final_target.get('id')
+
+                # Apply final_props if set values were configured
+                if final_props and hasattr(rel, 'properties'):
+                    for key, value in final_props.items():
+                        if hasattr(rel.properties, key):
+                            setattr(rel.properties, key, value)
+
             await self._create_relationship(neo_session=neo_session, relationship=rel, common_metadata=common_metadata)
+
+        if edge_skipped_count > 0:
+            logger.info(f"🔧 EDGE CONSTRAINTS: Skipped {edge_skipped_count} relationships due to constraints")
         
         # CRITICAL FIX: Make property indexing synchronous (await instead of background task)
         # This ensures properties are indexed BEFORE the response is returned
@@ -10818,7 +12240,17 @@ class MemoryGraph:
 
             # ANTI-HALLUCINATION: Filter out null properties from LLM output
             props = self._filter_null_properties(props)
-            
+
+            # ANTI-HALLUCINATION: Skip nodes that have no meaningful properties
+            # (only system-generated IDs like 'id', 'llmGenNodeId' remain after filtering)
+            system_props = {'id', 'llmGenNodeId', 'llm_gen_node_id'}
+            meaningful_props = {k for k in props.keys() if k not in system_props}
+            if not meaningful_props:
+                node_label_str = node.label.value if hasattr(node.label, 'value') else str(node.label)
+                logger.warning(f"🚫 ANTI-HALLUCINATION: Skipping {node_label_str} node with no meaningful properties (only system IDs). "
+                             f"Props after filtering: {list(props.keys())}")
+                return None
+
             # SCHEMA VALIDATION: Check that required properties are present
             # Note: This happens BEFORE property overrides are applied (in generate_node_ids)
             # Property overrides can "rescue" nodes by providing missing required fields
@@ -11089,11 +12521,46 @@ class MemoryGraph:
 
             logger.info(f"🔒 Creating relationship {safe_relationship_type} with full tenant isolation (workspace={workspace_id}, user={user_id}, org={organization_id}, namespace={namespace_id})")
 
-            # Use 'id' property for relationship matching (should be preserved from graph override)
-            # IMPORTANT: Include ALL tenant isolation and ACL fields in MATCH to only connect nodes with identical permissions
+            # CRITICAL: After the ID mapping fix, source_llm_id and target_llm_id now contain Neo4j UUIDs
+            # All nodes (Memory, entities, etc.) are matched by their UUID 'id' field
+            # The ID mapping in store_llm_generated_graph ensures we have the correct UUIDs
+            
+            # Use 'id' field for all nodes (it now contains the Neo4j UUID)
+            source_match_field = "id"
+            target_match_field = "id"
+            
+            # CRITICAL: Match nodes by UUID id + namespace_id + organization_id + workspace_id
+            # NOTE: user_id is NOT in MATCH - it's in WHERE clause (OR logic)
+            # Creating a relationship is a WRITE operation, so we check *_write_access (not read_access)
+            # MATCH narrows by tenant (namespace/org/workspace), WHERE checks write permission
+            
+            # CRITICAL FIX: Handle NULL/missing organization_id and namespace_id
+            # In Neo4j, {property: null} doesn't match nodes without that property
+            # Build conditional MATCH based on which tenant IDs are present
+            match_conditions = [f"{source_match_field}: $source_llm_id"]
+            if workspace_id:
+                match_conditions.append("workspace_id: $workspace_id")
+            if organization_id:
+                match_conditions.append("organization_id: $organization_id")
+            if namespace_id:
+                match_conditions.append("namespace_id: $namespace_id")
+            
+            source_match_clause = ", ".join(match_conditions)
+            target_match_clause = source_match_clause.replace("source_llm_id", "target_llm_id")
+            
             query = f"""
-            MATCH (source:{source_label} {{id: $source_id, workspace_id: $workspace_id, user_id: $user_id, organization_id: $organization_id, namespace_id: $namespace_id}})
-            MATCH (target:{target_label} {{id: $target_id, workspace_id: $workspace_id, user_id: $user_id, organization_id: $organization_id, namespace_id: $namespace_id}})
+            MATCH (source:{source_label} {{{source_match_clause}}})
+            WHERE source.user_id = $user_id 
+               OR $user_id IN source.user_write_access
+               OR $workspace_id IN source.workspace_write_access
+               OR $organization_id IN source.organization_write_access
+               OR $namespace_id IN source.namespace_write_access
+            MATCH (target:{target_label} {{{target_match_clause}}})
+            WHERE target.user_id = $user_id
+               OR $user_id IN target.user_write_access
+               OR $workspace_id IN target.workspace_write_access
+               OR $organization_id IN target.organization_write_access
+               OR $namespace_id IN target.namespace_write_access
             MERGE (source)-[r:{safe_relationship_type}]->(target)
             ON CREATE SET r += $props
             RETURN r
@@ -11729,12 +13196,11 @@ class MemoryGraph:
         developer_user_id: Optional[str] = None,
         graph_override: Optional[Dict[str, Any]] = None,
         schema_id: Optional[str] = None,
-        simple_schema_mode: bool = False,
         property_overrides: Optional[Dict[str, Dict[str, Any]]] = None
     ) -> List[ParseStoredMemory]:
         """
         Batch version of add_memory_item_async - processes multiple memories in a single database transaction.
-        
+
         Args:
             memory_items: List of MemoryItem objects to process
             relationships_json_list: List of relationship lists, one per memory
@@ -11752,9 +13218,8 @@ class MemoryGraph:
             developer_user_id: Developer user ID for schema selection
             graph_override: Optional graph override for manual mode
             schema_id: Optional schema ID for enforcement
-            simple_schema_mode: Use simplified schema mode
             property_overrides: Optional property overrides
-            
+
         Returns:
             List of ParseStoredMemory objects
         """
@@ -11808,19 +13273,18 @@ class MemoryGraph:
                         developer_user_id,
                         graph_override,
                         schema_id,
-                        simple_schema_mode,
                         property_overrides
                     )
-            
+
             logger.info(f"✅ batch_add_memory_items_async: Completed {len(stored_memories)} memories")
             return stored_memories
-            
+
         except Exception as e:
             logger.error(f"❌ Error in batch_add_memory_items_async: {e}", exc_info=True)
             raise  # Re-raise the exception instead of falling back to individual processing
 
     async def add_memory_item_async(
-        self, 
+        self,
         memory_item: MemoryItem,
         relationships_json: List[RelationshipItem],
         sessionToken: str,
@@ -11830,22 +13294,23 @@ class MemoryGraph:
         add_to_pinecone: bool = True,
         workspace_id: Optional[str] = None,
         skip_background_processing: bool = False,
-        user_workspace_ids: Optional[List[str]] = None, 
+        user_workspace_ids: Optional[List[str]] = None,
         api_key: Optional[str] = None,
         developer_user_object_id: Optional[str] = None,
         legacy_route: bool = True,
-        developer_user_id: Optional[str] = None,  # Add the missing parameter
-        graph_override: Optional[Dict[str, Any]] = None,  # Add graph_override parameter
-        schema_id: Optional[str] = None,  # Add schema_id for enforcement
-        simple_schema_mode: bool = False,  # Add simple_schema_mode parameter
-        property_overrides: Optional[Dict[str, Dict[str, Any]]] = None  # Add property_overrides parameter
+        developer_user_id: Optional[str] = None,
+        graph_override: Optional[Dict[str, Any]] = None,
+        schema_id: Optional[str] = None,
+        property_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
+        memory_policy: Optional[Dict[str, Any]] = None
     ) -> List[ParseStoredMemory]:  # Updated return type
         """
         Async version of add_memory_item that quickly stores the memory and processes relationships in the background.
         Accepts an optional neo_session for robust session management.
-        
+
         Args:
             schema_id: Optional custom schema ID to enforce during graph generation
+            memory_policy: Optional resolved memory policy with node_constraints and edge_constraints
         """
         logger.info(f"🔍 DEBUG: add_memory_item_async received graph_override: {graph_override}")
         logger.info(f"🔍 DEBUG: add_memory_item_async graph_override type: {type(graph_override)}")
@@ -11859,15 +13324,22 @@ class MemoryGraph:
             if memory_item and hasattr(memory_item, 'id'):
                 self.memory_items[memory_item.id] = memory_item
             
-            # If no workspace_id provided, try to get it from selected workspace follower
+            # If no workspace_id provided, try to get it from memory metadata first
             if not workspace_id:
-                async with AsyncClient() as client:
-                    workspace_id = await User.get_selected_workspace_id_async(user_id, sessionToken, api_key=api_key)
-                    if workspace_id:
-                        logger.info(f"Using selected workspace ID: {workspace_id}")
-                        memory_item.metadata['workspace_id'] = workspace_id
-                    else:
-                        logger.warning("No workspace_id provided and no selected workspace found")
+                # First, check if workspace_id is already in memory metadata
+                workspace_id = memory_item.metadata.get('workspace_id') if memory_item and hasattr(memory_item, 'metadata') else None
+                
+                if workspace_id:
+                    logger.info(f"Using workspace_id from memory metadata: {workspace_id}")
+                else:
+                    # Only fetch from Parse as last resort if absolutely necessary
+                    async with AsyncClient() as client:
+                        workspace_id = await User.get_selected_workspace_id_async(user_id, sessionToken, api_key=api_key)
+                        if workspace_id:
+                            logger.info(f"Using selected workspace ID from Parse: {workspace_id}")
+                            memory_item.metadata['workspace_id'] = workspace_id
+                        else:
+                            logger.warning("No workspace_id provided and no selected workspace found")
 
             # Initialize variables for the return values
             added_item_properties: ParseStoredMemory = None
@@ -11994,9 +13466,9 @@ class MemoryGraph:
                             neo_session=None,
                             legacy_route=legacy_route,
                             graph_override=graph_override,  # Pass graph_override to background processing
-                            simple_schema_mode=simple_schema_mode,  # Pass simple_schema_mode
                             property_overrides=property_overrides,  # Pass property_overrides for node customization
-                            developer_user_id=developer_user_id  # Pass developer_user_id for schema selection
+                            developer_user_id=developer_user_id,  # Pass developer_user_id for schema selection
+                            memory_policy=memory_policy  # Pass resolved memory_policy with constraints
                         )
 
                         # Process relationships in background
@@ -12851,7 +14323,7 @@ class MemoryGraph:
             search_result = None  # Initialize to avoid variable scoping issues
             try:
                 search_result = await asyncio.wait_for(
-                    self.qdrant_client.search(
+                    self._qdrant_search_async(
                         collection_name=self.qdrant_collection,
                         query_vector=embedding,
                         query_filter=qdrant_filter,
@@ -12876,14 +14348,34 @@ class MemoryGraph:
             match = search_result[0]
             score = match.score
             matched_id = str(match.id)
-            logger.info(f"Found match with ID: {matched_id} and similarity score: {score}")
+            matched_chunk_id = None
+            if getattr(match, "payload", None):
+                matched_chunk_id = (
+                    match.payload.get("chunk_id")
+                    or match.payload.get("memoryId")
+                    or match.payload.get("memory_id")
+                )
+            resolved_id = matched_chunk_id or matched_id
+            logger.info(
+                "Found match with ID: %s (resolved_id=%s) and similarity score: %s",
+                matched_id,
+                resolved_id,
+                score,
+            )
 
             if score > 0.97:
                 logger.info(f"Score {score} > 0.97, using existing vector")
                 qdrant_metadata = MemoryGraph.pinecone_compatible_metadata(new_metadata)
                 parse_metadata = new_metadata
-                await self.update_memory_metadata(session_token, matched_id, neo_session, qdrant_metadata, parse_metadata, api_key=api_key)
-                return matched_id
+                await self.update_memory_metadata(
+                    session_token,
+                    resolved_id,
+                    neo_session,
+                    qdrant_metadata,
+                    parse_metadata,
+                    api_key=api_key,
+                )
+                return resolved_id
             else:
                 logger.info(f"Score {score} <= 0.97, will create new vector")
                 return None

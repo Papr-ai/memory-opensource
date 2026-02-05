@@ -8,7 +8,7 @@ logger = LoggerSingleton.get_logger(__name__)
 
 # Simple in-memory cache with TTL
 class TTLCache:
-    def __init__(self, maxsize=1000, ttl_seconds=180, daily_flush=True):  # Increased to 3 minutes
+    def __init__(self, maxsize=1000, ttl_seconds=180, daily_flush=True, name="cache"):  # Increased to 3 minutes
         self.maxsize = maxsize
         self.ttl_seconds = ttl_seconds
         self.cache = {}
@@ -20,6 +20,7 @@ class TTLCache:
         self.daily_flush = daily_flush
         self.last_daily_flush = time.time()
         self.daily_flush_interval = 24 * 60 * 60  # 24 hours in seconds
+        self.name = name
     
     def _cleanup_expired(self):
         """Remove expired entries to prevent memory bloat"""
@@ -32,7 +33,7 @@ class TTLCache:
                 self.cache.clear()
                 self.stats = {"hits": 0, "misses": 0, "sets": 0}
                 self.last_daily_flush = current_time
-                logger.info(f"Daily cache flush executed: cleared {cache_size} entries")
+                logger.info(f"[{self.name}] Daily cache flush executed: cleared {cache_size} entries")
                 return  # Skip regular cleanup since we just flushed everything
         
         # Regular cleanup of expired entries
@@ -43,7 +44,7 @@ class TTLCache:
                 for k in expired_keys:
                     del self.cache[k]
                 if expired_keys:
-                    logger.info(f"Cache cleanup: removed {len(expired_keys)} expired entries")
+                    logger.info(f"[{self.name}] Cache cleanup: removed {len(expired_keys)} expired entries")
                 self.last_cleanup = current_time
     
     def get(self, key: str) -> Optional[Any]:
@@ -54,15 +55,15 @@ class TTLCache:
                 value, timestamp = self.cache[key]
                 if time.time() - timestamp < self.ttl_seconds:
                     self.stats["hits"] += 1
-                    logger.info(f"Cache HIT for {key[:20]}... (age: {time.time() - timestamp:.1f}s)")
+                    logger.info(f"[{self.name}] Cache HIT for {key[:20]}... (age: {time.time() - timestamp:.1f}s)")
                     return value
                 else:
                     # Expired, remove it
                     del self.cache[key]
-                    logger.info(f"Cache EXPIRED for {key[:20]}... (age: {time.time() - timestamp:.1f}s)")
+                    logger.info(f"[{self.name}] Cache EXPIRED for {key[:20]}... (age: {time.time() - timestamp:.1f}s)")
             
             self.stats["misses"] += 1
-            logger.info(f"Cache MISS for {key[:20]}...")
+            logger.info(f"[{self.name}] Cache MISS for {key[:20]}...")
             return None
     
     def set(self, key: str, value: Any):
@@ -80,11 +81,11 @@ class TTLCache:
                     old_ts, old_key = heapq.heappop(self.eviction_heap)
                     if old_key in self.cache and self.cache[old_key][1] == old_ts:
                         del self.cache[old_key]
-                        logger.info(f"Cache EVICTED oldest entry: {old_key[:20]}...")
+                        logger.info(f"[{self.name}] Cache EVICTED oldest entry: {old_key[:20]}...")
                         break
             
             self.stats["sets"] += 1
-            logger.info(f"Cache SET for {key[:20]}... (size: {len(self.cache)}/{self.maxsize})")
+            logger.info(f"[{self.name}] Cache SET for {key[:20]}... (size: {len(self.cache)}/{self.maxsize})")
     
     def get_stats(self):
         with self.lock:
@@ -107,7 +108,7 @@ class TTLCache:
         with self.lock:
             self.cache.clear()
             self.stats = {"hits": 0, "misses": 0, "sets": 0}
-            logger.info("Cache cleared")
+            logger.info(f"[{self.name}] Cache cleared")
     
     def find_value(self, target_value: Any) -> Optional[str]:
         """Find a key by its value (reverse lookup)"""
@@ -130,15 +131,18 @@ class TTLCache:
 
 # Global cache instances following authentication security best practices
 # Authentication caches: Short TTL (2-3 min) provides security - NO daily flush needed
-api_key_cache = TTLCache(maxsize=1000, ttl_seconds=180, daily_flush=False)  # 3 minutes - TTL provides security
-session_token_cache = TTLCache(maxsize=1000, ttl_seconds=180, daily_flush=False)  # 3 minutes - TTL provides security
-access_token_cache = TTLCache(maxsize=1000, ttl_seconds=180, daily_flush=False)  # 3 minutes - TTL provides security
-auth_optimized_cache = TTLCache(maxsize=1000, ttl_seconds=120, daily_flush=False)  # 2 minutes - optimal for auth security
-api_key_to_user_id_cache = TTLCache(maxsize=1000, ttl_seconds=600, daily_flush=False)  # 10 minutes - stable mapping
+api_key_cache = TTLCache(maxsize=1000, ttl_seconds=180, daily_flush=False, name="api_key_cache")  # 3 minutes - TTL provides security
+session_token_cache = TTLCache(maxsize=1000, ttl_seconds=180, daily_flush=False, name="session_token_cache")  # 3 minutes - TTL provides security
+access_token_cache = TTLCache(maxsize=1000, ttl_seconds=180, daily_flush=False, name="access_token_cache")  # 3 minutes - TTL provides security
+auth_optimized_cache = TTLCache(maxsize=1000, ttl_seconds=120, daily_flush=False, name="auth_optimized_cache")  # 2 minutes - optimal for auth security
+api_key_to_user_id_cache = TTLCache(maxsize=1000, ttl_seconds=600, daily_flush=False, name="api_key_to_user_id_cache")  # 10 minutes - stable mapping
 
 # Business data caches: Longer TTL + daily flush for monthly billing cycles
-workspace_subscription_cache = TTLCache(maxsize=1000, ttl_seconds=3600, daily_flush=True)  # 1 hour + daily flush - subscription changes monthly
-customer_tier_cache = TTLCache(maxsize=1000, ttl_seconds=3600, daily_flush=True)  # 1 hour + daily flush - tier changes infrequently 
+workspace_subscription_cache = TTLCache(maxsize=1000, ttl_seconds=3600, daily_flush=True, name="workspace_subscription_cache")  # 1 hour + daily flush - subscription changes monthly
+customer_tier_cache = TTLCache(maxsize=1000, ttl_seconds=3600, daily_flush=True, name="customer_tier_cache")  # 1 hour + daily flush - tier changes infrequently 
 
 # Enhanced API key cache: caches resolved org/namespace and owner for keys
-enhanced_api_key_cache = TTLCache(maxsize=1000, ttl_seconds=600, daily_flush=True)  # 10 minutes + daily flush 
+enhanced_api_key_cache = TTLCache(maxsize=1000, ttl_seconds=600, daily_flush=True, name="enhanced_api_key_cache")  # 10 minutes + daily flush 
+
+# Search caches: short TTL to avoid staleness while reducing latency
+search_embedding_cache = TTLCache(maxsize=2000, ttl_seconds=600, daily_flush=False, name="search_embedding_cache")  # 10 minutes

@@ -457,6 +457,36 @@ class AddMemoryResponse(BaseModel):
     def failure(cls, error: str, code: int = 400, details: Any = None):
         return cls(code=code, status="error", data=None, error=error, details=details)
 
+
+class AddMemoryOMOResponse(BaseModel):
+    """
+    OMO (Open Memory Object) format response for add_memory API.
+
+    Used when ?format=omo is specified. Returns the memory in portable OMO format
+    as defined by https://github.com/papr-ai/open-memory-object
+    """
+    code: int = Field(default=200, description="HTTP status code")
+    status: str = Field(default="success", description="'success' or 'error'")
+    omo: Optional[Any] = Field(default=None, description="OpenMemoryObject in OMO v1 format")
+    error: Optional[str] = Field(default=None, description="Error message if failed")
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        validate_assignment=True,
+        extra='allow'
+    )
+
+    @classmethod
+    def success(cls, omo_object: Any, code: int = 200):
+        """Create success response with OMO object."""
+        return cls(code=code, status="success", omo=omo_object, error=None)
+
+    @classmethod
+    def failure(cls, error: str, code: int = 400):
+        """Create failure response."""
+        return cls(code=code, status="error", omo=None, error=error)
+
+
 class ErrorDetail(BaseModel):
     code: int
     detail: str
@@ -683,6 +713,50 @@ class ParseStoredMemory(BaseModel):
     organization_read_access: Optional[List[str]] = Field(default_factory=list)
     organization_write_access: Optional[List[str]] = Field(default_factory=list)
 
+    # =============================================================================
+    # RELEVANCE SCORES - Research-backed scoring system
+    # =============================================================================
+    # References:
+    #   - BM25/IR: log1p() normalization for frequency (prevents popularity bias)
+    #   - RRF (Cormack et al. 2009): score = Σ 1/(k + rank_i) for rank fusion
+    #   - Time decay: exp(-λ * age) with configurable half-life
+    #   - Multi-signal fusion outperforms single signals (LTR research)
+    # =============================================================================
+
+    # COMPUTED AT SEARCH TIME - Base signals:
+    similarity_score: Optional[float] = Field(
+        default=None,
+        description="Cosine similarity from vector search (0-1). Measures semantic relevance to query."
+    )
+    popularity_score: Optional[float] = Field(
+        default=None,
+        description="Popularity signal (0-1): 0.5*cacheConfidenceWeighted30d + 0.5*citationConfidenceWeighted30d. Uses stored EMA fields."
+    )
+    recency_score: Optional[float] = Field(
+        default=None,
+        description="Recency signal (0-1): exp(-0.05 * days_since_last_access). Half-life ~14 days."
+    )
+
+    # ONLY when rank_results=True - Reranker signals:
+    reranker_score: Optional[float] = Field(
+        default=None,
+        description="Reranker relevance (0-1). From cross-encoder (Cohere/Qwen3/BGE) or LLM (GPT-5-nano)."
+    )
+    reranker_confidence: Optional[float] = Field(
+        default=None,
+        description="Reranker confidence (0-1). Meaningful for LLM reranking; equals reranker_score for cross-encoders."
+    )
+    reranker_type: Optional[str] = Field(
+        default=None,
+        description="Reranker type: 'cross_encoder' (Cohere/Qwen3/BGE) or 'llm' (GPT-5-nano/GPT-4o-mini)."
+    )
+
+    # FINAL COMBINED SCORE:
+    relevance_score: Optional[float] = Field(
+        default=None,
+        description="Final relevance (0-1). rank_results=False: 0.6*sim + 0.25*pop + 0.15*recency. rank_results=True: RRF-based fusion."
+    )
+
     model_config = ConfigDict(
         from_attributes=True,  # Allows conversion from ORM objects
         validate_assignment=True,  # Validate during assignment
@@ -710,9 +784,39 @@ class ParseStoredMemory(BaseModel):
 
     def without_metadata(self) -> 'ParseStoredMemory':
         """Create a copy of the memory item without metadata field."""
-        return ParseStoredMemory.model_validate(
-            self.model_dump(exclude={'metadata'})
-        )
+        data = self.model_dump(exclude={'metadata'})
+
+        # Preserve org/namespace IDs if they only exist in metadata.
+        metadata = self.metadata
+        if isinstance(metadata, str):
+            try:
+                metadata = json.loads(metadata)
+            except json.JSONDecodeError:
+                metadata = {}
+        if isinstance(metadata, dict):
+            if not data.get('organization_id'):
+                data['organization_id'] = metadata.get('organization_id')
+            if not data.get('namespace_id'):
+                data['namespace_id'] = metadata.get('namespace_id')
+
+        # Preserve org/namespace IDs if only pointer fields are present.
+        def _normalize_pointer_id(value):
+            if value is None:
+                return None
+            if isinstance(value, str):
+                return value or None
+            if isinstance(value, dict):
+                if not value:
+                    return None
+                return value.get('objectId') or value.get('id')
+            return getattr(value, 'objectId', None) or getattr(value, 'id', None)
+
+        if not data.get('organization_id'):
+            data['organization_id'] = _normalize_pointer_id(getattr(self, 'organization', None))
+        if not data.get('namespace_id'):
+            data['namespace_id'] = _normalize_pointer_id(getattr(self, 'namespace', None))
+
+        return ParseStoredMemory.model_validate(data)
 
     @classmethod
     def from_dict(cls, data: dict) -> 'ParseStoredMemory':
@@ -749,6 +853,14 @@ class ParseStoredMemory(BaseModel):
         if data.get('type') is None or data.get('type') == '':
             data['type'] = 'TextMemoryItem'
             logger.info(f"ParseStoredMemory.from_dict - Missing type field, defaulting to 'TextMemoryItem'")
+
+        # SCORE ALIASING: Map legacy relevance_score to predicted_importance
+        # In MongoDB/Parse, this field was called relevance_score but we renamed it to predicted_importance
+        # for clearer semantics. This ensures existing stored values are used.
+        if data.get('predicted_importance') is None and data.get('relevance_score') is not None:
+            data['predicted_importance'] = data['relevance_score']
+            logger.debug(f"ParseStoredMemory.from_dict - Aliased relevance_score ({data['relevance_score']}) to predicted_importance")
+
         logger.info(f"ParseStoredMemory.from_dict - Final data after conversion: {data}")
         instance = cls(**data)
         logger.info(f"ParseStoredMemory.from_dict - Created instance with memoryChunkIds: {instance.memoryChunkIds}")
@@ -792,6 +904,42 @@ class ParseStoredMemory(BaseModel):
     def from_parse_response(cls, response_data: Dict[str, Any]) -> 'ParseStoredMemory':
         """Create ParseStoredMemory from Parse Server response"""
         # Extract base fields
+        # Resolve org/namespace IDs with pointer fallbacks (legacy fields may be None)
+        def _normalize_pointer_id(value):
+            if value is None:
+                return None
+            if isinstance(value, str):
+                return value or None
+            if isinstance(value, dict):
+                if not value:
+                    return None
+                return value.get('objectId') or value.get('id')
+            return getattr(value, 'objectId', None) or getattr(value, 'id', None)
+
+        organization_id = _normalize_pointer_id(response_data.get('organization_id'))
+        if not organization_id:
+            organization_id = _normalize_pointer_id(response_data.get('organization'))
+        if not organization_id:
+            organization_id = _normalize_pointer_id(
+                (response_data.get('customMetadata') or {}).get('organization_id')
+            )
+        if not organization_id:
+            organization_id = _normalize_pointer_id(
+                (response_data.get('metadata') or {}).get('organization_id')
+            )
+
+        namespace_id = _normalize_pointer_id(response_data.get('namespace_id'))
+        if not namespace_id:
+            namespace_id = _normalize_pointer_id(response_data.get('namespace'))
+        if not namespace_id:
+            namespace_id = _normalize_pointer_id(
+                (response_data.get('customMetadata') or {}).get('namespace_id')
+            )
+        if not namespace_id:
+            namespace_id = _normalize_pointer_id(
+                (response_data.get('metadata') or {}).get('namespace_id')
+            )
+
         base_data = {
             'objectId': response_data['objectId'],
             'createdAt': response_data['createdAt'],
@@ -810,6 +958,10 @@ class ParseStoredMemory(BaseModel):
             'memoryChunkIds': response_data.get('memoryChunkIds', []),
             'user': response_data.get('user'),
             'developerUser': response_data.get('developerUser'),
+            'organization': response_data.get('organization'),
+            'namespace': response_data.get('namespace'),
+            'organization_id': organization_id,
+            'namespace_id': namespace_id,
             # Always extract ACL fields from top-level only
             'external_user_read_access': response_data.get('external_user_read_access', []) or [],
             'external_user_write_access': response_data.get('external_user_write_access', []) or [],
@@ -908,12 +1060,54 @@ class Memory(BaseModel):
         default=None,
         description="Quantized INT8 embedding vector (values -128 to 127). 4x smaller than float32. Default format for efficiency."
     )
-    
-    # Relevance score from server ranking (optional, populated by predictive builders or ranking algorithms)
+
+    # =============================================================================
+    # RELEVANCE SCORES - Research-backed scoring system
+    # =============================================================================
+    # References:
+    #   - BM25/IR: log1p() normalization for frequency (prevents popularity bias)
+    #   - RRF (Cormack et al. 2009): score = Σ 1/(k + rank_i) for rank fusion
+    #   - Time decay: exp(-λ * age) with configurable half-life
+    #   - Multi-signal fusion outperforms single signals (LTR research)
+    # =============================================================================
+
+    # COMPUTED AT SEARCH TIME - Base signals:
+    similarity_score: Optional[float] = Field(
+        default=None,
+        description="Cosine similarity from vector search (0-1). Measures semantic relevance to query."
+    )
+    popularity_score: Optional[float] = Field(
+        default=None,
+        description="Popularity signal (0-1): 0.5*cacheConfidenceWeighted30d + 0.5*citationConfidenceWeighted30d. Uses stored EMA fields."
+    )
+    recency_score: Optional[float] = Field(
+        default=None,
+        description="Recency signal (0-1): exp(-0.05 * days_since_last_access). Half-life ~14 days."
+    )
+
+    # ONLY when rank_results=True - Reranker signals:
+    reranker_score: Optional[float] = Field(
+        default=None,
+        description="Reranker relevance (0-1). From cross-encoder (Cohere/Qwen3/BGE) or LLM (GPT-5-nano)."
+    )
+    reranker_confidence: Optional[float] = Field(
+        default=None,
+        description="Reranker confidence (0-1). Meaningful for LLM reranking; equals reranker_score for cross-encoders."
+    )
+    reranker_type: Optional[str] = Field(
+        default=None,
+        description="Reranker type: 'cross_encoder' (Cohere/Qwen3/BGE) or 'llm' (GPT-5-nano/GPT-4o-mini)."
+    )
+
+    # FINAL COMBINED SCORE:
     relevance_score: Optional[float] = Field(
         default=None,
-        description="Relevance score from server-side ranking algorithm. Higher scores indicate more relevant memories. Computed as: 60% vector similarity + 30% transition probability + 20% access frequency."
+        description="Final relevance (0-1). rank_results=False: 0.6*sim + 0.25*pop + 0.15*recency. rank_results=True: RRF-based fusion."
     )
+
+    # Processing metrics (optional; populated when available from Parse)
+    metrics: Optional[Dict[str, Any]] = None
+    totalProcessingCost: Optional[float] = None
 
     model_config = ConfigDict(
         from_attributes=True,
@@ -923,21 +1117,8 @@ class Memory(BaseModel):
         extra='allow'
     )
     
-    @field_serializer('relevance_score', when_used='json')
-    def serialize_relevance_score(self, v):
-        """Ensure relevance_score is never None in JSON output - calculate estimate if missing"""
-        if v is not None:
-            return float(v)
-        # If no relevance_score provided, estimate based on content quality
-        # This provides a reasonable default for memories without server-side ranking
-        if not self.content or len(self.content.strip()) < 10:
-            return 0.05  # Very short/empty content = low relevance
-        elif len(self.content) < 50:
-            return 0.15  # Short content = low-medium relevance
-        elif len(self.content) < 200:
-            return 0.40  # Medium content = medium relevance
-        else:
-            return 0.65  # Rich content = high relevance (assumes it's meaningful)
+    # Note: Removed serialize_relevance_score fallback - scores should be None if not computed
+    # The new scoring fields (predicted_importance, behavioral_score, etc.) provide clear semantics
 
     def model_dump(self, *args, **kwargs):
         def convert_dt(obj):
@@ -993,6 +1174,56 @@ class Memory(BaseModel):
             acl_list = getattr(parse_memory, 'external_user_read_access', [])
             if isinstance(acl_list, list) and len(acl_list) == 1:
                 external_user_id = acl_list[0]
+        # Resolve org/namespace IDs with pointer fallbacks (legacy fields may be None)
+        def _normalize_pointer_id(value):
+            if value is None:
+                return None
+            if isinstance(value, str):
+                return value or None
+            if isinstance(value, dict):
+                if not value:
+                    return None
+                return value.get('objectId') or value.get('id')
+            return getattr(value, 'objectId', None) or getattr(value, 'id', None)
+
+        organization_id = _normalize_pointer_id(getattr(parse_memory, 'organization_id', None))
+        if not organization_id and getattr(parse_memory, 'organization', None):
+            organization_id = _normalize_pointer_id(parse_memory.organization)
+        if not organization_id:
+            organization_id = _normalize_pointer_id(
+                getattr(parse_memory, 'customMetadata', None) and (parse_memory.customMetadata or {}).get('organization_id')
+            )
+        if not organization_id:
+            organization_id = _normalize_pointer_id(
+                getattr(parse_memory, 'metadata', None) and (parse_memory.metadata or {}).get('organization_id')
+            )
+
+        namespace_id = _normalize_pointer_id(getattr(parse_memory, 'namespace_id', None))
+        if not namespace_id and getattr(parse_memory, 'namespace', None):
+            namespace_id = _normalize_pointer_id(parse_memory.namespace)
+        if not namespace_id:
+            namespace_id = _normalize_pointer_id(
+                getattr(parse_memory, 'customMetadata', None) and (parse_memory.customMetadata or {}).get('namespace_id')
+            )
+        if not namespace_id:
+            namespace_id = _normalize_pointer_id(
+                getattr(parse_memory, 'metadata', None) and (parse_memory.metadata or {}).get('namespace_id')
+            )
+        # Normalize ACL keys for API response (r/w -> read/write)
+        acl = parse_memory.ACL or {}
+        if isinstance(acl, dict):
+            normalized_acl = {}
+            for principal, perms in acl.items():
+                if isinstance(perms, dict):
+                    normalized_perms = dict(perms)
+                    if 'r' in normalized_perms and 'read' not in normalized_perms:
+                        normalized_perms['read'] = normalized_perms['r']
+                    if 'w' in normalized_perms and 'write' not in normalized_perms:
+                        normalized_perms['write'] = normalized_perms['w']
+                    normalized_acl[principal] = normalized_perms
+                else:
+                    normalized_acl[principal] = perms
+            acl = normalized_acl
         base_data = {
             'id': parse_memory.memoryId,
             'content': parse_memory.content,
@@ -1015,11 +1246,11 @@ class Memory(BaseModel):
             'created_at': parse_memory.createdAt,
             'updated_at': parse_memory.updatedAt,
             # Access control and ownership
-            'acl': parse_memory.ACL,
+            'acl': acl,
             'workspace_id': parse_memory.workspace.objectId if parse_memory.workspace else None,
             # Multi-tenant fields (NEW)
-            'organization_id': getattr(parse_memory, 'organization_id', None),
-            'namespace_id': getattr(parse_memory, 'namespace_id', None),
+            'organization_id': organization_id,
+            'namespace_id': namespace_id,
             # Source context with renamed fields
             'source_document_id': parse_memory.post.objectId if parse_memory.post else None,
             'source_message_id': parse_memory.postMessage.objectId if parse_memory.postMessage else None,
@@ -1039,8 +1270,20 @@ class Memory(BaseModel):
             # Role and category fields
             'role': getattr(parse_memory, 'role', None),
             'category': getattr(parse_memory, 'category', None),
-            # Relevance score from server ranking
+            # Relevance scores - Research-backed scoring system
+            'similarity_score': getattr(parse_memory, 'similarity_score', None),
+            'popularity_score': getattr(parse_memory, 'popularity_score', None),
+            'recency_score': getattr(parse_memory, 'recency_score', None),
+            'reranker_score': getattr(parse_memory, 'reranker_score', None),
+            'reranker_confidence': getattr(parse_memory, 'reranker_confidence', None),
+            'reranker_type': getattr(parse_memory, 'reranker_type', None),
             'relevance_score': getattr(parse_memory, 'relevance_score', None),
+            # Processing metrics (if present in Parse)
+            'metrics': getattr(parse_memory, 'metrics', None),
+            'totalProcessingCost': (
+                getattr(parse_memory, 'totalProcessingCost', None)
+                or getattr(parse_memory, 'total_processing_cost', None)
+            ),
         }
 
         # Add document-specific fields if this is a DocumentMemoryItem

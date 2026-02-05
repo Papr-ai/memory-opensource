@@ -42,7 +42,7 @@ def initialize_logging():
                 maxBytes=30485760,  # 30MB
                 backupCount=5
             )
-            file_handler.setLevel(log_level)  # Set handler level to match logger
+            file_handler.setLevel(logging.INFO)  # Set handler level to match logger
             file_handler.setFormatter(formatter)
             root_logger.addHandler(file_handler)
     else:

@@ -1,4 +1,5 @@
 from typing import Dict, Any, List, Optional, Union
+import asyncio
 from models.user_schemas import UserGraphSchema, SchemaStatus, SchemaScope, SchemaResponse, SchemaListResponse
 from services.logging_config import get_logger
 from services.url_utils import clean_url
@@ -60,9 +61,18 @@ class SchemaService:
         if 'workspace_id' in data and isinstance(data['workspace_id'], dict) and data['workspace_id'].get('__type') == 'Pointer':
             data['workspace_id'] = data['workspace_id']['objectId']
         if 'organization' in data and isinstance(data['organization'], dict) and data['organization'].get('__type') == 'Pointer':
-            data['organization'] = data['organization']['objectId']
+            data['organization_id'] = data['organization']['objectId']
+            del data['organization']
         if 'namespace' in data and isinstance(data['namespace'], dict) and data['namespace'].get('__type') == 'Pointer':
-            data['namespace'] = data['namespace']['objectId']
+            data['namespace_id'] = data['namespace']['objectId']
+            del data['namespace']
+        # Handle legacy string fields if present
+        if 'organization' in data and isinstance(data['organization'], str):
+            data['organization_id'] = data['organization']
+            del data['organization']
+        if 'namespace' in data and isinstance(data['namespace'], str):
+            data['namespace_id'] = data['namespace']
+            del data['namespace']
         
         # Map Parse Server fields
         if 'objectId' in data:
@@ -158,14 +168,14 @@ class SchemaService:
             
             # Set multi-tenant context
             if organization_id:
-                schema.organization = organization_id  # Will be converted to pointer later
-                logger.info(f"🔍 TRACE STEP 14a - SET ORGANIZATION: {organization_id}")
+                schema.organization_id = organization_id  # Will be converted to pointer later
+                logger.info(f"🔍 TRACE STEP 14a - SET ORGANIZATION_ID: {organization_id}")
             
             if namespace_id:
-                schema.namespace = namespace_id  # Will be converted to pointer later
-                logger.info(f"🔍 TRACE STEP 14b - SET NAMESPACE: {namespace_id}")
+                schema.namespace_id = namespace_id  # Will be converted to pointer later
+                logger.info(f"🔍 TRACE STEP 14b - SET NAMESPACE_ID: {namespace_id}")
                 
-            logger.info(f"🔍 TRACE STEP 15 - SCHEMA AFTER SETTING: user_id={schema.user_id}, workspace_id={schema.workspace_id}, org={schema.organization}, ns={schema.namespace}")
+            logger.info(f"🔍 TRACE STEP 15 - SCHEMA AFTER SETTING: user_id={schema.user_id}, workspace_id={schema.workspace_id}, org_id={schema.organization_id}, ns_id={schema.namespace_id}")
             now = datetime.now(timezone.utc)
             schema.created_at = now
             schema.updated_at = now
@@ -173,7 +183,11 @@ class SchemaService:
             # Store in Parse Server
             # Convert complex nested objects for Parse Server
             schema_data = schema.model_dump(mode='json', exclude_none=True)
-            logger.info(f"🔍 TRACE STEP 16 - SCHEMA MODEL_DUMP: {json.dumps(schema_data, indent=2)}")
+            try:
+                schema_dump = json.dumps(schema_data, indent=2)
+            except TypeError:
+                schema_dump = json.dumps(schema_data, indent=2, default=str)
+            logger.info(f"🔍 TRACE STEP 16 - SCHEMA MODEL_DUMP: {schema_dump}")
             
             # Development server expects Objects, not JSON strings
             # Keep node_types and relationship_types as objects
@@ -202,38 +216,59 @@ class SchemaService:
                 schema_data['workspace_id'] = None
                 logger.warning(f"🔍 TRACE STEP 19 - WORKSPACE_ID SET TO NULL")
             
-            # Convert organization to Parse Server Pointer format (multi-tenant)
-            if 'organization' in schema_data and schema_data['organization']:
-                # If it's already a string (objectId), convert to pointer
-                if isinstance(schema_data['organization'], str):
-                    logger.info(f"🔍 CONVERTING ORGANIZATION: {schema_data['organization']} to pointer")
+            # Convert organization_id to Parse Server Pointer format (multi-tenant)
+            if 'organization_id' in schema_data and schema_data['organization_id']:
+                if isinstance(schema_data['organization_id'], str):
+                    logger.info(f"🔍 CONVERTING ORGANIZATION_ID: {schema_data['organization_id']} to pointer")
                     schema_data['organization'] = {
                         "__type": "Pointer",
                         "className": "Organization",
-                        "objectId": schema_data['organization']
+                        "objectId": schema_data['organization_id']
                     }
                     logger.info(f"🔍 ORGANIZATION CONVERTED: {schema_data['organization']}")
+                del schema_data['organization_id']
             
-            # Convert namespace to Parse Server Pointer format (multi-tenant)
-            if 'namespace' in schema_data and schema_data['namespace']:
-                # If it's already a string (objectId), convert to pointer
-                if isinstance(schema_data['namespace'], str):
-                    logger.info(f"🔍 CONVERTING NAMESPACE: {schema_data['namespace']} to pointer")
+            # Convert namespace_id to Parse Server Pointer format (multi-tenant)
+            if 'namespace_id' in schema_data and schema_data['namespace_id']:
+                if isinstance(schema_data['namespace_id'], str):
+                    logger.info(f"🔍 CONVERTING NAMESPACE_ID: {schema_data['namespace_id']} to pointer")
                     schema_data['namespace'] = {
                         "__type": "Pointer",
                         "className": "Namespace",
-                        "objectId": schema_data['namespace']
+                        "objectId": schema_data['namespace_id']
                     }
                     logger.info(f"🔍 NAMESPACE CONVERTED: {schema_data['namespace']}")
+                del schema_data['namespace_id']
             
-            logger.info(f"🔍 TRACE STEP 20 - FINAL SCHEMA_DATA: {json.dumps(schema_data, indent=2)}")
+            try:
+                final_schema_dump = json.dumps(schema_data, indent=2)
+            except TypeError:
+                final_schema_dump = json.dumps(schema_data, indent=2, default=str)
+            logger.info(f"🔍 TRACE STEP 20 - FINAL SCHEMA_DATA: {final_schema_dump}")
             
             async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.parse_server_url}/parse/classes/UserGraphSchema",
-                    headers=self._get_headers(use_master_key=True),
-                    json=schema_data
-                )
+                response = None
+                for attempt in range(2):
+                    try:
+                        response = await client.post(
+                            f"{self.parse_server_url}/parse/classes/UserGraphSchema",
+                            headers=self._get_headers(use_master_key=True),
+                            json=schema_data,
+                            timeout=20.0
+                        )
+                        break
+                    except httpx.RequestError as e:
+                        logger.error(
+                            "Schema create request failed (attempt %s/2): %s",
+                            attempt + 1,
+                            e,
+                        )
+                        if attempt == 0:
+                            await asyncio.sleep(0.5)
+                        else:
+                            raise
+                if response is None:
+                    raise RuntimeError("Schema create request did not return a response")
                 
                 if response.status_code != 201:
                     logger.error(f"Failed to create schema: {response.text}")

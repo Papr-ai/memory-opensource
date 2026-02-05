@@ -974,10 +974,12 @@ async def store_generic_memory_item(
 
         # Add document-specific fields only if type is DocumentMemoryItem
         if memory_item.type == "DocumentMemoryItem":
+            # Check both metadata and customMetadata for upload_id (workflow may put it in either)
+            upload_id_value = metadata.get('upload_id') or (custom_metadata.get('upload_id') if custom_metadata else None)
             document_fields = {
                 "page_number": metadata.get('page_number'),
                 "total_pages": metadata.get('total_pages'),
-                "upload_id": metadata.get('upload_id'),
+                "upload_id": upload_id_value,
                 "filename": metadata.get('filename'),
                 "page": metadata.get('page'),
                 "file_url": metadata.get('file_url')
@@ -986,6 +988,7 @@ async def store_generic_memory_item(
             if parse_memory_args["sourceUrl"].strip() == "" and document_fields.get("file_url"):
                 parse_memory_args["sourceUrl"] = document_fields["file_url"]
             parse_memory_args.update(document_fields)
+            logger.info(f"📄 DocumentMemoryItem fields: upload_id={upload_id_value}, page_number={document_fields.get('page_number')}")
 
         # Prepare developerUser pointer for Parse Server
         developer_user_pointer_dict = None
@@ -1822,19 +1825,30 @@ async def _batch_store_single_request(
         # Convert UUID to string
         memory_id_str = str(memory_item.id)
         
-        # Serialize context
-        if isinstance(memory_item.context, str):
-            context = memory_item.context
-        elif isinstance(memory_item.context, list):
-            context = json.dumps(memory_item.context)
+        # Ensure context is an array (Parse Server expects Array type, not String)
+        if isinstance(memory_item.context, list):
+            context = memory_item.context  # Already a list, use directly
+        elif isinstance(memory_item.context, str):
+            # Try to parse as JSON array, otherwise wrap in array
+            try:
+                parsed = json.loads(memory_item.context)
+                context = parsed if isinstance(parsed, list) else [memory_item.context]
+            except (json.JSONDecodeError, TypeError):
+                context = [memory_item.context] if memory_item.context else []
         else:
-            context = json.dumps([])
+            context = []
         
-        # Serialize metadata
-        if isinstance(memory_item.metadata, dict):
-            metadata_str = json.dumps(memory_item.metadata)
-        else:
-            metadata_str = str(memory_item.metadata)
+        # Prepare metadata as an object (Parse Server expects Object type, not String)
+        # Ensure customMetadata within metadata is also an object, not a string
+        metadata_obj = memory_item.metadata if isinstance(memory_item.metadata, dict) else {}
+        
+        # Fix nested customMetadata if it's a string (double-serialization issue)
+        if 'customMetadata' in metadata_obj and isinstance(metadata_obj['customMetadata'], str):
+            try:
+                metadata_obj = dict(metadata_obj)  # Make a copy to avoid mutating original
+                metadata_obj['customMetadata'] = json.loads(metadata_obj['customMetadata'])
+            except (json.JSONDecodeError, TypeError):
+                pass  # Keep as string if parsing fails
 
         # Build body with all fields from the MemoryItem
         body = {
@@ -1845,7 +1859,7 @@ async def _batch_store_single_request(
             },
             "content": memory_item.content,
             "context": context,
-            "metadata": metadata_str,
+            "metadata": metadata_obj,  # Pass as object, not string
             "memoryId": memory_id_str,
             "type": memory_item.metadata.get("type", "text"),
         }
@@ -1983,7 +1997,18 @@ def batch_store_memories(session_token: str, memory_items: list):
 
         # Convert UUID to string
         memory_id_str = str(memory_item.id)
-        context = json.dumps(memory_item.context)  # Ensure context is a JSON string
+        
+        # Ensure context is an array (Parse Server expects Array type, not String)
+        if isinstance(memory_item.context, list):
+            context = memory_item.context
+        elif isinstance(memory_item.context, str):
+            try:
+                parsed = json.loads(memory_item.context)
+                context = parsed if isinstance(parsed, list) else [memory_item.context]
+            except (json.JSONDecodeError, TypeError):
+                context = [memory_item.context] if memory_item.context else []
+        else:
+            context = []
 
         # Prepare the individual request data
         data = {
@@ -2061,8 +2086,17 @@ async def batch_store_memories_async_old(
         # Convert UUID to string
         memory_id_str = str(memory_item.id)
         
-        # Prepare context
-        context = json.dumps(memory_item.context) if memory_item.context else "[]"
+        # Ensure context is an array (Parse Server expects Array type, not String)
+        if isinstance(memory_item.context, list):
+            context = memory_item.context
+        elif isinstance(memory_item.context, str):
+            try:
+                parsed = json.loads(memory_item.context)
+                context = parsed if isinstance(parsed, list) else [memory_item.context]
+            except (json.JSONDecodeError, TypeError):
+                context = [memory_item.context] if memory_item.context else []
+        else:
+            context = []
         
         # Get metadata fields
         metadata = memory_item.metadata if isinstance(memory_item.metadata, dict) else {}
@@ -2086,6 +2120,14 @@ async def batch_store_memories_async_old(
         organization_read_access = metadata.get('organization_read_access', [])
         organization_write_access = metadata.get('organization_write_access', [])
         
+        # Fix nested customMetadata if it's a string (double-serialization issue)
+        metadata_obj = dict(metadata)  # Make a copy
+        if 'customMetadata' in metadata_obj and isinstance(metadata_obj['customMetadata'], str):
+            try:
+                metadata_obj['customMetadata'] = json.loads(metadata_obj['customMetadata'])
+            except (json.JSONDecodeError, TypeError):
+                pass  # Keep as string if parsing fails
+        
         # Build the body for this memory
         body = {
             "user": {
@@ -2098,7 +2140,7 @@ async def batch_store_memories_async_old(
             "type": metadata.get("type", "text"),
             "memoryId": memory_id_str,
             "memoryChunkIds": memory_item.memoryChunkIds if hasattr(memory_item, 'memoryChunkIds') else [],
-            "metadata": json.dumps(metadata),
+            "metadata": metadata_obj,  # Pass as object, not string (Parse Server expects Object type)
             "ACL": acl_data if acl_data else None,
         }
         
@@ -4572,6 +4614,8 @@ async def update_memory_item(
             existing_acl = existing_memory.get('ACL', {})
             # Preserve existing memoryChunkIds to prevent data loss during updates
             existing_memory_chunk_ids = existing_memory.get('memoryChunkIds', [])
+            # Preserve existing user pointer to prevent validation errors during updates
+            existing_user = existing_memory.get('user')
             logger.info(f"Existing ACL: {existing_acl}")
             logger.info(f"Existing memoryChunkIds: {existing_memory_chunk_ids}")
         
@@ -4706,7 +4750,7 @@ async def update_memory_item(
             "memoryId": base_memory_id,
         }
         
-        # Add user pointer only if user_id is present
+        # Add user pointer - prefer metadata user_id, fallback to existing user
         user_id_from_meta = metadata.get("user_id")
         if user_id_from_meta and str(user_id_from_meta).strip():
             base_data["user"] = ParsePointer(
@@ -4714,6 +4758,9 @@ async def update_memory_item(
                 className="_User",
                 objectId=user_id_from_meta
             )
+        elif existing_user:
+            # Use existing user pointer from the memory
+            base_data["user"] = existing_user
 
         # Don't include goals and usecases in the main update - they need to be handled as Relations
         # We'll add them separately after the main update
@@ -6088,7 +6135,53 @@ async def store_batch_memories_in_parse(
                     json=post_data,
                     headers=post_headers
                 )
-                post_id = existing_post_id
+                
+                # If update fails with 404 (Post doesn't exist), fallback to creating new Post
+                if post_response.status_code == 404:
+                    logger.warning(f"Post {existing_post_id} does not exist (404), creating new Post instead")
+                    
+                    # Add required fields for creating a new Post (these were skipped because existing_post_id was set)
+                    post_data.update({
+                        "type": "batch_memories",
+                        "source": "temporal_batch_processing",
+                        "organizationId": organization_id,
+                        "namespaceId": namespace_id,
+                    })
+                    
+                    # Add user ACL
+                    if user_id:
+                        post_data["ACL"] = {
+                            user_id: {"read": True, "write": True}
+                        }
+                        post_data["user"] = {
+                            "__type": "Pointer",
+                            "className": "_User",
+                            "objectId": user_id
+                        }
+                    
+                    # Add workspace pointer (required for Post creation)
+                    if workspace_id:
+                        post_data["workspace"] = {
+                            "__type": "Pointer",
+                            "className": "WorkSpace",
+                            "objectId": workspace_id
+                        }
+                    
+                    logger.info(f"Fallback Post data: workspace={workspace_id}, user={user_id}, org={organization_id}")
+                    
+                    post_response = await client.post(
+                        f"{PARSE_SERVER_URL}/parse/classes/Post",
+                        json=post_data,
+                        headers=post_headers
+                    )
+                    if post_response.status_code == 201:
+                        post_result = post_response.json()
+                        post_id = post_result.get("objectId")
+                        logger.info(f"✅ Created new Post {post_id} (fallback from missing {existing_post_id})")
+                    else:
+                        raise Exception(f"Failed to create Post (fallback): {post_response.status_code} - {post_response.text}")
+                else:
+                    post_id = existing_post_id
             else:
                 # Create new Post
                 post_response = await client.post(

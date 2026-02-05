@@ -20,3 +20,8 @@ __pycache__/main.cpython-311.pyc
 .env.development
 .env.production
 keys/jwt-private.pem
+.env
+.env
+.env
+.env.mongodb_optimized
+.env

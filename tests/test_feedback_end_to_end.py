@@ -7,7 +7,9 @@ from models.feedback_models import FeedbackRequest, FeedbackResponse, FeedbackDa
 from os import environ as env
 from dotenv import load_dotenv, find_dotenv
 import asyncio
+import time
 from models.shared_types import FeedbackType, FeedbackSource
+from services.memory_management import get_query_log_by_id_async
 
 
 # Load environment variables
@@ -15,6 +17,16 @@ ENV_FILE = find_dotenv()
 load_dotenv(ENV_FILE)
 
 TEST_X_USER_API_KEY = env.get('TEST_X_USER_API_KEY')
+
+async def wait_for_query_log(search_id: str, timeout_seconds: int = 30, poll_interval: float = 2.0) -> dict:
+    """Poll Parse for QueryLog creation so feedback validation won't 404."""
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        query_log = await get_query_log_by_id_async(search_id)
+        if query_log:
+            return query_log
+        await asyncio.sleep(poll_interval)
+    raise AssertionError(f"QueryLog {search_id} not found within {timeout_seconds}s")
 
 @pytest.mark.asyncio
 async def test_feedback_end_to_end():
@@ -51,7 +63,7 @@ async def test_feedback_end_to_end():
             search_id = validated_search.search_id
 
             # Wait for the background QueryLog creation to complete
-            await asyncio.sleep(5)
+            await wait_for_query_log(search_id)
 
             # 2. Submit feedback for this search
             # Create FeedbackData object
@@ -122,7 +134,7 @@ async def test_get_feedback_by_id_v1():
             search_id = validated_search.search_id
 
             # Wait for the background QueryLog creation to complete
-            await asyncio.sleep(5)
+            await wait_for_query_log(search_id)
 
             # 2. Submit feedback for this search
             feedback_data = FeedbackData(

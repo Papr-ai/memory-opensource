@@ -18,19 +18,19 @@ cp .env.example .env.opensource
 # Required: OPENAI_API_KEY, GROQ_API_KEY, DEEPINFRA_API_KEY
 ```
 
-**Note**: The docker-compose file uses `.env.opensource` specifically for open-source setup.
+**Note**: The docker compose file uses `.env.opensource` specifically for open-source setup.
 
 ## Step 2: Start Services
 
 ```bash
 # Start all services (MongoDB, Redis, Neo4j, Qdrant, Parse Server, API)
-docker-compose -f docker-compose.yaml up -d
+docker compose -f docker compose.yaml up -d
 
 # Check status
-docker-compose -f docker-compose.yaml ps
+docker compose -f docker compose.yaml ps
 
 # View logs (watch for auto-initialization)
-docker-compose -f docker-compose.yaml logs -f papr-memory
+docker compose -f docker compose.yaml logs -f papr-memory
 ```
 
 **What happens automatically on first run:**
@@ -53,7 +53,7 @@ docker cp papr-memory:/app/.env.generated ./
 cat .env.generated
 
 # Or check the container logs for the API key
-docker-compose -f docker-compose.yaml logs papr-memory | grep "API Key"
+docker compose -f docker compose.yaml logs papr-memory | grep "API Key"
 ```
 
 **Default credentials:**
@@ -102,7 +102,7 @@ Once running, you have access to:
 
 ```bash
 # Start with Parse Dashboard enabled
-docker-compose --profile dashboard up -d parse-dashboard
+docker compose --profile dashboard up -d parse-dashboard
 
 # Access at http://localhost:4040
 # Login: admin / password
@@ -180,7 +180,7 @@ curl -H "X-Session-Token: YOUR_SESSION_TOKEN" \
 ```
 
 **Option B: Via Parse Dashboard (Easier for Testing)**
-1. Start Parse Dashboard: `docker-compose --profile dashboard up -d parse-dashboard`
+1. Start Parse Dashboard: `docker compose --profile dashboard up -d parse-dashboard`
 2. Login at http://localhost:4040 (admin / password)
 3. Navigate to `_Session` class to view active session tokens
 4. Copy the `sessionToken` field from any active session
@@ -245,22 +245,22 @@ curl -X POST http://localhost:5001/v1/memory/batch \
 
 ```bash
 # Check logs for all services
-docker-compose -f docker-compose.yaml logs
+docker compose -f docker compose.yaml logs
 
 # Check specific service logs
-docker-compose -f docker-compose.yaml logs papr-memory
-docker-compose -f docker-compose.yaml logs mongodb
-docker-compose -f docker-compose.yaml logs neo4j
+docker compose -f docker compose.yaml logs papr-memory
+docker compose -f docker compose.yaml logs mongodb
+docker compose -f docker compose.yaml logs neo4j
 
 # Restart specific service
-docker-compose -f docker-compose.yaml restart papr-memory
+docker compose -f docker compose.yaml restart papr-memory
 ```
 
 ### API Key Not Found
 
 ```bash
 # Check if auto-bootstrap ran successfully
-docker-compose -f docker-compose.yaml logs papr-memory | grep "API Key"
+docker compose -f docker compose.yaml logs papr-memory | grep "API Key"
 
 # Manually run bootstrap (inside container)
 docker exec -it papr-memory python scripts/bootstrap_opensource_user.py \
@@ -299,7 +299,7 @@ docker exec -it papr-memory python scripts/init_qdrant_collections_opensource.py
 
 - Make sure Parse Dashboard is enabled: `--profile dashboard`
 - Refresh the page - Parse Server may have been starting when you first accessed it
-- Check Parse Server logs: `docker-compose -f docker-compose.yaml logs parse-server`
+- Check Parse Server logs: `docker compose -f docker compose.yaml logs parse-server`
 
 ### Health Check Failures
 
@@ -308,17 +308,17 @@ docker exec -it papr-memory python scripts/init_qdrant_collections_opensource.py
 curl http://localhost:5001/health
 
 # Check individual service health
-docker-compose -f docker-compose.yaml ps
+docker compose -f docker compose.yaml ps
 ```
 
 ## Stopping Services
 
 ```bash
 # Stop all services
-docker-compose -f docker-compose.yaml down
+docker compose -f docker compose.yaml down
 
 # Stop and remove volumes (WARNING: deletes all data)
-docker-compose -f docker-compose.yaml down -v
+docker compose -f docker compose.yaml down -v
 ```
 
 ## Upgrading
@@ -328,7 +328,7 @@ docker-compose -f docker-compose.yaml down -v
 git pull origin main
 
 # Rebuild containers with latest code
-docker-compose -f docker-compose.yaml up -d --build
+docker compose -f docker compose.yaml up -d --build
 
 # The entrypoint script will handle schema migrations automatically
 ```
@@ -359,7 +359,7 @@ docker-compose -f docker-compose.yaml up -d --build
 ## Configuration Files
 
 - **`.env.opensource`**: Environment variables for open-source setup
-- **`docker-compose.yaml`**: Docker Compose configuration
+- **`docker compose.yaml`**: Docker Compose configuration
 - **`config/opensource.yaml`**: Feature flags and limits for open-source edition
 
 ## Need Help?

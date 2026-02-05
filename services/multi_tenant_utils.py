@@ -106,21 +106,40 @@ def apply_multi_tenant_scoping_to_metadata(
             pass
         logger.info(f"Applied namespace scoping from auth: {auth_context['namespace_id']}")
 
-    # Apply explicit organization/namespace from request (for backward compatibility)
+    # Apply explicit organization/namespace from request only when auth context is absent
     if request_context:
-        if request_context.get('organization_id') is not None:
-            try:
-                setattr(metadata, 'organization_id', request_context['organization_id'])
-            except Exception:
-                pass
-            logger.info(f"Applied explicit organization from request: {request_context['organization_id']}")
+        req_org = request_context.get('organization_id')
+        req_ns = request_context.get('namespace_id')
+        auth_org = auth_context.get('organization_id')
+        auth_ns = auth_context.get('namespace_id')
 
-        if request_context.get('namespace_id') is not None:
-            try:
-                setattr(metadata, 'namespace_id', request_context['namespace_id'])
-            except Exception:
-                pass
-            logger.info(f"Applied explicit namespace from request: {request_context['namespace_id']}")
+        if req_org is not None:
+            if auth_org is None:
+                try:
+                    setattr(metadata, 'organization_id', req_org)
+                except Exception:
+                    pass
+                logger.info(f"Applied explicit organization from request: {req_org}")
+            elif req_org != auth_org:
+                logger.warning(
+                    "Ignoring explicit organization_id from request (%s) due to auth context (%s)",
+                    req_org,
+                    auth_org,
+                )
+
+        if req_ns is not None:
+            if auth_ns is None:
+                try:
+                    setattr(metadata, 'namespace_id', req_ns)
+                except Exception:
+                    pass
+                logger.info(f"Applied explicit namespace from request: {req_ns}")
+            elif req_ns != auth_ns:
+                logger.warning(
+                    "Ignoring explicit namespace_id from request (%s) due to auth context (%s)",
+                    req_ns,
+                    auth_ns,
+                )
 
     logger.info(
         "After multi-tenant scoping: org_id=%s, namespace_id=%s",
@@ -153,6 +172,26 @@ def apply_multi_tenant_scoping_to_search_request(
         'organization_id': getattr(search_request, 'organization_id', None),
         'namespace_id': getattr(search_request, 'namespace_id', None)
     }
+
+    # Keep SearchRequest aligned with auth context when present
+    auth_org = auth_context.get('organization_id')
+    auth_ns = auth_context.get('namespace_id')
+    if auth_org is not None:
+        if request_context['organization_id'] not in (None, auth_org):
+            logger.warning(
+                "Overriding SearchRequest.organization_id (%s) with auth context (%s)",
+                request_context['organization_id'],
+                auth_org,
+            )
+        setattr(search_request, 'organization_id', auth_org)
+    if auth_ns is not None:
+        if request_context['namespace_id'] not in (None, auth_ns):
+            logger.warning(
+                "Overriding SearchRequest.namespace_id (%s) with auth context (%s)",
+                request_context['namespace_id'],
+                auth_ns,
+            )
+        setattr(search_request, 'namespace_id', auth_ns)
 
     return apply_multi_tenant_scoping_to_metadata(metadata, auth_context, request_context)
 

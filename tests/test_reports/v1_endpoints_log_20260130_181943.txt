@@ -1,0 +1,224 @@
+V1 ENDPOINTS SEQUENTIAL TEST REPORT
+==================================================
+
+Timestamp: 2026-01-30T18:19:43.138135
+Total Tests: 104
+Passed: 101
+Failed: 1
+Skipped: 2
+Success Rate: 95.19%
+Total Duration: 7795.15s
+
+DETAILED RESULTS:
+------------------------------
+✅ Add Memory - Basic (356.45s)
+
+✅ Add Memory - API Key (261.19s)
+
+✅ Add Memory - External User ID + Custom Metadata (190.66s)
+
+✅ Add Memory - External User ID Only (205.66s)
+
+✅ Add Memory - External User ID + ACL (178.77s)
+
+✅ Add Memory - User ID from Created User (139.11s)
+
+✅ Batch Add Memory - Basic (329.90s)
+
+✅ Batch Add Memory - User ID (419.45s)
+
+✅ Batch Add Memory - External User ID (612.38s)
+
+✅ Batch Add Memory - Webhook Success (333.46s)
+
+✅ Batch Add Memory - Webhook Partial Success (179.63s)
+
+✅ Batch Add Memory - Webhook No URL (117.27s)
+
+✅ Batch Add Memory - Webhook Azure Fallback (120.89s)
+
+✅ Batch Add Memory - Webhook Payload Structure (116.13s)
+
+✅ Batch Add Memory - Webhook Immediate (skip_background=True) (36.63s)
+
+✅ Batch Add Memory - Webhook With Background Processing (206.36s)
+
+✅ Update Memory - Basic (36.30s)
+
+✅ Update Memory - API Key (31.30s)
+
+✅ Update Memory - ACL with Real Users (25.62s)
+
+✅ Get Memory - Basic (94.76s)
+
+✅ Search Memory - Basic (17.41s)
+
+✅ Search Memory - User ID ACL (220.06s)
+
+✅ Search Memory - External User ID ACL (215.44s)
+
+✅ Search Memory - New User Qwen Route (21.73s)
+
+✅ Search Memory - Custom Metadata Filter (Qwen Only) (251.29s)
+
+✅ Search Memory - Numeric Custom Metadata Filter (223.88s)
+
+✅ Search Memory - List Custom Metadata Filter (227.73s)
+
+✅ Search Memory - Boolean Custom Metadata Filter (209.20s)
+
+✅ Search Memory - Mixed Custom Metadata Types (106.22s)
+
+✅ Search Memory - Organization and Namespace Filter (314.95s)
+
+✅ Search Memory - Agentic Graph (224.09s)
+
+✅ Search Memory - Predicted Grouping Logging (12.43s)
+
+✅ Search Memory - Fixed User Cache Test (22.17s)
+
+✅ Search Memory - Low-similarity Performance (33.58s)
+
+✅ Auth/Dev Marking - APIKey Sets Developer (11.87s)
+
+⏭️ Auth/Dev Marking - Bearer Only Does Not Set Developer (10.80s)
+    Skipped: No valid Bearer token available for testing
+
+✅ Auth/Dev Marking - Anon End-User Not Marked Developer When Dev API Key Used (126.33s)
+
+✅ Delete Memory - Basic (39.99s)
+
+✅ Delete Memory - API Key (15.91s)
+
+✅ Delete All Memories - Complete Workflow (30.09s)
+
+✅ Delete All Memories - External User ID (20.67s)
+
+✅ Delete All Memories - No Memories Found (14.34s)
+
+✅ Upload Document V2 - API Key (3.02s)
+
+✅ Upload Document V2 - Session Token (0.58s)
+
+✅ Upload Document V2 - Real PDF File (44.73s)
+
+✅ Upload Document V2 - Real PDF with Custom Schema (151.84s)
+
+✅ Upload Document V2 - Invalid File Type (0.17s)
+
+✅ Upload Document V2 - Malicious Content (0.02s)
+
+✅ Upload Document V2 - Large File (0.10s)
+
+✅ Upload Document V2 - With Webhook (0.40s)
+
+✅ Upload Document V2 - Multi-tenant (0.30s)
+
+✅ Upload Document V2 - Provider Preference (0.76s)
+
+✅ Upload Document V2 - Authentication Failure (0.57s)
+
+✅ Document Status Endpoint (0.06s)
+
+✅ Document Cancel Endpoint (0.07s)
+
+✅ Reducto Provider - Direct and Route (28.12s)
+
+✅ Reducto Provider - Simple Upload (59.59s)
+
+✅ Upload Document V2 - Gemini Provider (42.51s)
+
+❌ Upload Document V2 - TensorLake Provider (217.35s)
+    Error: TensorLake processing failed: Activity task failed
+
+✅ Create User - Basic (3.53s)
+
+✅ Create User - Anonymous (4.05s)
+
+✅ Create User - Batch (5.61s)
+
+✅ Get User - Basic (3.97s)
+
+✅ Update User - Basic (4.05s)
+
+✅ Delete User - Basic (3.63s)
+
+✅ Delete User - By External ID (4.35s)
+
+✅ List Users - Basic (7.55s)
+
+✅  Feedback - End to End (21.55s)
+
+✅ Feedback - Get by ID (12.37s)
+
+✅ Sync Tiers - Basic (13.40s)
+
+✅ Sync Tiers - With Embeddings (small) (36.87s)
+
+✅ Sync Delta - Cursor Pagination (11.82s)
+
+✅ QueryLog - Memory Metadata with Query Log Fields (0.00s)
+
+✅ QueryLog - Classification Data Detection (0.00s)
+
+✅ QueryLog - Search with Query Log Integration (0.00s)
+
+✅ QueryLog - Agentic Graph Log Model Creation (0.00s)
+
+✅ QueryLog - User Feedback Log Model Creation (0.00s)
+
+✅ QueryLog - Agentic Graph Log with Relations (0.00s)
+
+✅ QueryLog - User Feedback Log Minimal (0.00s)
+
+✅ QueryLog - Agentic Graph Log Storage Function (0.00s)
+
+✅ QueryLog - User Feedback Log Storage Function (0.00s)
+
+✅ QueryLog - Agentic Graph Log Data Preparation (0.00s)
+
+✅ QueryLog - User Feedback Log Data Preparation (0.00s)
+
+⏭️ QueryLog - Memory Retrieval Log Predicted Grouping (0.00s)
+    Skipped: Requires monkeypatch fixture
+
+✅ QueryLog - Persisted with Classification (21.55s)
+
+✅ QueryLog - Real creation and memory increment (4.64s)
+
+✅ QueryLog - Cache hits increment on repeated search (4.98s)
+
+✅ QueryLog - Fused confidence matches weight delta (3.60s)
+
+⏭️ QueryLog - Backfill Retrieval Counters Small Batch (5.67s)
+
+✅ QueryLog - Sync Tiers Returns Ranked Tier1 (5.73s)
+
+✅ Custom Schema - Create Security Schema (7.53s)
+
+✅ Custom Schema - Add Memory with schema_id (212.02s)
+
+✅ Custom Schema - Wait for Memory Processing (0.00s)
+
+✅ Custom Schema - Search Verify Neo4j Nodes (0.00s)
+
+✅ Custom Schema - Search with Agentic Graph (35.51s)
+
+✅ Custom Schema - Add Memory with graph_override (0.00s)
+
+✅ Custom Schema - Full Workflow Validation (0.00s)
+
+✅ Graph Generation - Auto Mode with Schema ID (154.55s)
+
+✅ Graph Generation - Auto Mode with Property Overrides (173.03s)
+
+✅ Graph Generation - Manual Mode with Explicit Graph (121.22s)
+
+✅ Multi-Tenant - Auth Models (0.00s)
+
+✅ Multi-Tenant - Memory Models Fields (0.00s)
+
+✅ Multi-Tenant - Batch Memory Scoping (0.01s)
+
+✅ Multi-Tenant - Backward Compatibility (0.00s)
+

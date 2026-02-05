@@ -883,7 +883,7 @@ async def test_document_upload_v2_with_real_pdf_file(app):
                     mem_poll_waited = 0
                     mem_poll_interval = 5
                     while mem_poll_waited < 300 and not mem_found:
-                        # 1) Try direct pointer on Memory.post
+                        # 1) Try direct pointer on Memory.post with top-level upload_id
                         where_mem = json.dumps({
                             "upload_id": upload_id,
                             "post": {"__type": "Pointer", "className": "Post", "objectId": post_id}
@@ -899,7 +899,23 @@ async def test_document_upload_v2_with_real_pdf_file(app):
                             mem_found = True
                             break
 
-                        # 2) Try relation on Post.memories
+                        # 2) Try direct pointer with upload_id in customMetadata (fallback)
+                        where_mem_custom = json.dumps({
+                            "customMetadata.upload_id": upload_id,
+                            "post": {"__type": "Pointer", "className": "Post", "objectId": post_id}
+                        })
+                        mem_resp_custom = await client.get(
+                            f"{parse_url}/parse/classes/Memory",
+                            params={"where": where_mem_custom, "limit": 1},
+                            headers=headers_parse
+                        )
+                        if mem_resp_custom.status_code == 200:
+                            mem_results_custom = mem_resp_custom.json().get("results", [])
+                            if len(mem_results_custom) >= 1:
+                                mem_found = True
+                                break
+
+                        # 3) Try relation on Post.memories with top-level upload_id
                         related_to = json.dumps({
                             "$relatedTo": {
                                 "object": {"__type": "Pointer", "className": "Post", "objectId": post_id},
@@ -917,6 +933,25 @@ async def test_document_upload_v2_with_real_pdf_file(app):
                         if len(rel_results) >= 1:
                             mem_found = True
                             break
+
+                        # 4) Try relation with upload_id in customMetadata (fallback)
+                        related_to_custom = json.dumps({
+                            "$relatedTo": {
+                                "object": {"__type": "Pointer", "className": "Post", "objectId": post_id},
+                                "key": "memories"
+                            },
+                            "customMetadata.upload_id": upload_id
+                        })
+                        rel_resp_custom = await client.get(
+                            f"{parse_url}/parse/classes/Memory",
+                            params={"where": related_to_custom, "limit": 1},
+                            headers=headers_parse
+                        )
+                        if rel_resp_custom.status_code == 200:
+                            rel_results_custom = rel_resp_custom.json().get("results", [])
+                            if len(rel_results_custom) >= 1:
+                                mem_found = True
+                                break
 
                         await asyncio.sleep(mem_poll_interval)
                         mem_poll_waited += mem_poll_interval
