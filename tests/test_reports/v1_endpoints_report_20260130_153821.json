@@ -1,0 +1,653 @@
+{
+  "summary": {
+    "total_tests": 91,
+    "passed_tests": 53,
+    "failed_tests": 37,
+    "skipped_tests": 1,
+    "success_rate": 58.24175824175825,
+    "total_duration": 7238.203563928604,
+    "average_duration": 79.54069850470994,
+    "passed_duration": 5729.196408510208,
+    "failed_duration": 8747.121731996536
+  },
+  "results": [
+    {
+      "test_name": "Add Memory - Basic",
+      "status": "passed",
+      "duration": 368.27421402931213,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Add Memory - API Key",
+      "status": "passed",
+      "duration": 293.81298208236694,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Add Memory - External User ID + Custom Metadata",
+      "status": "passed",
+      "duration": 187.00173616409302,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Add Memory - External User ID Only",
+      "status": "passed",
+      "duration": 197.95973181724548,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Add Memory - External User ID + ACL",
+      "status": "passed",
+      "duration": 166.59353113174438,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Add Memory - User ID from Created User",
+      "status": "passed",
+      "duration": 143.50339126586914,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Batch Add Memory - Basic",
+      "status": "passed",
+      "duration": 351.0663709640503,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Batch Add Memory - User ID",
+      "status": "passed",
+      "duration": 478.7845649719238,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Batch Add Memory - External User ID",
+      "status": "passed",
+      "duration": 612.1770279407501,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Batch Add Memory - Webhook Success",
+      "status": "passed",
+      "duration": 294.6416811943054,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Batch Add Memory - Webhook Partial Success",
+      "status": "passed",
+      "duration": 221.67153811454773,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Batch Add Memory - Webhook No URL",
+      "status": "failed",
+      "duration": 41.292397022247314,
+      "error": "Expected status code 200 or 207, got 408",
+      "details": null
+    },
+    {
+      "test_name": "Batch Add Memory - Webhook Azure Fallback",
+      "status": "failed",
+      "duration": 156.76153182983398,
+      "error": "Expected 'send_batch_completion_webhook' to have been called once. Called 0 times.",
+      "details": null
+    },
+    {
+      "test_name": "Batch Add Memory - Webhook Payload Structure",
+      "status": "passed",
+      "duration": 163.43367505073547,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Batch Add Memory - Webhook Immediate (skip_background=True)",
+      "status": "passed",
+      "duration": 30.02353310585022,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Batch Add Memory - Webhook With Background Processing",
+      "status": "passed",
+      "duration": 292.0189371109009,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Update Memory - Basic",
+      "status": "failed",
+      "duration": 45.27902412414551,
+      "error": "Failed to retrieve added memory",
+      "details": null
+    },
+    {
+      "test_name": "Update Memory - API Key",
+      "status": "passed",
+      "duration": 34.014135122299194,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Update Memory - ACL with Real Users",
+      "status": "passed",
+      "duration": 28.17442297935486,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Get Memory - Basic",
+      "status": "passed",
+      "duration": 125.12989068031311,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Search Memory - Basic",
+      "status": "failed",
+      "duration": 16.083431243896484,
+      "error": "Response should not have errors",
+      "details": null
+    },
+    {
+      "test_name": "Search Memory - User ID ACL",
+      "status": "failed",
+      "duration": 113.48026585578918,
+      "error": "user_id does not have read access in acl",
+      "details": null
+    },
+    {
+      "test_name": "Search Memory - External User ID ACL",
+      "status": "passed",
+      "duration": 180.19575381278992,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Search Memory - New User Qwen Route",
+      "status": "passed",
+      "duration": 21.261471033096313,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Search Memory - Custom Metadata Filter (Qwen Only)",
+      "status": "passed",
+      "duration": 246.5373980998993,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Search Memory - Numeric Custom Metadata Filter",
+      "status": "passed",
+      "duration": 200.53165483474731,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Search Memory - List Custom Metadata Filter",
+      "status": "passed",
+      "duration": 220.02011823654175,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Search Memory - Boolean Custom Metadata Filter",
+      "status": "passed",
+      "duration": 237.3214521408081,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Search Memory - Mixed Custom Metadata Types",
+      "status": "passed",
+      "duration": 109.29719305038452,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Search Memory - Organization and Namespace Filter",
+      "status": "failed",
+      "duration": 287.0910527706146,
+      "error": "Namespace search failed: {\"code\":400,\"status\":\"error\",\"data\":null,\"error\":\"2 validation errors for Memory\\norganization_id\\n  Input should be a valid string [type=string_type, input_value={}, input_type=dict]\\n    For further information visit https://errors.pydantic.dev/2.12/v/string_type\\nnamespace_id\\n  Input should be a valid string [type=string_type, input_value={}, input_type=dict]\\n    For further information visit https://errors.pydantic.dev/2.12/v/string_type\",\"details\":null,\"search_id\":null}",
+      "details": null
+    },
+    {
+      "test_name": "Search Memory - Agentic Graph",
+      "status": "passed",
+      "duration": 225.89453411102295,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Search Memory - Predicted Grouping Logging",
+      "status": "failed",
+      "duration": 72.64137887954712,
+      "error": "",
+      "details": null
+    },
+    {
+      "test_name": "Search Memory - Fixed User Cache Test",
+      "status": "failed",
+      "duration": 18.032750129699707,
+      "error": "Expected 2 timings, got 0: []",
+      "details": null
+    },
+    {
+      "test_name": "Search Memory - Low-similarity Performance",
+      "status": "failed",
+      "duration": 14.227166891098022,
+      "error": "Search failed: {\"code\":500,\"status\":\"error\",\"data\":null,\"error\":\"Memory search failed: [Errno 8] nodename nor servname provided, or not known\",\"details\":null,\"search_id\":null}",
+      "details": null
+    },
+    {
+      "test_name": "Auth/Dev Marking - APIKey Sets Developer",
+      "status": "failed",
+      "duration": 16.836381912231445,
+      "error": "[Errno 8] nodename nor servname provided, or not known",
+      "details": null
+    },
+    {
+      "test_name": "Auth/Dev Marking - Bearer Only Does Not Set Developer",
+      "status": "failed",
+      "duration": 20.052027940750122,
+      "error": "",
+      "details": null
+    },
+    {
+      "test_name": "Auth/Dev Marking - Anon End-User Not Marked Developer When Dev API Key Used",
+      "status": "failed",
+      "duration": 20.04872488975525,
+      "error": "",
+      "details": null
+    },
+    {
+      "test_name": "Delete Memory - Basic",
+      "status": "failed",
+      "duration": 20.050024032592773,
+      "error": "",
+      "details": null
+    },
+    {
+      "test_name": "Delete Memory - API Key",
+      "status": "failed",
+      "duration": 20.05917191505432,
+      "error": "",
+      "details": null
+    },
+    {
+      "test_name": "Delete All Memories - Complete Workflow",
+      "status": "failed",
+      "duration": 20.048832178115845,
+      "error": "",
+      "details": null
+    },
+    {
+      "test_name": "Delete All Memories - External User ID",
+      "status": "passed",
+      "duration": 18.88787007331848,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Delete All Memories - No Memories Found",
+      "status": "passed",
+      "duration": 13.996403932571411,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Upload Document V2 - API Key",
+      "status": "passed",
+      "duration": 11.173133850097656,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Upload Document V2 - Session Token",
+      "status": "passed",
+      "duration": 0.8149499893188477,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Upload Document V2 - Real PDF File",
+      "status": "failed",
+      "duration": 54.761559009552,
+      "error": "No Post created for this upload_id",
+      "details": null
+    },
+    {
+      "test_name": "Upload Document V2 - Real PDF with Custom Schema",
+      "status": "failed",
+      "duration": 261.80285382270813,
+      "error": "No memories linked to Post 1Bbz0yG8Lw",
+      "details": null
+    },
+    {
+      "test_name": "Upload Document V2 - Invalid File Type",
+      "status": "passed",
+      "duration": 0.6569890975952148,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Upload Document V2 - Malicious Content",
+      "status": "passed",
+      "duration": 0.024204015731811523,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Upload Document V2 - Large File",
+      "status": "passed",
+      "duration": 0.09613490104675293,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Upload Document V2 - With Webhook",
+      "status": "passed",
+      "duration": 0.3253653049468994,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Upload Document V2 - Multi-tenant",
+      "status": "passed",
+      "duration": 0.3157017230987549,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Upload Document V2 - Provider Preference",
+      "status": "passed",
+      "duration": 1.810067892074585,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Upload Document V2 - Authentication Failure",
+      "status": "passed",
+      "duration": 0.8800690174102783,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Document Status Endpoint",
+      "status": "passed",
+      "duration": 0.06327486038208008,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Document Cancel Endpoint",
+      "status": "passed",
+      "duration": 0.06317591667175293,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Reducto Provider - Direct and Route",
+      "status": "passed",
+      "duration": 28.374611854553223,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Reducto Provider - Simple Upload",
+      "status": "passed",
+      "duration": 41.32722091674805,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Upload Document V2 - Gemini Provider",
+      "status": "passed",
+      "duration": 152.20726084709167,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Upload Document V2 - TensorLake Provider",
+      "status": "failed",
+      "duration": 194.29929399490356,
+      "error": "TensorLake processing failed: Activity task failed",
+      "details": null
+    },
+    {
+      "test_name": "Create User - Basic",
+      "status": "failed",
+      "duration": 0.03966784477233887,
+      "error": "Expected status code 200, got 401. Response: {\"detail\":\"Invalid API key\"}",
+      "details": null
+    },
+    {
+      "test_name": "Create User - Anonymous",
+      "status": "failed",
+      "duration": 0.011044025421142578,
+      "error": "Expected status code 200, got 401. Response: {\"detail\":\"Invalid API key\"}",
+      "details": null
+    },
+    {
+      "test_name": "Create User - Batch",
+      "status": "failed",
+      "duration": 0.015488862991333008,
+      "error": "Expected status code 200, got 401. Response: {\"detail\":\"Invalid API key\"}",
+      "details": null
+    },
+    {
+      "test_name": "Get User - Basic",
+      "status": "failed",
+      "duration": 0.009398937225341797,
+      "error": "User creation failed: {\"detail\":\"Invalid API key\"}",
+      "details": null
+    },
+    {
+      "test_name": "Update User - Basic",
+      "status": "failed",
+      "duration": 0.00911402702331543,
+      "error": "User creation failed: {\"detail\":\"Invalid API key\"}",
+      "details": null
+    },
+    {
+      "test_name": "Delete User - Basic",
+      "status": "failed",
+      "duration": 0.009329795837402344,
+      "error": "User creation failed: {\"detail\":\"Invalid API key\"}",
+      "details": null
+    },
+    {
+      "test_name": "Delete User - By External ID",
+      "status": "failed",
+      "duration": 0.00881195068359375,
+      "error": "User creation failed: {\"detail\":\"Invalid API key\"}",
+      "details": null
+    },
+    {
+      "test_name": "List Users - Basic",
+      "status": "failed",
+      "duration": 0.008847236633300781,
+      "error": "User 1 creation failed: {\"detail\":\"Invalid API key\"}",
+      "details": null
+    },
+    {
+      "test_name": "Feedback - End to End",
+      "status": "failed",
+      "duration": 37.97233724594116,
+      "error": "Search failed: {\"code\":400,\"status\":\"error\",\"data\":null,\"error\":\"2 validation errors for Memory\\norganization_id\\n  Input should be a valid string [type=string_type, input_value={}, input_type=dict]\\n    For further information visit https://errors.pydantic.dev/2.12/v/string_type\\nnamespace_id\\n  Input should be a valid string [type=string_type, input_value={}, input_type=dict]\\n    For further information visit https://errors.pydantic.dev/2.12/v/string_type\",\"details\":null,\"search_id\":null}",
+      "details": null
+    },
+    {
+      "test_name": "Feedback - Get by ID",
+      "status": "failed",
+      "duration": 12.388674259185791,
+      "error": "Search failed: {\"code\":400,\"status\":\"error\",\"data\":null,\"error\":\"2 validation errors for Memory\\norganization_id\\n  Input should be a valid string [type=string_type, input_value={}, input_type=dict]\\n    For further information visit https://errors.pydantic.dev/2.12/v/string_type\\nnamespace_id\\n  Input should be a valid string [type=string_type, input_value={}, input_type=dict]\\n    For further information visit https://errors.pydantic.dev/2.12/v/string_type\",\"details\":null,\"search_id\":null}",
+      "details": null
+    },
+    {
+      "test_name": "Sync Tiers - Basic",
+      "status": "passed",
+      "duration": 28.827347993850708,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "Sync Tiers - With Embeddings (small)",
+      "status": "failed",
+      "duration": 20.068161010742188,
+      "error": "",
+      "details": null
+    },
+    {
+      "test_name": "Sync Delta - Cursor Pagination",
+      "status": "failed",
+      "duration": 20.087446689605713,
+      "error": "",
+      "details": null
+    },
+    {
+      "test_name": "QueryLog - Memory Metadata with Query Log Fields",
+      "status": "passed",
+      "duration": 0.0016620159149169922,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "QueryLog - Classification Data Detection",
+      "status": "passed",
+      "duration": 0.0023698806762695312,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "QueryLog - Search with Query Log Integration",
+      "status": "passed",
+      "duration": 0.0025980472564697266,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "QueryLog - Agentic Graph Log Model Creation",
+      "status": "passed",
+      "duration": 0.0020809173583984375,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "QueryLog - User Feedback Log Model Creation",
+      "status": "passed",
+      "duration": 0.0005559921264648438,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "QueryLog - Agentic Graph Log with Relations",
+      "status": "passed",
+      "duration": 0.00032782554626464844,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "QueryLog - User Feedback Log Minimal",
+      "status": "passed",
+      "duration": 0.0002410411834716797,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "QueryLog - Agentic Graph Log Storage Function",
+      "status": "passed",
+      "duration": 0.0006818771362304688,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "QueryLog - User Feedback Log Storage Function",
+      "status": "passed",
+      "duration": 0.00021457672119140625,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "QueryLog - Agentic Graph Log Data Preparation",
+      "status": "passed",
+      "duration": 0.00043582916259765625,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "QueryLog - User Feedback Log Data Preparation",
+      "status": "passed",
+      "duration": 0.0005192756652832031,
+      "error": null,
+      "details": null
+    },
+    {
+      "test_name": "QueryLog - Memory Retrieval Log Predicted Grouping",
+      "status": "skipped",
+      "duration": 0.00023674964904785156,
+      "error": null,
+      "details": "Requires monkeypatch fixture"
+    },
+    {
+      "test_name": "QueryLog - Persisted with Classification",
+      "status": "failed",
+      "duration": 3.2200701236724854,
+      "error": "Search failed: 500 {\"code\":500,\"status\":\"error\",\"data\":null,\"error\":\"Memory search failed: [Errno 8] nodename nor servname provided, or not known\",\"details\":null,\"search_id\":null}",
+      "details": null
+    },
+    {
+      "test_name": "QueryLog - Real creation and memory increment",
+      "status": "failed",
+      "duration": 3.0366411209106445,
+      "error": "",
+      "details": null
+    },
+    {
+      "test_name": "QueryLog - Cache hits increment on repeated search",
+      "status": "failed",
+      "duration": 3.0418529510498047,
+      "error": "Search failed: 500 {\"code\":500,\"status\":\"error\",\"data\":null,\"error\":\"Memory search failed: [Errno 8] nodename nor servname provided, or not known\",\"details\":null,\"search_id\":null}",
+      "details": null
+    },
+    {
+      "test_name": "QueryLog - Fused confidence matches weight delta",
+      "status": "failed",
+      "duration": 10.083730936050415,
+      "error": "Search failed: 400 {\"code\":400,\"status\":\"error\",\"data\":null,\"error\":\"2 validation errors for Memory\\norganization_id\\n  Input should be a valid string [type=string_type, input_value={}, input_type=dict]\\n    For further information visit https://errors.pydantic.dev/2.12/v/string_type\\nnamespace_id\\n  Input should be a valid string [type=string_type, input_value={}, input_type=dict]\\n    For further information visit https://errors.pydantic.dev/2.12/v/string_type\",\"details\":null,\"search_id\":null}",
+      "details": null
+    },
+    {
+      "test_name": "QueryLog - Backfill Retrieval Counters Small Batch",
+      "status": "failed",
+      "duration": 3.028345823287964,
+      "error": "",
+      "details": null
+    },
+    {
+      "test_name": "QueryLog - Sync Tiers Returns Ranked Tier1",
+      "status": "failed",
+      "duration": 3.0313398838043213,
+      "error": "",
+      "details": null
+    },
+    {
+      "test_name": "TEST_SUITE_ERROR",
+      "status": "failed",
+      "duration": 7238.203560829163,
+      "error": "Unhandled exception: name 'test_v1_create_security_schema' is not defined",
+      "details": null
+    }
+  ],
+  "timestamp": "2026-01-30T15:38:21.982585"
+}

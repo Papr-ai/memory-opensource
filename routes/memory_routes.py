@@ -851,7 +851,11 @@ async def common_add_memory_batch_handler(
         tasks = [process_one(idx, memory, legacy_route) for idx, memory in enumerate(memories)]
         
         # Add timeout for batch operations to prevent hanging
-        batch_timeout = min(300, len(memories) * 30)  # 30s per memory, max 5 minutes
+        per_memory_timeout = int(env.get("BATCH_PROCESSING_TIMEOUT_PER_MEMORY_SECONDS", 45))
+        min_timeout = int(env.get("BATCH_PROCESSING_TIMEOUT_MIN_SECONDS", 60))
+        max_timeout = int(env.get("BATCH_PROCESSING_TIMEOUT_MAX_SECONDS", 300))
+        batch_timeout = max(min_timeout, len(memories) * per_memory_timeout)
+        batch_timeout = min(max_timeout, batch_timeout)
         logger.info(f"Starting batch processing with {batch_timeout}s timeout for {len(memories)} memories")
         
         try:

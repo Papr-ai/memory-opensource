@@ -19,6 +19,7 @@ from .feedback_routes import router as feedback_router
 from .websocket_routes import router as websocket_router
 from .schema_routes_v1 import router as schema_router
 from .message_routes import router as message_router
+from .omo_routes import router as omo_router
 
 # Include core routers (always available)
 v1_router.include_router(memory_router)
@@ -27,6 +28,7 @@ v1_router.include_router(feedback_router)
 v1_router.include_router(websocket_router)
 v1_router.include_router(schema_router)
 v1_router.include_router(message_router)
+v1_router.include_router(omo_router)
 
 # ==========================================
 # Cloud-only routes (conditionally loaded)

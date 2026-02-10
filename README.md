@@ -38,11 +38,13 @@ graph TB
     API --> Redis[(Redis Cache)]
 
     subgraph "AI Services"
-        OpenAI[OpenAI Embeddings]
+        LocalEmbed[Local Embeddings<br/>Qwen3-0.6B]
+        CloudEmbed[Cloud Embeddings<br/>Optional]
         LLM[Language Models]
     end
 
-    API --> OpenAI
+    API --> LocalEmbed
+    API -.-> CloudEmbed
     API --> LLM
 
     subgraph "Storage Layer"
@@ -69,6 +71,7 @@ graph TB
 |---------|-------------|-------|
 | Memory Storage | ✅ | ✅ |
 | Vector Search | ✅ | ✅ |
+| **Local Embeddings (Privacy-First)** | **✅** | **❌** |
 | Graph Relationships | ✅ | ✅ |
 | API Access | ✅ | ✅ |
 | Self-Hosted | ✅ | ❌ |
@@ -91,6 +94,7 @@ graph TB
 - **Neo4j**: Graph database for memory relationships and connections
 - **Qdrant**: Vector database for semantic search and embeddings
 - **Redis**: Caching layer for performance optimization
+- **Local Embeddings**: Privacy-first Qwen3-0.6B model for on-device embedding generation (see [Local Embeddings Guide](docs/LOCAL_EMBEDDINGS.md))
 
 ## 🚀 Quick Start
 
@@ -99,8 +103,51 @@ graph TB
 - **Python 3.8+**
 - **Docker & Docker Compose** (recommended)
 - **Git**
-- **API Keys**: OpenAI API key, Groq API key, and Deep Infra API key
-  - Note: Hugging Face is also supported, and local Qwen on-device support will be added soon
+- **API Keys** (Optional for local embeddings):
+  - OpenAI API key (for LLM operations)
+  - Groq API key (optional)
+  - Deep Infra API key (only if using cloud embeddings)
+
+#### Docker Resource Requirements
+
+**Important:** Docker resource allocation depends on your embedding choice:
+
+##### Option 1: Local Embeddings (Default - Privacy-First) ✅
+
+Local embeddings run the Qwen3-Embedding-0.6B model entirely on your device without external API calls.
+
+| Resource | Minimum | Recommended | Notes |
+|----------|---------|-------------|-------|
+| **Memory (RAM)** | 8 GB | 12 GB | Model needs ~2-3 GB + services need ~2-3 GB |
+| **CPU Cores** | 2 cores | 4+ cores | More cores = faster embedding generation |
+| **Swap** | 2 GB | 4 GB | Helps prevent OOM during model loading |
+| **Disk Space** | 10 GB | 20 GB | Model download ~1.2 GB + containers + data |
+
+**To configure Docker resources (Docker Desktop):**
+1. Open Docker Desktop → Settings → Resources
+2. Set Memory to **at least 8 GB** (12 GB recommended)
+3. Set CPUs to **4 or more** if available
+4. Set Swap to **2-4 GB**
+5. Click "Apply & Restart"
+
+##### Option 2: Cloud Embeddings (Faster, Requires API)
+
+Cloud embeddings use external APIs (DeepInfra/Vertex AI) - much lighter resource requirements.
+
+| Resource | Minimum | Recommended |
+|----------|---------|-------------|
+| **Memory (RAM)** | 4 GB | 6 GB |
+| **CPU Cores** | 2 cores | 4 cores |
+| **Swap** | 1 GB | 2 GB |
+| **Disk Space** | 5 GB | 10 GB |
+
+**To use cloud embeddings**, set in your `.env` file:
+```bash
+USE_LOCAL_EMBEDDINGS=false
+DEEPINFRA_TOKEN=your_token_here
+```
+
+See [Local Embeddings Guide](docs/LOCAL_EMBEDDINGS.md) for detailed comparison and configuration.
 
 ### Option 1: Docker Setup (Recommended)
 
@@ -118,14 +165,18 @@ cd memory-opensource
 ```bash
 # For open source setup
 cp .env.example .env.opensource
-# Edit .env.opensource with your API keys (OpenAI, Groq, Deep Infra)
-# Note: Hugging Face is also supported, and local Qwen on-device support will be added soon
+# Edit .env.opensource with your API keys
+
+# OpenAI API key (required for LLM operations)
+# Groq API key (optional)
+# DeepInfra token (only needed if using cloud embeddings: USE_LOCAL_EMBEDDINGS=false)
+# Note: By default, local embeddings are used (no external API calls)
 ```
 
 3. **Start all services**
 ```bash
 # Open source setup (auto-initializes everything)
-docker-compose up -d
+docker compose up -d
 ```
 
 4. **Access the API**
@@ -133,7 +184,7 @@ docker-compose up -d
    - Health Check: http://localhost:5001/health
    - Parse Dashboard: http://localhost:4040 (optional, use `--profile dashboard` for open source)
    
-**Note**: The open-source setup automatically initializes schemas, creates a default user, and generates an API key on first run. Check container logs for your API key.
+**Note**: The open-source setup automatically initializes schemas, creates a default user, and generates an API key on first run. **Test credentials are automatically saved to your `.env.opensource` file** - check the `TEST_*` variables after the first startup completes (~30 seconds).
 
 ### Option 2: Manual Setup
 
@@ -149,7 +200,7 @@ pip install -r requirements.txt
 2. **Start required services**
 ```bash
 # Recommended: Use docker-compose for open source setup
-docker-compose up -d mongodb neo4j qdrant redis parse-server
+docker compose up -d mongodb neo4j qdrant redis parse-server
 
 # Or start individually (for development):
 # MongoDB
@@ -393,9 +444,124 @@ const searchMemories = async (query) => {
 };
 ```
 
+## 🧪 Testing
+
+The project includes a comprehensive test suite with **~119 V1 endpoint tests** covering memory operations, search, user management, and more.
+
+### Run All Tests
+
+```bash
+# Simple one-command execution (works for all contributors)
+./run_tests.sh
+```
+
+This automatically:
+- ✅ Runs complete V1 test suite in Docker
+- ✅ Saves reports to `tests/test_reports/`
+- ✅ Works regardless of Docker configuration
+- ✅ Displays summary when complete
+
+### Run Single Test
+
+```bash
+# Debug a specific failing test
+./tests/run_single_test.sh "tests/test_add_memory_fastapi.py::test_v1_add_memory_1"
+```
+
+### View Test Results
+
+```bash
+# View latest test summary
+cat tests/test_reports/v1_endpoints_opensource_log_*.txt | tail -50
+
+# Check success rate
+grep "Success Rate" tests/test_reports/v1_endpoints_opensource_log_*.txt | tail -1
+```
+
+**For detailed testing documentation**, see [TESTING.md](TESTING.md)
+
 ## 🤝 Contributing
 
 We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+## 🔧 Troubleshooting
+
+### Docker File Sharing on Mac
+
+**Symptom:** Error message: "Mounts denied: The path ... is not shared from the host"
+
+**Solution:** Docker Desktop on Mac requires explicit permission to mount files from your host system.
+
+**Option 1: Enable File Sharing (Recommended)**
+1. Open **Docker Desktop**
+2. Click the **gear icon** (⚙️) → **Settings**
+3. Go to **Resources** → **File Sharing**
+4. Click the **"+"** button
+5. Add your project directory: `/Users/YOUR_USERNAME/Documents/GitHub/memory-opensource`
+6. Click **Apply & Restart**
+
+**Option 2: Copy Credentials After Bootstrap**
+If you prefer not to enable file sharing, you can copy test credentials after the first run:
+```bash
+# After docker compose up completes (~30 seconds)
+docker cp papr-memory:/app/.env.opensource ./.env.opensource
+```
+
+This will copy the auto-generated test credentials to your host machine.
+
+### Docker Resource Issues
+
+**Symptom:** Container keeps restarting, server hangs during startup, or "Out of Memory" errors
+
+**Solution:** Increase Docker resource allocation (see [Prerequisites](#prerequisites) for requirements)
+
+```bash
+# Check if local embeddings are enabled
+docker exec papr-memory cat /app/.env | grep USE_LOCAL_EMBEDDINGS
+
+# If using local embeddings, ensure Docker has 8+ GB RAM allocated
+# Docker Desktop → Settings → Resources → Memory: 8-12 GB
+
+# Alternatively, switch to cloud embeddings (uses less memory)
+# In .env: USE_LOCAL_EMBEDDINGS=false
+```
+
+### Model Download Slow or Failing
+
+**Symptom:** Container logs show "Downloading model..." for a long time
+
+**Solution:** The Qwen3-Embedding-0.6B model is ~1.2GB and downloads on first run
+
+```bash
+# Monitor download progress
+docker logs papr-memory -f | grep -i "download\|qwen\|embedding"
+
+# If download fails, check internet connection and retry
+docker compose restart papr-memory
+```
+
+### Services Not Starting
+
+**Symptom:** Services fail health checks or don't respond
+
+**Solution:** Ensure all services are healthy before accessing API
+
+```bash
+# Check service status
+docker compose ps
+
+# View logs for specific service
+docker logs papr-memory
+docker logs papr-neo4j
+docker logs papr-mongodb
+
+# Restart all services
+docker compose restart
+```
+
+For more detailed troubleshooting, see:
+- [Local Embeddings Guide](docs/LOCAL_EMBEDDINGS.md)
+- [Quick Start Guide](QUICKSTART_OPENSOURCE.md)
 
 ### Quick Contribution Steps
 1. Fork the repository

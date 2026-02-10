@@ -3,7 +3,9 @@
 Initialize Qdrant Collections for Open Source Edition
 
 This script creates the required Qdrant collections on startup:
-- Main collection (Qwen4B): 2560 dimensions for memory embeddings
+- Main collection: Variable dimensions based on embedding model
+  - Local (Qwen3-Embedding-0.6B): 1024 dimensions
+  - Cloud (Qwen3-Embedding-4B): 2560 dimensions
 - Property collection: 384 dimensions for property vectors
 
 Usage:
@@ -86,8 +88,23 @@ async def init_qdrant_collections(
     qdrant_url = qdrant_url or os.getenv("QDRANT_URL", "http://localhost:6333")
     qdrant_api_key = qdrant_api_key or os.getenv("QDRANT_API_KEY", "")
     
-    # Main collection (for memory embeddings)
-    main_collection = main_collection or os.getenv("QDRANT_COLLECTION_QWEN4B", "Qwen4B")
+    # Determine embedding dimensions based on local vs cloud embeddings
+    use_local_embeddings = os.getenv("USE_LOCAL_EMBEDDINGS", "true").lower() == "true"
+    if use_local_embeddings:
+        # Local Qwen3-Embedding-0.6B produces 1024 dimensions
+        embedding_dimensions = int(os.getenv("LOCAL_EMBEDDING_DIMENSIONS", "1024"))
+        embedding_model_name = "Qwen0.6B (local)"
+    else:
+        # Cloud Qwen3-Embedding-4B produces 2560 dimensions
+        embedding_dimensions = 2560
+        embedding_model_name = "Qwen4B (cloud)"
+    
+    # Main collection (for memory embeddings) - auto-select based on dimensions
+    if main_collection is None:
+        if embedding_dimensions == 1024:
+            main_collection = os.getenv("QDRANT_COLLECTION_QWEN0pt6B", "Qwen0pt6B")
+        else:
+            main_collection = os.getenv("QDRANT_COLLECTION_QWEN4B", "Qwen4B")
     
     # Property collection (for property vectors)
     property_collection = property_collection or os.getenv("QDRANT_PROPERTY_COLLECTION", "neo4j_properties_dev")
@@ -96,7 +113,8 @@ async def init_qdrant_collections(
     print("🔧 Initializing Qdrant Collections")
     print("=" * 60)
     print(f"Qdrant URL: {qdrant_url}")
-    print(f"Main Collection: {main_collection} (2560 dimensions)")
+    print(f"Embedding Model: {embedding_model_name}")
+    print(f"Main Collection: {main_collection} ({embedding_dimensions} dimensions)")
     print(f"Property Collection: {property_collection} (384 dimensions)")
     if create_both_property_collections:
         print(f"Also creating: neo4j_properties (384 dimensions)")
@@ -120,12 +138,12 @@ async def init_qdrant_collections(
         print(f"❌ Failed to connect to Qdrant: {e}")
         return False
     
-    # Create main collection (Qwen4B - 2560 dimensions)
+    # Create main collection with appropriate dimensions
     success_main = await create_collection(
         client=client,
         collection_name=main_collection,
-        vector_size=2560,
-        description="Memory embeddings (Qwen4B)"
+        vector_size=embedding_dimensions,
+        description=f"Memory embeddings ({embedding_model_name})"
     )
     
     # Create property collection (384 dimensions) - dev version

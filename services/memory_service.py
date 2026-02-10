@@ -22,9 +22,15 @@ from urllib.parse import urlparse
 import uuid
 from models.memory_models import AddMemoryRequest
 import httpx
-from models.shared_types import MemoryMetadata
+from models.shared_types import MemoryMetadata, ACLConfig
 
 from services.logger_singleton import LoggerSingleton
+from services.memory_policy_resolver import (
+    resolve_memory_policy_from_schema,
+    extract_omo_fields_from_policy,
+    should_skip_graph_extraction
+)
+from services.link_to_parser import expand_link_to_to_policy, validate_link_to
 
 # Create a logger instance for this module
 logger = LoggerSingleton.get_logger(__name__)
@@ -154,6 +160,52 @@ async def batch_handle_incoming_memories(
             metadata['user_id'] = str(end_user_id)
             metadata['workspace_id'] = workspace_id if workspace_id is not None else None
             
+            # CRITICAL: Add organization_id and namespace_id for multi-tenant scoping
+            # These come from the AddMemoryRequest and/or its metadata
+            req_org_id = getattr(memory_request, 'organization_id', None)
+            req_ns_id = getattr(memory_request, 'namespace_id', None)
+            meta_org_id = memory_request.metadata.organization_id if memory_request.metadata and hasattr(memory_request.metadata, 'organization_id') else None
+            meta_ns_id = memory_request.metadata.namespace_id if memory_request.metadata and hasattr(memory_request.metadata, 'namespace_id') else None
+            
+            # Use request-level first, then metadata-level
+            final_org_id = req_org_id or meta_org_id or metadata.get('organization_id')
+            final_ns_id = req_ns_id or meta_ns_id or metadata.get('namespace_id')
+            
+            if final_org_id:
+                metadata['organization_id'] = str(final_org_id)
+                logger.info(f"Setting organization_id={final_org_id} on memory metadata")
+            if final_ns_id:
+                metadata['namespace_id'] = str(final_ns_id)
+                logger.info(f"Setting namespace_id={final_ns_id} on memory metadata")
+            
+            # Handle ACL for batch requests (match handle_add_memory default behavior)
+            acl_fields = [
+                'user_read_access', 'user_write_access',
+                'workspace_read_access', 'workspace_write_access',
+                'role_read_access', 'role_write_access'
+            ]
+            acl_already_set = any(metadata.get(field) for field in acl_fields)
+            if not acl_already_set:
+                acl_user_id = end_user_id if end_user_id else developer_user_id
+                if acl_user_id:
+                    metadata['user_read_access'] = [acl_user_id]
+                    metadata['user_write_access'] = [acl_user_id]
+                    logger.info(
+                        f"Setting default ACL for user: {acl_user_id} "
+                        f"(end_user_id={end_user_id}, developer_user_id={developer_user_id})"
+                    )
+                else:
+                    logger.warning(
+                        f"No valid user ID for ACL: end_user_id={end_user_id}, "
+                        f"developer_user_id={developer_user_id}"
+                    )
+                    metadata['user_read_access'] = []
+                    metadata['user_write_access'] = []
+                metadata['workspace_read_access'] = []
+                metadata['workspace_write_access'] = []
+                metadata['role_read_access'] = []
+                metadata['role_write_access'] = []
+
             # Add createdAt if not present
             if 'createdAt' not in metadata:
                 from datetime import datetime, timezone
@@ -187,9 +239,8 @@ async def batch_handle_incoming_memories(
         first_request = memory_requests[0]
         graph_override = None
         schema_id = None
-        simple_schema_mode = False
         property_overrides = None
-        
+
         if first_request.graph_generation:
             graph_gen = first_request.graph_generation
             if graph_gen.mode == "manual" and graph_gen.manual:
@@ -198,9 +249,8 @@ async def batch_handle_incoming_memories(
             elif graph_gen.mode == "auto" and graph_gen.auto:
                 auto_config = graph_gen.auto
                 schema_id = auto_config.schema_id
-                simple_schema_mode = auto_config.simple_schema_mode
                 property_overrides = auto_config.property_overrides
-                logger.info(f"🤖 BATCH AUTO MODE: schema_id={schema_id}, simple_schema_mode={simple_schema_mode}")
+                logger.info(f"🤖 BATCH AUTO MODE: schema_id={schema_id}")
         
         # Call batch processing method
         try:
@@ -221,7 +271,6 @@ async def batch_handle_incoming_memories(
                 developer_user_id=developer_user_id,
                 graph_override=graph_override,
                 schema_id=schema_id,
-                simple_schema_mode=simple_schema_mode,
                 property_overrides=property_overrides
             )
         except Exception as e:
@@ -496,8 +545,18 @@ async def handle_incoming_memory(
                 metadata[field] = merge_acl_lists(metadata.get(field), acl.get(field) if acl else [])
         elif not acl_already_set:
             # If no ACLs at all, set to private
-            metadata['user_read_access'] = [end_user_id]
-            metadata['user_write_access'] = [end_user_id]
+            # Use end_user_id if available, otherwise fall back to developer_user_id
+            # This ensures the creator (either end user or developer) has access to the memory
+            acl_user_id = end_user_id if end_user_id else developer_user_id
+            if acl_user_id:
+                metadata['user_read_access'] = [acl_user_id]
+                metadata['user_write_access'] = [acl_user_id]
+                logger.info(f"Setting default ACL for user: {acl_user_id} (end_user_id={end_user_id}, developer_user_id={developer_user_id})")
+            else:
+                # No valid user ID available - log warning but don't set empty ACL
+                logger.warning(f"No valid user ID for ACL: end_user_id={end_user_id}, developer_user_id={developer_user_id}")
+                metadata['user_read_access'] = []
+                metadata['user_write_access'] = []
             metadata['workspace_read_access'] = []
             metadata['workspace_write_access'] = []
             metadata['role_read_access'] = []
@@ -569,10 +628,61 @@ async def handle_incoming_memory(
         # Extract graph generation configuration from new structure
         graph_override = None
         schema_id = None
-        simple_schema_mode = False
         property_overrides = None
-        
-        if memory_request.graph_generation:
+        memory_policy_dict = None
+
+        # SHORTHAND: Expand link_to DSL if provided
+        # link_to is a shorthand for memory_policy.node_constraints and edge_constraints
+        if hasattr(memory_request, 'link_to') and memory_request.link_to:
+            try:
+                logger.info(f"🔗 LINK_TO DSL: Expanding shorthand syntax")
+                # Get existing memory_policy dict if present (exclude None values to prevent issues)
+                existing_policy = None
+                if hasattr(memory_request, 'memory_policy') and memory_request.memory_policy:
+                    mp = memory_request.memory_policy
+                    existing_policy = mp.model_dump(exclude_none=True) if hasattr(mp, 'model_dump') else mp
+
+                # Expand link_to and merge with existing policy
+                expanded_policy = expand_link_to_to_policy(
+                    link_to=memory_request.link_to,
+                    existing_policy=existing_policy,
+                    schema=None  # TODO: Fetch schema for type inference if schema_id is known
+                )
+                memory_policy_dict = expanded_policy
+                logger.info(f"🔗 LINK_TO EXPANDED: node_constraints={len(expanded_policy.get('node_constraints') or [])}, "
+                           f"edge_constraints={len(expanded_policy.get('edge_constraints') or [])}")
+            except ValueError as e:
+                logger.error(f"❌ LINK_TO ERROR: {e}")
+                return AddMemoryResponse.failure(error=f"Invalid link_to syntax: {e}", code=400)
+
+        # NEW: Check for memory_policy first (new unified API)
+        # Skip if already populated by link_to expansion
+        if memory_policy_dict is None and hasattr(memory_request, 'memory_policy') and memory_request.memory_policy:
+            mp = memory_request.memory_policy
+            # Convert Pydantic model to dict if needed (exclude None to prevent issues)
+            memory_policy_dict = mp.model_dump(exclude_none=True) if hasattr(mp, 'model_dump') else mp
+
+        # Process memory_policy_dict (from link_to expansion or direct memory_policy)
+        if memory_policy_dict:
+            # Extract schema_id from memory_policy
+            schema_id = memory_policy_dict.get('schema_id')
+
+            # Extract mode and configure accordingly
+            # Note: 'structured' is accepted as deprecated alias for 'manual'
+            mode = memory_policy_dict.get('mode', 'auto')
+            if mode in ('manual', 'structured'):
+                # Manual mode: developer provides exact nodes (no LLM extraction)
+                nodes = memory_policy_dict.get('nodes')
+                relationships = memory_policy_dict.get('relationships')
+                if nodes:
+                    graph_override = {'nodes': nodes, 'relationships': relationships or []}
+                    logger.info(f"🎯 MANUAL MODE (memory_policy): Using developer-provided graph structure")
+            elif mode == 'auto':
+                # Auto mode: LLM extraction, constraints applied if provided
+                logger.info(f"🤖 AUTO MODE (memory_policy): schema_id={schema_id}")
+
+        # LEGACY: Fall back to graph_generation if memory_policy not provided
+        elif memory_request.graph_generation:
             graph_gen = memory_request.graph_generation
             if graph_gen.mode == "manual" and graph_gen.manual:
                 graph_override = graph_gen.manual
@@ -580,17 +690,85 @@ async def handle_incoming_memory(
             elif graph_gen.mode == "auto" and graph_gen.auto:
                 auto_config = graph_gen.auto
                 schema_id = auto_config.schema_id
-                simple_schema_mode = auto_config.simple_schema_mode
                 property_overrides = auto_config.property_overrides
-                logger.info(f"🤖 AUTO MODE: schema_id={schema_id}, simple_schema_mode={simple_schema_mode}")
+                logger.info(f"🤖 AUTO MODE: schema_id={schema_id}")
                 if property_overrides:
                     logger.info(f"🔧 PROPERTY OVERRIDES: {len(property_overrides)} rules")
-        
+
+        # Resolve schema-level memory_policy if schema_id is provided
+        resolved_policy = None  # Initialize before conditional block
+        if schema_id:
+            try:
+                resolved_policy = await resolve_memory_policy_from_schema(
+                    memory_graph=memory_graph,
+                    schema_id=schema_id,
+                    memory_policy=memory_policy_dict,
+                    user_id=end_user_id,
+                    workspace_id=workspace_id,
+                    organization_id=metadata.get('organization_id'),
+                    namespace_id=metadata.get('namespace_id'),
+                    api_key=api_key
+                )
+                logger.info(f"📋 RESOLVED POLICY: {resolved_policy}")
+
+            except Exception as e:
+                logger.warning(f"Failed to resolve schema-level policy: {e}")
+                # Continue without schema policy
+
+        # Apply OMO fields and constraints from the effective policy
+        # Use resolved_policy (from schema) if available, otherwise use memory_policy_dict
+        effective_policy = resolved_policy or memory_policy_dict
+        if effective_policy:
+            # Check if we should skip graph extraction (consent='none')
+            if should_skip_graph_extraction(effective_policy):
+                logger.warning(f"⚠️ Skipping graph extraction due to consent='none' policy")
+                # Continue with memory storage, but skip graph generation
+                graph_override = {'nodes': [], 'relationships': []}
+
+            # Extract OMO fields and add to metadata
+            omo_fields = extract_omo_fields_from_policy(effective_policy)
+            metadata['consent'] = omo_fields.get('consent', 'implicit')
+            metadata['risk'] = omo_fields.get('risk', 'none')
+            logger.info(f"🔒 OMO FIELDS APPLIED: consent={metadata['consent']}, risk={metadata['risk']}")
+            if omo_fields.get('acl'):
+                metadata['acl'] = omo_fields['acl']
+                # Expand OMO ACL into granular access fields for storage/filtering
+                try:
+                    acl_value = omo_fields['acl']
+                    if isinstance(acl_value, ACLConfig):
+                        granular_acl = acl_value.to_granular_acl()
+                    elif isinstance(acl_value, dict):
+                        granular_acl = ACLConfig(**acl_value).to_granular_acl()
+                    else:
+                        granular_acl = None
+                    if granular_acl:
+                        for field, values in granular_acl.items():
+                            if values:
+                                existing = metadata.get(field) or []
+                                metadata[field] = list(set(existing + values))
+                except Exception as e:
+                    logger.warning(f"Failed to expand memory_policy.acl into granular fields: {e}")
+
+            # Extract node_constraints for graph processing
+            node_constraints = effective_policy.get('node_constraints')
+            if node_constraints:
+                if not property_overrides:
+                    property_overrides = []
+                # Convert node_constraints to property_overrides format for compatibility
+                for constraint in node_constraints:
+                    if constraint.get('force'):
+                        property_overrides.append({
+                            'node_type': constraint['node_type'],
+                            'properties': constraint['force']
+                        })
+                logger.info(f"🔧 NODE CONSTRAINTS from policy: {len(node_constraints)} rules")
+
         logger.info(f"🔍 DEBUG: Extracted graph_override: {graph_override is not None}")
         logger.info(f"🔍 DEBUG: Extracted schema_id: {schema_id}")
-        logger.info(f"🔍 DEBUG: Extracted simple_schema_mode: {simple_schema_mode}")
         logger.info(f"🔍 DEBUG: Extracted property_overrides: {property_overrides}")
         try:
+            # Use resolved_policy if available, otherwise use memory_policy_dict
+            final_memory_policy = resolved_policy or memory_policy_dict
             memory_items = await memory_graph.add_memory_item_async(
                 memory_item,
                 relationship_items,
@@ -608,8 +786,8 @@ async def handle_incoming_memory(
                 developer_user_id=developer_user_id,  # Pass developer ID for schema selection
                 graph_override=graph_override,  # Pass extracted graph_override for bypassing LLM
                 schema_id=schema_id,  # Pass extracted schema_id for enforcement
-                simple_schema_mode=simple_schema_mode, # Pass extracted simple_schema_mode
-                property_overrides=property_overrides # Pass extracted property_overrides
+                property_overrides=property_overrides,  # Pass extracted property_overrides
+                memory_policy=final_memory_policy  # Pass resolved memory_policy with constraints
             )
         except Exception as e:
             logger.error(f"Error adding memory item to graph: {str(e)}")

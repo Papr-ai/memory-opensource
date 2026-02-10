@@ -130,7 +130,7 @@ async def main():
 
         # Memory worker configuration
         # Use -v2 queue to avoid conflicts with old worker registrations
-        memory_task_queue = "memory-processing-v2"
+        memory_task_queue = "memory-processing"
         
         # Document worker configuration
         document_task_queue = "document-processing-v2"  # Use v2 to avoid stuck workflows
@@ -158,18 +158,44 @@ async def main():
         # 2. Are human-readable
         # 3. Sort chronologically
         # 4. Indicate compatibility (via semver major.minor)
+        #
+        # IMPORTANT: Worker Versioning requires BOTH:
+        # 1. Workers registering with build_id (done here)
+        # 2. Task queue configured with default build ID in Temporal Cloud, OR
+        #    workflows started with versioning_intent to route to versioned workers
+        #
+        # To configure default build ID in Temporal Cloud:
+        #   temporal task-queue update-build-ids add-new-default \
+        #     --task-queue memory-processing-v2 \
+        #     --build-id "v0.2.2+batch-default.20251117"
+        #
+        # Note: The old build_id API will be deprecated March 2026 in favor of
+        # Worker Deployments. See: https://docs.temporal.io/worker-versioning
+        #
+        # Set TEMPORAL_USE_VERSIONING=false to run unversioned (for local dev/testing
+        # if task queue default build ID is not configured in Temporal Cloud).
+        # Default is true to match current production behavior.
+        use_versioning = os.getenv("TEMPORAL_USE_VERSIONING", "true").lower() == "true"
+        
         feature_id = "batch-default"
         timestamp = "20251117"  # Date of batch-default release
         default_build_id = f"v{APP_VERSION}+{feature_id}.{timestamp}"
+        build_id = os.getenv("TEMPORAL_BUILD_ID", default_build_id) if use_versioning else None
         
-        build_id = os.getenv("TEMPORAL_BUILD_ID", default_build_id)
-        logger.info(f"🏗️  Worker build ID: {build_id}")
+        if build_id:
+            logger.info(f"🏗️  Worker build ID: {build_id} (versioned mode)")
+            logger.info(f"⚠️  Ensure task queue has default build ID configured in Temporal Cloud!")
+        else:
+            logger.info(f"🏗️  Worker version: {APP_VERSION} (unversioned mode)")
 
         # Create both workers
+        # build_id is only passed if TEMPORAL_USE_VERSIONING=true
+        worker_kwargs = {"client": client, "task_queue": memory_task_queue}
+        if build_id:
+            worker_kwargs["build_id"] = build_id
+        
         memory_worker = Worker(
-            client,
-            task_queue=memory_task_queue,
-            build_id=build_id,
+            **worker_kwargs,
             workflows=[
                 ProcessBatchMemoryWorkflow,
                 ProcessBatchMemoryFromPostWorkflow,
@@ -194,10 +220,12 @@ async def main():
             ],
         )
 
+        doc_worker_kwargs = {"client": client, "task_queue": document_task_queue}
+        if build_id:
+            doc_worker_kwargs["build_id"] = build_id
+        
         document_worker = Worker(
-            client,
-            task_queue=document_task_queue,
-            build_id=build_id,
+            **doc_worker_kwargs,
             workflows=[DocumentProcessingWorkflow],
             activities=[
                 # Document processing activities only - NO memory activities

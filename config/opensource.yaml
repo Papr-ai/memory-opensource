@@ -11,6 +11,8 @@ features:
   api_access: true
   background_jobs: true
   webhooks: true
+  temporal: true  # Durable workflows for batch processing and document ingestion
+  document_processing: true  # Document ingestion with providers (Reducto, TensorLake, Gemini, etc.)
   
   # Authentication (simplified for self-hosted)
   api_key_auth: true
@@ -45,6 +47,7 @@ plugins:
   enabled:
     - "posthog"  # Self-hosted analytics
     - "local_auth"  # Simple authentication
+    - "temporal"  # Durable workflow execution
   
   disabled:
     - "stripe"
@@ -53,8 +56,16 @@ plugins:
     - "auth0"
 
 batch_processing:
-  max_batch_size: 50  # OSS limited to smaller batches
-  max_concurrent_processing: 10
+  max_batch_size: 1000  # Temporal handles large batches
+  temporal_threshold: 100  # Use Temporal for batches > 100
+  max_concurrent_processing: 100
+
+# Temporal configuration for durable workflow execution
+temporal:
+  enabled: true
+  task_queue: "memory-processing"
+  namespace: "default"  # Use 'default' for self-hosted Temporal, or set via TEMPORAL_NAMESPACE env var
+  retention_days: 30
 
 messaging:
   batch_limit_exceeded: |

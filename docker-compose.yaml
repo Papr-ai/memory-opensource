@@ -10,13 +10,18 @@
 # Optional Parse Dashboard:
 #   docker-compose --profile dashboard up -d parse-dashboard
 #   Access at http://localhost:4040 (admin / password)
+#
+# Temporal Web UI (workflow monitoring):
+#   Access at http://localhost:8080
 # ============================================
 
 services:
 
   # Main Papr Memory Application
   papr-memory:
-    build: .
+    build:
+      context: .
+      network: host
     container_name: papr-memory
     image: "${IMAGE_NAME:-papr_memory_oss}:${IMAGE_TAG:-latest}"
     entrypoint: ["/app/scripts/opensource/docker_entrypoint_opensource.sh"]
@@ -24,6 +29,7 @@ services:
     ports:
       - "5001:5001"
     # volumes:
+    #   - ./.env.opensource:/app/.env.opensource  # Disabled: Use docker cp after bootstrap completes
     #   - ./logs:/app/logs  # Optional: mount logs for debugging (requires Docker file sharing)
     env_file:
       - .env.opensource
@@ -35,9 +41,16 @@ services:
       REDIS_URL: redis://:${REDIS_PASSWORD:-password}@redis:6379/0
       NEO4J_URL: bolt://neo4j:7687
       QDRANT_URL: http://qdrant:6333
+      # Qdrant collections (auto-selected based on LOCAL_EMBEDDING_DIMENSIONS)
+      QDRANT_COLLECTION_QWEN0pt6B: ${QDRANT_COLLECTION_QWEN0pt6B:-Qwen0pt6B}
       QDRANT_COLLECTION_QWEN4B: ${QDRANT_COLLECTION_QWEN4B:-Qwen4B}
       QDRANT_PROPERTY_COLLECTION: ${QDRANT_PROPERTY_COLLECTION:-neo4j_properties_dev}
-      PARSE_SERVER_URL: http://parse-server:1337/parse
+      # Local embedding configuration (determines which collection is used)
+      # Default to false (DeepInfra Qwen 4B) - override with shell var if needed
+      USE_LOCAL_EMBEDDINGS: ${USE_LOCAL_EMBEDDINGS:-false}
+      LOCAL_EMBEDDING_MODEL: ${LOCAL_EMBEDDING_MODEL:-Qwen/Qwen3-Embedding-4B}
+      LOCAL_EMBEDDING_DIMENSIONS: ${LOCAL_EMBEDDING_DIMENSIONS:-2560}
+      PARSE_SERVER_URL: ${PARSE_SERVER_URL:-http://parse-server:1337}
       # Parse Server credentials (set both naming conventions for compatibility)
       # Defaults match .env.opensource convention (papr-oss-*)
       PARSE_APPLICATION_ID: ${PARSE_SERVER_APPLICATION_ID:-papr-oss-app-id}
@@ -52,6 +65,11 @@ services:
       # Fix protobuf compatibility issue with sentencepiece (BigBird tokenizer)
       # This uses pure-Python protobuf implementation to avoid version conflicts
       PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python
+      # Temporal configuration for durable workflows
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-default}
+      TEMPORAL_TASK_QUEUE: ${TEMPORAL_TASK_QUEUE:-memory-processing}
+      TEMPORAL_ENABLED: ${TEMPORAL_ENABLED:-true}
     depends_on:
       mongodb:
         condition: service_started
@@ -63,6 +81,8 @@ services:
         condition: service_started
       parse-server:
         condition: service_started
+      temporal:
+        condition: service_healthy
     networks:
       - papr-network
     restart: unless-stopped
@@ -129,11 +149,11 @@ services:
       - papr-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "password", "RETURN 1"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:7474 || exit 1"]
       interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
 
   # Qdrant - Vector database for semantic search
   qdrant:
@@ -163,6 +183,7 @@ services:
       PARSE_SERVER_APPLICATION_ID: ${PARSE_SERVER_APPLICATION_ID:-papr-oss-app-id}
       PARSE_SERVER_MASTER_KEY: ${PARSE_SERVER_MASTER_KEY:-papr-oss-master-key}
       PARSE_SERVER_DATABASE_URI: mongodb://${MONGODB_USERNAME:-admin}:${MONGODB_PASSWORD:-password}@mongodb:27017/${MONGODB_DATABASE:-papr_memory}?authSource=admin
+      # Parse Server needs its own URL with /parse mount path (hardcoded, not from env var)
       PARSE_SERVER_URL: http://parse-server:1337/parse
       PARSE_SERVER_PUBLIC_SERVER_URL: http://localhost:1337/parse
       PARSE_SERVER_MOUNT_PATH: /parse
@@ -171,14 +192,14 @@ services:
       PARSE_SERVER_APP_NAME: Papr Memory
       PARSE_SERVER_ENABLE_EXPERIMENTAL_DIRECT_ACCESS: 1
       # Allow class creation during initial setup - can be disabled after schema is initialized
-      PARSE_SERVER_ALLOW_CLIENT_CLASS_CREATION: true
-      PARSE_SERVER_ENABLE_PRIVATE_USERS: true
+      PARSE_SERVER_ALLOW_CLIENT_CLASS_CREATION: "true"
+      PARSE_SERVER_ENABLE_PRIVATE_USERS: "true"
       # Allow custom objectId during object creation (required for search_id functionality)
       # Note: Parse Server 8.x may not support this as an environment variable
       # If this doesn't work, you may need to configure allowCustomObjectId in Parse Server
       # initialization code or use a separate search_id field instead of objectId
       # This allows setting objectId when creating QueryLog entries to match search_id
-      PARSE_SERVER_ALLOW_CUSTOM_OBJECT_ID: true
+      PARSE_SERVER_ALLOW_CUSTOM_OBJECT_ID: "true"
       # Parse Server 8.x security settings for local development
       PARSE_SERVER_ALLOW_INSECURE_HTTP: 1
       PARSE_SERVER_ENABLE_CHECK_LOG: 0
@@ -190,6 +211,195 @@ services:
       PARSE_SERVER_MOUNT_PLAYGROUND: "true"
     depends_on:
       - mongodb
+    networks:
+      - papr-network
+    restart: unless-stopped
+
+  # ============================================
+  # Temporal - Durable Workflow Engine (Official Setup)
+  # ============================================
+  # PostgreSQL for Temporal (separate from MongoDB used by app)
+  temporal-postgres:
+    image: postgres:17-alpine
+    container_name: papr-temporal-postgres
+    environment:
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: temporal
+    volumes:
+      - temporal_postgres_data:/var/lib/postgresql/data
+    networks:
+      - papr-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U temporal"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 30s
+
+  # Temporal Admin Tools - Sets up database schemas
+  temporal-admin-tools:
+    image: temporalio/admin-tools:1.29.1-tctl-1.18.4-cli-1.5.0
+    container_name: papr-temporal-admin-tools
+    restart: on-failure:6
+    depends_on:
+      temporal-postgres:
+        condition: service_healthy
+    environment:
+      - DB=postgres12
+      - DB_PORT=5432
+      - POSTGRES_USER=temporal
+      - POSTGRES_PWD=temporal
+      - POSTGRES_SEEDS=temporal-postgres
+      - SQL_PASSWORD=temporal
+    networks:
+      - papr-network
+    entrypoint: []
+    command:
+      - sh
+      - -c
+      - |
+        echo 'Starting PostgreSQL schema setup...'
+        echo 'Waiting for PostgreSQL port to be available...'
+        nc -z -w 10 temporal-postgres 5432
+        echo 'PostgreSQL port is available'
+        temporal-sql-tool --plugin postgres12 --ep temporal-postgres -u temporal -p 5432 --db temporal create
+        temporal-sql-tool --plugin postgres12 --ep temporal-postgres -u temporal -p 5432 --db temporal setup-schema -v 0.0
+        temporal-sql-tool --plugin postgres12 --ep temporal-postgres -u temporal -p 5432 --db temporal update-schema -d /etc/temporal/schema/postgresql/v12/temporal/versioned
+        temporal-sql-tool --plugin postgres12 --ep temporal-postgres -u temporal -p 5432 --db temporal_visibility create
+        temporal-sql-tool --plugin postgres12 --ep temporal-postgres -u temporal -p 5432 --db temporal_visibility setup-schema -v 0.0
+        temporal-sql-tool --plugin postgres12 --ep temporal-postgres -u temporal -p 5432 --db temporal_visibility update-schema -d /etc/temporal/schema/postgresql/v12/visibility/versioned
+        echo 'PostgreSQL schema setup complete'
+
+  # Temporal Server - orchestrates durable workflows
+  temporal:
+    image: temporalio/server:1.29.1
+    container_name: papr-temporal
+    depends_on:
+      temporal-admin-tools:
+        condition: service_completed_successfully
+    ports:
+      - "7233:7233"   # gRPC Frontend
+    environment:
+      - DB=postgres12
+      - DB_PORT=5432
+      - POSTGRES_USER=temporal
+      - POSTGRES_PWD=temporal
+      - POSTGRES_SEEDS=temporal-postgres
+      - BIND_ON_IP=0.0.0.0
+    networks:
+      - papr-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "7233"]
+      interval: 5s
+      timeout: 3s
+      start_period: 30s
+      retries: 60
+
+  # Temporal Namespace Creator - creates default namespace
+  temporal-create-namespace:
+    image: temporalio/admin-tools:1.29.1-tctl-1.18.4-cli-1.5.0
+    container_name: papr-temporal-create-namespace
+    restart: on-failure:5
+    depends_on:
+      temporal:
+        condition: service_healthy
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - DEFAULT_NAMESPACE=default
+    networks:
+      - papr-network
+    entrypoint: []
+    command:
+      - sh
+      - -c
+      - |
+        echo 'Waiting for Temporal server port to be available...'
+        nc -z -w 10 temporal 7233
+        echo 'Temporal server port is available'
+        echo 'Waiting for Temporal server to be healthy...'
+        max_attempts=3
+        attempt=0
+        until temporal operator cluster health --address temporal:7233; do
+          attempt=$$((attempt + 1))
+          if [ $$attempt -ge 3 ]; then
+            echo 'Server did not become healthy'
+            exit 1
+          fi
+          echo 'Server not ready yet, waiting...'
+          sleep 5
+        done
+        echo 'Server is healthy, creating namespace default...'
+        temporal operator namespace describe -n default --address temporal:7233 || temporal operator namespace create -n default --address temporal:7233
+        echo 'Namespace default created'
+
+  # Temporal Web UI - Monitor workflows at http://localhost:8080
+  temporal-ui:
+    image: temporalio/ui:2.34.0
+    container_name: papr-temporal-ui
+    ports:
+      - "8080:8080"
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_CORS_ORIGINS=http://localhost:3000
+    depends_on:
+      temporal:
+        condition: service_healthy
+    networks:
+      - papr-network
+    restart: unless-stopped
+
+  # Temporal Worker - Processes batch memory and document workflows
+  temporal-worker:
+    build: .
+    container_name: papr-temporal-worker
+    image: "${IMAGE_NAME:-papr_memory_oss}:${IMAGE_TAG:-latest}"
+    command: python start_all_workers.py
+    env_file:
+      - .env.opensource
+    environment:
+      PAPR_EDITION: opensource
+      # Database connections
+      MONGO_URI: mongodb://${MONGODB_USERNAME:-admin}:${MONGODB_PASSWORD:-password}@mongodb:27017/${MONGODB_DATABASE:-papr_memory}?authSource=admin
+      REDIS_URL: redis://:${REDIS_PASSWORD:-password}@redis:6379/0
+      NEO4J_URL: bolt://neo4j:7687
+      NEO4J_USERNAME: ${NEO4J_USERNAME:-neo4j}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-password}
+      QDRANT_URL: http://qdrant:6333
+      # Qdrant collections (auto-selected based on LOCAL_EMBEDDING_DIMENSIONS)
+      QDRANT_COLLECTION_QWEN0pt6B: ${QDRANT_COLLECTION_QWEN0pt6B:-Qwen0pt6B}
+      QDRANT_COLLECTION_QWEN4B: ${QDRANT_COLLECTION_QWEN4B:-Qwen4B}
+      # Local embedding configuration
+      # Default to false (DeepInfra Qwen 4B) - override with shell var if needed
+      USE_LOCAL_EMBEDDINGS: ${USE_LOCAL_EMBEDDINGS:-false}
+      LOCAL_EMBEDDING_MODEL: ${LOCAL_EMBEDDING_MODEL:-Qwen/Qwen3-Embedding-4B}
+      LOCAL_EMBEDDING_DIMENSIONS: ${LOCAL_EMBEDDING_DIMENSIONS:-2560}
+      PARSE_SERVER_URL: ${PARSE_SERVER_URL:-http://parse-server:1337}
+      PARSE_APPLICATION_ID: ${PARSE_SERVER_APPLICATION_ID:-papr-oss-app-id}
+      PARSE_MASTER_KEY: ${PARSE_SERVER_MASTER_KEY:-papr-oss-master-key}
+      # Temporal configuration
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-default}
+      TEMPORAL_TASK_QUEUE: ${TEMPORAL_TASK_QUEUE:-memory-processing}
+      # Disable worker versioning for local Docker testing
+      # (versioning requires task queue default build ID to be configured in Temporal)
+      TEMPORAL_USE_VERSIONING: "false"
+      # Fix protobuf compatibility
+      PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python
+    depends_on:
+      temporal:
+        condition: service_healthy
+      mongodb:
+        condition: service_started
+      redis:
+        condition: service_started
+      neo4j:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      parse-server:
+        condition: service_started
     networks:
       - papr-network
     restart: unless-stopped
@@ -227,7 +437,7 @@ services:
           "users": [
             {
               "user": "admin",
-              "pass": "$2b$10$/.J.hoDpJjXsJl.deEeeU.bAa8Dgwurprhh2DXheQkjsmNFZEJ7nS"
+              "pass": "$$2b$$10$$/.J.hoDpJjXsJl.deEeeU.bAa8Dgwurprhh2DXheQkjsmNFZEJ7nS"
             }
           ],
           "useEncryptedPasswords": true
@@ -239,6 +449,82 @@ services:
     restart: unless-stopped
     profiles:
       - dashboard
+
+  # ============================================
+  # Test Runner - Runs pytest inside Docker
+  # ============================================
+  # Usage:
+  #   docker compose run --rm test-runner                              (quick test)
+  #   docker compose run --rm test-runner pytest tests/test_add_memory_fastapi.py -v  (specific file)
+  #   docker compose run --rm test-runner pytest tests/ -v             (all tests)
+  #
+  # This container does NOT run the server — it only runs pytest.
+  # The embedding model is loaded once by pytest, so no duplicate memory usage.
+  test-runner:
+    build:
+      context: .
+      network: host
+    container_name: papr-test-runner
+    image: "${IMAGE_NAME:-papr_memory_oss}:${IMAGE_TAG:-latest}"
+    entrypoint: []
+    command: ["python", "-m", "pytest", "tests/test_add_memory_fastapi.py::test_v1_add_memory_1", "-v", "--tb=short"]
+    working_dir: /app
+    # Volume mount ensures code changes are reflected immediately in the test container
+    volumes:
+      - .:/app
+    env_file:
+      - .env.opensource
+    environment:
+      PAPR_EDITION: opensource
+      # Docker service names (these override anything in .env.opensource)
+      MONGO_URI: mongodb://${MONGODB_USERNAME:-admin}:${MONGODB_PASSWORD:-password}@mongodb:27017/${MONGODB_DATABASE:-papr_memory}?authSource=admin
+      DATABASE_URI: mongodb://${MONGODB_USERNAME:-admin}:${MONGODB_PASSWORD:-password}@mongodb:27017/${MONGODB_DATABASE:-papr_memory}?authSource=admin
+      REDIS_URL: redis://:${REDIS_PASSWORD:-password}@redis:6379/0
+      NEO4J_URL: bolt://neo4j:7687
+      NEO4J_USERNAME: ${NEO4J_USERNAME:-neo4j}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-password}
+      QDRANT_URL: http://qdrant:6333
+      # Qdrant collections (auto-selected based on LOCAL_EMBEDDING_DIMENSIONS)
+      QDRANT_COLLECTION_QWEN0pt6B: ${QDRANT_COLLECTION_QWEN0pt6B:-Qwen0pt6B}
+      QDRANT_COLLECTION_QWEN4B: ${QDRANT_COLLECTION_QWEN4B:-Qwen4B}
+      # Local embedding configuration
+      # Default to false (DeepInfra Qwen 4B) - override with shell var if needed
+      USE_LOCAL_EMBEDDINGS: ${USE_LOCAL_EMBEDDINGS:-false}
+      LOCAL_EMBEDDING_MODEL: ${LOCAL_EMBEDDING_MODEL:-Qwen/Qwen3-Embedding-4B}
+      LOCAL_EMBEDDING_DIMENSIONS: ${LOCAL_EMBEDDING_DIMENSIONS:-2560}
+      PARSE_SERVER_URL: ${PARSE_SERVER_URL:-http://parse-server:1337}
+      PARSE_APPLICATION_ID: ${PARSE_SERVER_APPLICATION_ID:-papr-oss-app-id}
+      PARSE_MASTER_KEY: ${PARSE_SERVER_MASTER_KEY:-papr-oss-master-key}
+      PARSE_SERVER_APPLICATION_ID: ${PARSE_SERVER_APPLICATION_ID:-papr-oss-app-id}
+      PARSE_SERVER_MASTER_KEY: ${PARSE_SERVER_MASTER_KEY:-papr-oss-master-key}
+      PARSE_REST_API_KEY: ${PARSE_SERVER_REST_API_KEY:-papr-oss-rest-key}
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-default}
+      TEMPORAL_TASK_QUEUE: ${TEMPORAL_TASK_QUEUE:-memory-processing}
+      TEMPORAL_ENABLED: ${TEMPORAL_ENABLED:-true}
+      PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python
+      # Prevent OpenBLAS/OpenMP thread conflicts that cause hangs with local embedding models
+      OPENBLAS_NUM_THREADS: "1"
+      OMP_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      PYTHONPATH: /app
+      # Test credentials are auto-fetched from Parse Server at runtime by conftest.py
+      # No hardcoded values needed - the bootstrap script creates the test user
+    depends_on:
+      mongodb:
+        condition: service_started
+      redis:
+        condition: service_started
+      neo4j:
+        condition: service_started
+      qdrant:
+        condition: service_started
+      parse-server:
+        condition: service_started
+    networks:
+      - papr-network
+    profiles:
+      - test
 
 volumes:
   mongodb_data:
@@ -258,6 +544,8 @@ volumes:
   qdrant_data:
     driver: local
   parse_data:
+    driver: local
+  temporal_postgres_data:
     driver: local
 
 networks:

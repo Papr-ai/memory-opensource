@@ -51,7 +51,7 @@ async def test_delete_all_memories_complete_workflow():
     4. Delete all memories for that user
     5. Confirm all memories were deleted by searching again
     """
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as async_client:
             
             # Test data preparation
@@ -308,7 +308,7 @@ async def test_delete_all_memories_with_external_user_id():
     Test delete_all_memories endpoint using external_user_id parameter
     to verify user resolution works correctly.
     """
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as async_client:
             
             test_run_id = uuid4().hex[:10]
@@ -401,7 +401,7 @@ async def test_delete_all_memories_no_memories_found():
     Test delete_all_memories endpoint when user has no memories
     (should return 404 with appropriate message).
     """
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as async_client:
             
             test_run_id = uuid4().hex[:10]

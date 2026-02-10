@@ -51,6 +51,7 @@ def clean_url(url):
     return url
 
 
+
 def get_parse_server_url():
     """
     Get Parse Server URL at runtime, applying localhost override for open-source local testing.
@@ -87,15 +88,11 @@ def get_parse_server_url():
         except (IOError, OSError):
             pass  # If we can't read it, assume not Docker
     
-    # Only override if we're running locally (pytest or not in Docker) AND URL contains Docker service name
-    if (is_pytest or not is_docker) and "parse-server" in url:
+    # Only override if we're running locally (NOT in Docker) AND URL contains Docker service name
+    # Note: When running pytest inside Docker, we MUST keep Docker service names
+    if not is_docker and "parse-server" in url:
         # Replace Docker service name with localhost
         url = url.replace("parse-server", "localhost")
-        # Remove trailing /parse if present, since the code adds /parse/classes
-        if url.endswith("/parse"):
-            url = url[:-6]  # Remove trailing "/parse"
-        elif url.endswith("/parse/"):
-            url = url[:-7]  # Remove trailing "/parse/"
     
     return clean_url(url)
 
@@ -136,8 +133,9 @@ def get_qdrant_url():
         except (IOError, OSError):
             pass  # If we can't read it, assume not Docker
     
-    # Only override if we're running locally (pytest or not in Docker) AND URL contains Docker service name
-    if (is_pytest or not is_docker) and "qdrant" in url and "localhost" not in url:
+    # Only override if we're running locally (NOT in Docker) AND URL contains Docker service name
+    # Note: When running pytest inside Docker, we MUST keep Docker service names
+    if not is_docker and "qdrant" in url and "localhost" not in url:
         # Replace Docker service name with localhost (but preserve port if different)
         # qdrant:6333 -> localhost:6333
         url = url.replace("qdrant", "localhost")

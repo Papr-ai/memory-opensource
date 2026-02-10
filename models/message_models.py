@@ -2,10 +2,15 @@
 Message models for chat message storage and processing
 """
 from pydantic import BaseModel, Field, ConfigDict, field_validator
-from typing import Optional, List, Dict, Any, Literal, Union
+from typing import Optional, List, Dict, Any, Literal, Union, TYPE_CHECKING
 from datetime import datetime, timezone
 from enum import Enum
-from models.shared_types import MemoryMetadata, MessageRole, UserMemoryCategory, AssistantMemoryCategory
+from models.shared_types import MemoryMetadata, MessageRole, UserMemoryCategory, AssistantMemoryCategory, MemoryPolicy
+
+# Import GraphGeneration with TYPE_CHECKING to avoid circular import at module load time
+# It will be resolved at runtime via model_rebuild()
+if TYPE_CHECKING:
+    from models.memory_models import GraphGeneration
 
 
 class MessageRequest(BaseModel):
@@ -24,13 +29,35 @@ class MessageRequest(BaseModel):
     )
     metadata: Optional[MemoryMetadata] = Field(
         None,
-        description="Optional metadata for the message"
+        description="Optional metadata for the message (topics, location, etc.)"
+    )
+    context: Optional[List[Dict[str, Any]]] = Field(
+        default_factory=list,
+        description="Optional context for the message (conversation history or relevant context)"
+    )
+    relationships_json: Optional[List[Dict[str, Any]]] = Field(
+        default_factory=list,
+        description="Optional array of relationships for Graph DB (Neo4j)"
     )
     
     # Processing control
     process_messages: bool = Field(
         default=True, 
         description="Whether to process messages into memories (true) or just store them (false). Default is true."
+    )
+    
+    # Graph generation control (same as AddMemoryRequest)
+    memory_policy: Optional[MemoryPolicy] = Field(
+        default=None,
+        description="Unified policy for graph generation and OMO safety. "
+                   "Use mode='auto' (LLM extraction), 'manual' (exact nodes), "
+                   "or 'hybrid' (LLM with constraints). Includes consent, risk, and ACL settings."
+    )
+    
+    graph_generation: Optional["GraphGeneration"] = Field(
+        default=None,
+        description="DEPRECATED: Use 'memory_policy' instead. Legacy graph generation configuration.",
+        json_schema_extra={"deprecated": True}
     )
     
     # Multi-tenant fields
@@ -102,11 +129,57 @@ class MessageResponse(BaseModel):
     )
 
 
+class ConversationSummaryResponse(BaseModel):
+    """Hierarchical conversation summaries for context window compression"""
+    short_term: Optional[str] = Field(None, description="Summary of last 15 messages")
+    medium_term: Optional[str] = Field(None, description="Summary of last ~100 messages")
+    long_term: Optional[str] = Field(None, description="Full session summary")
+    topics: List[str] = Field(default_factory=list, description="Key topics discussed")
+    last_updated: Optional[datetime] = Field(None, description="When summaries were last updated")
+
+
+class SessionSummaryResponse(BaseModel):
+    """Response model for session summarization endpoint"""
+    session_id: str = Field(..., description="Session ID of the conversation")
+    summaries: ConversationSummaryResponse = Field(..., description="Hierarchical conversation summaries")
+    ai_agent_note: str = Field(
+        ..., 
+        description="Instructions for AI agents on how to search for more details about this conversation"
+    )
+    from_cache: bool = Field(..., description="Whether summaries were retrieved from cache (true) or just generated (false)")
+    message_count: Optional[int] = Field(None, description="Number of messages summarized (only present if just generated)")
+    
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "session_id": "session_123",
+                "summaries": {
+                    "short_term": "User requested help planning Q4 product roadmap. Assistant offered to help identify key objectives.",
+                    "medium_term": "Ongoing product planning discussion for Q4, covering objectives, timelines, and resource allocation.",
+                    "long_term": "Product planning and strategy conversation focused on Q4 roadmap development and execution.",
+                    "topics": ["product planning", "Q4 roadmap", "objectives", "strategy"],
+                    "last_updated": "2024-01-15T10:31:00Z"
+                },
+                "ai_agent_note": "To find more details about this conversation, search memories with metadata filter: sessionId='session_123'",
+                "from_cache": True
+            }
+        }
+    )
+
+
 class MessageHistoryResponse(BaseModel):
     """Response model for retrieving message history"""
     sessionId: str = Field(..., description="Session ID of the conversation")
     messages: List[MessageResponse] = Field(..., description="List of messages in chronological order")
     total_count: int = Field(..., description="Total number of messages in the session")
+    summaries: Optional[ConversationSummaryResponse] = Field(
+        None,
+        description="Hierarchical conversation summaries for context compression"
+    )
+    context_for_llm: Optional[str] = Field(
+        None,
+        description="Pre-formatted compressed context ready for LLM consumption (summaries + recent messages)"
+    )
     
     model_config = ConfigDict(
         json_schema_extra={
@@ -130,7 +203,14 @@ class MessageHistoryResponse(BaseModel):
                         "processing_status": "completed"
                     }
                 ],
-                "total_count": 2
+                "total_count": 2,
+                "summaries": {
+                    "short_term": "User requested help planning Q4 product roadmap",
+                    "medium_term": "Ongoing product planning discussion for Q4",
+                    "long_term": "Product planning and strategy conversation",
+                    "topics": ["product", "roadmap", "planning", "Q4"]
+                },
+                "context_for_llm": "FULL SESSION: Product planning and strategy conversation\nRECENT (last ~100): Ongoing product planning discussion for Q4\nCURRENT (last 15): User requested help planning Q4 product roadmap"
             }
         }
     )
@@ -147,7 +227,24 @@ class MessageAnalysisResult(BaseModel):
     confidence_score: float = Field(..., description="Confidence in the analysis (0.0-1.0)")
     reasoning: Optional[str] = Field(None, description="AI reasoning for the decision")
     topics: Optional[List[str]] = Field(None, description="Relevant topics/keywords extracted from the message")
-    hierarchical_structures: Optional[str] = Field(None, description="Hierarchical categorization")
+    hierarchical_structures: Optional[Union[str, List]] = Field(None, description="Hierarchical categorization")
+    
+    # User preference learning
+    has_user_preference_learning: bool = Field(default=False, description="Whether user preference learning was detected")
+    user_learning_content: Optional[str] = Field(None, description="User preference learning content")
+    user_learning_type: Optional[str] = Field(None, description="Type of user preference learning")
+    user_learning_confidence: float = Field(default=0.0, description="Confidence in user preference learning (0.0-1.0)")
+    user_learning_evidence: Optional[str] = Field(None, description="Evidence for user preference learning")
+    
+    # Agent performance learning
+    has_performance_learning: bool = Field(default=False, description="Whether agent performance learning was detected")
+    performance_learning_content: Optional[str] = Field(None, description="Agent performance learning content")
+    performance_learning_type: Optional[str] = Field(None, description="Type of agent performance learning")
+    performance_learning_confidence: float = Field(default=0.0, description="Confidence in agent performance learning (0.0-1.0)")
+    inefficient_approach: Optional[str] = Field(None, description="The inefficient approach that was identified")
+    efficient_approach: Optional[str] = Field(None, description="The efficient approach discovered")
+    performance_context: Optional[str] = Field(None, description="Context for the performance learning")
+    performance_scope: Optional[str] = Field(None, description="Scope of performance learning (project, goal, user, global)")
     
     model_config = ConfigDict(
         json_schema_extra={
@@ -204,3 +301,23 @@ class EnhancedAddMemoryRequest(BaseModel):
             }
         }
     )
+
+
+# Rebuild models to resolve forward references
+# This must be done after all models are defined
+def _rebuild_message_models():
+    """Rebuild Pydantic models to resolve forward references"""
+    try:
+        # Import GraphGeneration at runtime to resolve forward reference
+        from models.memory_models import GraphGeneration
+        
+        # Rebuild the model with the resolved types
+        MessageRequest.model_rebuild()
+    except Exception as e:
+        # Log but don't fail - this is a safety measure
+        import logging
+        logging.warning(f"Failed to rebuild MessageRequest model: {e}")
+
+
+# Call rebuild at module load time
+_rebuild_message_models()

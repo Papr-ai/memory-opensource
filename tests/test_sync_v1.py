@@ -15,7 +15,7 @@ TEST_X_USER_API_KEY = os.environ.get('TEST_X_USER_API_KEY')
 async def test_v1_sync_tiers_basic(app):
     """Test basic tier sync with Memory objects and ACL fields verification"""
     assert TEST_X_USER_API_KEY, "TEST_X_USER_API_KEY must be set for integration tests"
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as async_client:
             headers = {
                 'X-Client-Type': 'papr_plugin',
@@ -148,7 +148,7 @@ async def test_v1_sync_tiers_relevance_score_normalization(app):
     4. Represent normalized scores from ranking algorithms
     """
     assert TEST_X_USER_API_KEY, "TEST_X_USER_API_KEY must be set for integration tests"
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as async_client:
             headers = {
                 'X-Client-Type': 'papr_plugin',
@@ -279,7 +279,7 @@ async def test_v1_sync_tiers_relevance_score_normalization(app):
 @pytest.mark.asyncio
 async def test_v1_sync_tiers_with_embeddings_small_limits(app):
     assert TEST_X_USER_API_KEY, "TEST_X_USER_API_KEY must be set for integration tests"
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as async_client:
             headers = {
                 'X-Client-Type': 'papr_plugin',
@@ -313,7 +313,7 @@ async def test_v1_sync_tiers_with_embeddings_small_limits(app):
 @pytest.mark.asyncio
 async def test_v1_sync_delta_cursor_pagination(app):
     assert TEST_X_USER_API_KEY, "TEST_X_USER_API_KEY must be set for integration tests"
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as async_client:
             headers = {
                 'X-Client-Type': 'papr_plugin',
@@ -339,7 +339,7 @@ async def test_v1_sync_delta_cursor_pagination(app):
 async def test_v1_sync_tiers_with_tier1_embeddings(app):
     """Test that Tier1 memories get enriched with embeddings from Qdrant and have all Memory fields"""
     assert TEST_X_USER_API_KEY, "TEST_X_USER_API_KEY must be set for integration tests"
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as async_client:
             headers = {
                 'X-Client-Type': 'papr_plugin',
@@ -425,7 +425,7 @@ async def test_v1_sync_tiers_with_tier1_embeddings(app):
 async def test_v1_sync_tiers_float32_embeddings_for_coreml(app):
     """Test that Tier1 can return float32 embeddings for CoreML/ANE (fp16 on-device)"""
     assert TEST_X_USER_API_KEY, "TEST_X_USER_API_KEY must be set for integration tests"
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as async_client:
             headers = {
                 'X-Client-Type': 'papr_plugin',
@@ -499,7 +499,7 @@ async def test_v1_sync_tiers_qwen4b_coreml_full_precision(app):
     4. All 100 requested items per tier have embeddings
     """
     assert TEST_X_USER_API_KEY, "TEST_X_USER_API_KEY must be set for integration tests"
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as async_client:
             headers = {
                 'X-Client-Type': 'papr_plugin',

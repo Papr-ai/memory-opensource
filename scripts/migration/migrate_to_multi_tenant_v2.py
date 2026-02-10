@@ -311,7 +311,7 @@ class EnhancedMultiTenantMigration:
             logger.warning(f"  Parse Master Key: {'Present' if self.parse_master_key else 'Missing'}")
             return False
 
-        url = f"{self.parse_server_url}/classes/Organization/{org_id}"
+        url = f"{self.parse_server_url}/parse/classes/Organization/{org_id}"
         objects = [{"__type": "Pointer", "className": "_User", "objectId": mid} for mid in member_ids]
         payload = {"team_members": {"__op": "AddRelation", "objects": objects}}
 

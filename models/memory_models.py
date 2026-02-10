@@ -1,6 +1,11 @@
 from pydantic import BaseModel, Field, ConfigDict, ValidationError, field_validator, RootModel
 from typing import Dict, Any, List, Optional, Union, Literal
-from models.shared_types import MemoryMetadata, NodeLabel, ContextItem, MemoryType, MessageRole, UserMemoryCategory, AssistantMemoryCategory, PropertyOverrideRule
+from models.shared_types import (
+    MemoryMetadata, NodeLabel, ContextItem, MemoryType, MessageRole,
+    UserMemoryCategory, AssistantMemoryCategory, PropertyOverrideRule,
+    MemoryPolicy, PolicyMode, NodeConstraint, NodeSpec, RelationshipSpec,
+    ConsentLevel, RiskLevel, ACLConfig, OMOFilter
+)
 from datetime import datetime, timezone, UTC
 from memory.memory_item import MemoryItem
 import json
@@ -44,7 +49,7 @@ class MemoryNodeProperties(BaseModel):
     topics: Optional[List[str]] = Field(default_factory=list)
     emotion_tags: Optional[List[str]] = Field(default_factory=list)
     emoji_tags: Optional[List[str]] = Field(default_factory=list)
-    hierarchical_structures: Optional[str] = Field(default="")
+    hierarchical_structures: Optional[Union[str, List]] = Field(default="")
     conversationId: Optional[str] = None
     sourceType: Optional[str] = None
     sourceUrl: Optional[str] = None
@@ -62,6 +67,10 @@ class MemoryNodeProperties(BaseModel):
     role_write_access: List[str] = Field(default_factory=list)
     external_user_read_access: Optional[List[str]] = Field(default_factory=list)
     external_user_write_access: Optional[List[str]] = Field(default_factory=list)
+    namespace_read_access: Optional[List[str]] = Field(default_factory=list, description="Namespace-level read access")
+    namespace_write_access: Optional[List[str]] = Field(default_factory=list, description="Namespace-level write access")
+    organization_read_access: Optional[List[str]] = Field(default_factory=list, description="Organization-level read access")
+    organization_write_access: Optional[List[str]] = Field(default_factory=list, description="Organization-level write access")
     createdAt: Optional[str] = None
     updatedAt: Optional[str] = None
 
@@ -129,6 +138,10 @@ def memory_item_to_node(memory_item: 'MemoryItem', chunk_ids: List[str]) -> LLMG
         role_write_access=metadata.get('role_write_access', []),
         external_user_read_access=metadata.get('external_user_read_access', []),
         external_user_write_access=metadata.get('external_user_write_access', []),
+        namespace_read_access=metadata.get('namespace_read_access', []),
+        namespace_write_access=metadata.get('namespace_write_access', []),
+        organization_read_access=metadata.get('organization_read_access', []),
+        organization_write_access=metadata.get('organization_write_access', []),
         createdAt=metadata.get('createdAt') or datetime.now(timezone.utc).isoformat(),
         **custom_fields
     ).model_dump(exclude_none=True)
@@ -154,6 +167,10 @@ class NeoBaseProperties(BaseModel):
     role_write_access: Optional[List[str]] = Field(default_factory=list)
     external_user_read_access: Optional[List[str]] = Field(default_factory=list)
     external_user_write_access: Optional[List[str]] = Field(default_factory=list)
+    namespace_read_access: Optional[List[str]] = Field(default_factory=list, description="Namespace-level read access")
+    namespace_write_access: Optional[List[str]] = Field(default_factory=list, description="Namespace-level write access")
+    organization_read_access: Optional[List[str]] = Field(default_factory=list, description="Organization-level read access")
+    organization_write_access: Optional[List[str]] = Field(default_factory=list, description="Organization-level write access")
 
      # Multi-tenant scoping fields
     organization_id: Optional[str] = Field(default=None, description="Organization ID for multi-tenant scoping")
@@ -233,6 +250,10 @@ class BaseNodeProperties(BaseModel):
     role_write_access: Optional[List[str]] = Field(default_factory=list)
     external_user_read_access: Optional[List[str]] = Field(default_factory=list)
     external_user_write_access: Optional[List[str]] = Field(default_factory=list)
+    namespace_read_access: Optional[List[str]] = Field(default_factory=list, description="Namespace-level read access")
+    namespace_write_access: Optional[List[str]] = Field(default_factory=list, description="Namespace-level write access")
+    organization_read_access: Optional[List[str]] = Field(default_factory=list, description="Organization-level read access")
+    organization_write_access: Optional[List[str]] = Field(default_factory=list, description="Organization-level write access")
 
     # Multi-tenant scoping fields
     organization_id: Optional[str] = Field(default=None, description="Organization ID for multi-tenant scoping")
@@ -258,7 +279,7 @@ class NeoMemoryNode(MemoryProperties, NeoBaseProperties):
     """Memory node with all Neo4j properties"""
     title: Optional[str] = None
     emoji_tags: Optional[List[str]] = Field(default_factory=list)
-    hierarchical_structures: Optional[str] = Field(default="")
+    hierarchical_structures: Optional[Union[str, List]] = Field(default="")
 
     pass
 
@@ -266,7 +287,7 @@ class PaprMemoryNodeProperties(MemoryProperties, BaseNodeProperties):
     """Memory node properties"""
     title: Optional[str] = None
     emoji_tags: Optional[List[str]] = Field(default_factory=list)
-    hierarchical_structures: Optional[str] = Field(default="")
+    hierarchical_structures: Optional[Union[str, List]] = Field(default="")
     steps: List[str] = Field(default_factory=list)  # Default to empty list
     current_step: str = Field(default="")  # Default to empty string
 
@@ -514,9 +535,15 @@ class MemorySourceInfo(BaseModel):
 
 
 class RerankingProvider(str, Enum):
-    """Reranking provider options"""
-    OPENAI = "openai"      # OpenAI GPT models (better quality, slower)
-    COHERE = "cohere"      # Cohere rerank API (faster, optimized for reranking)
+    """Reranking provider options for memory search results.
+
+    OPENAI: LLM-based reranking using GPT models. Returns score + confidence.
+            Models: gpt-5-nano (fast), gpt-5-mini (better quality), gpt-4o-mini
+    COHERE: Cross-encoder reranking. Faster, optimized for relevance ranking.
+            Models: rerank-v3.5 (latest), rerank-english-v3.0, rerank-multilingual-v3.0
+    """
+    OPENAI = "openai"      # LLM-based (gpt-5-nano default, gpt-5-mini for quality)
+    COHERE = "cohere"      # Cross-encoder (rerank-v3.5 default)
 
 
 class RerankingConfig(BaseModel):
@@ -531,16 +558,28 @@ class RerankingConfig(BaseModel):
     )
     reranking_model: str = Field(
         default="gpt-5-nano",
-        description="Model to use for reranking. For OpenAI: 'gpt-5-nano', 'gpt-4o-mini', 'gpt-4.1-nano', etc. For Cohere: 'rerank-v3.5' (default, latest), 'rerank-english-v3.0', 'rerank-multilingual-v3.0'"
+        description="Model to use for reranking. OpenAI (LLM): 'gpt-5-nano' (fast reasoning, default), 'gpt-5-mini' (better quality reasoning). Cohere (cross-encoder): 'rerank-v3.5' (latest), 'rerank-english-v3.0', 'rerank-multilingual-v3.0'"
     )
-    
+
     model_config = ConfigDict(
         json_schema_extra={
-            "example": {
-                "reranking_enabled": True,
-                "reranking_provider": "openai",
-                "reranking_model": "gpt-5-nano"
-            }
+            "examples": [
+                {
+                    "reranking_enabled": True,
+                    "reranking_provider": "openai",
+                    "reranking_model": "gpt-5-nano"
+                },
+                {
+                    "reranking_enabled": True,
+                    "reranking_provider": "openai",
+                    "reranking_model": "gpt-5-mini"
+                },
+                {
+                    "reranking_enabled": True,
+                    "reranking_provider": "cohere",
+                    "reranking_model": "rerank-v3.5"
+                }
+            ]
         }
     )
 
@@ -552,7 +591,8 @@ class RelatedMemoryResult(BaseModel):
     neo_context: Optional[str] = None
     neo_query: Optional[str] = None
     memory_source_info: Optional[MemorySourceInfo] = None
-    confidence_scores: Optional[List[float]] = Field(default_factory=list, description="Confidence scores for memory items (parallel to memory_items)")
+    confidence_scores: Optional[List[float]] = Field(default_factory=list, description="Reranker scores for memory items (parallel to memory_items). For LLM: normalized 1-10 score to 0-1. For cross-encoder: raw relevance score.")
+    llm_confidence_scores: Optional[List[float]] = Field(default_factory=list, description="LLM confidence scores (0-1) for LLM reranking only. Represents LLM's confidence in its relevance judgment.")
     similarity_scores_by_id: Optional[Dict[str, float]] = Field(default_factory=dict, description="Cosine similarity scores for each memory id")
     bigbird_memory_info: Optional[Any] = None
 
@@ -599,11 +639,14 @@ class SearchResult(BaseModel):
                 # Get schema_id for this node if it's a custom node
                 node_label = node.label.value if hasattr(node.label, 'value') else str(node.label)
                 schema_id = schema_mapping.get(node_label) if schema_mapping else None
-                
+                if not schema_id:
+                    # Fall back to schema_id stored on the node itself
+                    schema_id = getattr(getattr(node, "properties", None), "schema_id", None)
+
                 # Create the public node
                 public_node = Node.from_internal(node, schema_id=schema_id)
                 nodes.append(public_node)
-                
+
                 # Track used schemas
                 if schema_id:
                     used_schemas.add(schema_id)
@@ -744,10 +787,14 @@ class SearchRequest(BaseModel):
     rank_results: bool = Field(
         default=False,
         description=(
+            "DEPRECATED: Use 'reranking_config' instead. "
             "Whether to enable additional ranking of search results. Default is false because results "
             "are already ranked when using an LLM for search (recommended approach). Only enable this "
-            "if you're not using an LLM in your search pipeline and need additional result ranking."
-        )
+            "if you're not using an LLM in your search pipeline and need additional result ranking. "
+            "Migration: Replace 'rank_results: true' with 'reranking_config: {reranking_enabled: true, "
+            "reranking_provider: \"cohere\", reranking_model: \"rerank-v3.5\"}'"
+        ),
+        json_schema_extra={"deprecated": True}
     )
     enable_agentic_graph: bool = Field(
         default=False,
@@ -762,13 +809,18 @@ class SearchRequest(BaseModel):
             "Set to false only if you need faster, simpler keyword-based search."
         )
     )
-    user_id: Optional[str] = Field(
-        default=None,
-        description="Optional internal user ID to filter search results by a specific user. If not provided, results are not filtered by user. If both user_id and external_user_id are provided, user_id takes precedence."
-    )
+    # User identification (external_user_id is primary)
     external_user_id: Optional[str] = Field(
         default=None,
-        description="Optional external user ID to filter search results by a specific external user. If both user_id and external_user_id are provided, user_id takes precedence."
+        description="Your application's user identifier to filter search results. This is the primary way to identify users. "
+                   "Use this for your app's user IDs (e.g., 'user_alice_123', UUID, email)."
+    )
+    # Deprecated field (kept for backwards compatibility)
+    user_id: Optional[str] = Field(
+        default=None,
+        description="DEPRECATED: Use 'external_user_id' instead. Internal Papr Parse user ID. "
+                   "Most developers should not use this field directly.",
+        json_schema_extra={"deprecated": True}
     )
     organization_id: Optional[str] = Field(
         default=None,
@@ -782,10 +834,6 @@ class SearchRequest(BaseModel):
         default=None,
         description="Optional user-defined schema ID to use for this search. If provided, this schema (plus system schema) will be used for query generation. If not provided, system will automatically select relevant schema based on query content."
     )
-    simple_schema_mode: bool = Field(
-        default=False,
-        description="If true, uses simple schema mode: system schema + ONE most relevant user schema. This ensures better consistency between add/search operations and reduces query complexity. Recommended for production use."
-    )
     metadata: Optional[MemoryMetadata] = Field(
         default=None,
         description="Optional metadata filter. Any field in MemoryMetadata (including custom fields) can be used for filtering."
@@ -798,6 +846,53 @@ class SearchRequest(BaseModel):
         default=None,
         description="Optional reranking configuration. If provided, enables reranking with specified provider (OpenAI or Cohere) and model. If not provided but rank_results=True, uses default OpenAI reranking."
     )
+
+    # OMO (Open Memory Object) Filtering - filter search results by safety standards
+    omo_filter: Optional[OMOFilter] = Field(
+        default=None,
+        description="Optional OMO (Open Memory Object) safety filter. Filter search results by consent level and/or risk level. "
+                   "Use this to exclude memories without proper consent or flagged content from search results."
+    )
+
+    @model_validator(mode='after')
+    def resolve_reranking_config(self) -> 'SearchRequest':
+        """
+        Resolve conflicts between deprecated rank_results and new reranking_config.
+
+        Precedence:
+        1. If only reranking_config is set → use it
+        2. If only rank_results is set → use it (with deprecation warning logged)
+        3. If both are set → reranking_config takes precedence
+        4. If both are set with conflicting values → log warning, use reranking_config
+        """
+        import warnings
+
+        # Check if rank_results was explicitly set (not default)
+        rank_results_set = self.rank_results is True
+        reranking_config_set = self.reranking_config is not None
+
+        if rank_results_set and not reranking_config_set:
+            # Case: Only rank_results is set - emit deprecation warning
+            warnings.warn(
+                "The 'rank_results' field is deprecated. "
+                "Use 'reranking_config' instead. Example: "
+                "reranking_config={'reranking_enabled': True, 'reranking_provider': 'cohere', 'reranking_model': 'rerank-v3.5'}",
+                DeprecationWarning,
+                stacklevel=2
+            )
+        elif rank_results_set and reranking_config_set:
+            # Case: Both are set - check for conflicts
+            reranking_enabled = self.reranking_config.reranking_enabled if self.reranking_config else False
+
+            if self.rank_results != reranking_enabled:
+                # Conflict: rank_results=True but reranking_config.reranking_enabled=False (or vice versa)
+                logger.warning(
+                    f"Conflict between deprecated 'rank_results' ({self.rank_results}) and "
+                    f"'reranking_config.reranking_enabled' ({reranking_enabled}). "
+                    f"Using 'reranking_config' value. Please remove 'rank_results' from your request."
+                )
+
+        return self
 
     @field_validator('query')
     @classmethod
@@ -1120,10 +1215,6 @@ class AutoGraphGeneration(BaseModel):
         None,
         description="Force AI to use this specific schema instead of auto-selecting"
     )
-    simple_schema_mode: bool = Field(
-        default=False,
-        description="Limit AI to system + one user schema for consistency"
-    )
     property_overrides: Optional[List[PropertyOverrideRule]] = Field(
         None,
         description="Override specific property values in AI-generated nodes with match conditions"
@@ -1177,17 +1268,62 @@ class GraphGeneration(BaseModel):
 
 class SchemaSpecificationMixin(BaseModel):
     """
-    Mixin for consistent graph generation specification across all memory request types.
-    
-    Provides a unified way to specify how the knowledge graph should be generated:
-    - Auto mode: AI-powered extraction with optional guidance
-    - Manual mode: Complete control over graph structure
+    Mixin for consistent memory processing policy across all memory request types.
+
+    Provides a unified way to control:
+    1. **Graph Generation**: How knowledge graph nodes are created
+       - auto: LLM extracts entities (default). If node_constraints provided, they are applied.
+       - manual: You provide exact nodes (no LLM extraction)
+
+    2. **OMO Safety Standards**: Consent, risk, and access control
+       - consent: explicit, implicit, terms, none
+       - risk: none, sensitive, flagged
+       - acl: Read/write permissions
+
+    3. **Schema Integration**: Reference schema-level defaults
+       - schema_id: Inherit memory_policy from schema
+
+    **Precedence**: Request-level > Schema-level > System defaults
+
+    Note: 'structured' is deprecated alias for 'manual'. 'hybrid' is deprecated alias for 'auto'.
     """
-    graph_generation: Optional[GraphGeneration] = Field(
-        default_factory=lambda: GraphGeneration(mode=GraphGenerationMode.AUTO),
-        description="Graph generation configuration. Defaults to auto mode with AI-selected schema."
+
+    # PRIMARY: Unified memory policy (RECOMMENDED)
+    memory_policy: Optional[MemoryPolicy] = Field(
+        default=None,
+        description="Unified policy for graph generation and OMO safety. "
+                   "Use mode='auto' (LLM extraction, constraints applied if provided) or 'manual' (exact nodes). "
+                   "Includes consent, risk, and ACL settings. "
+                   "If schema_id is set, schema's memory_policy is used as defaults. "
+
     )
-    
+
+    # SHORTHAND: link_to DSL for quick node/edge constraints
+    # Type alias: Union[str, List[str], Dict[str, Any]]
+    link_to: Optional[Union[str, List[str], Dict[str, Any]]] = Field(
+        default=None,
+        description="Shorthand DSL for node/edge constraints. "
+                   "Expands to memory_policy.node_constraints and edge_constraints. "
+                   "Formats: "
+                   "- String: 'Task:title' (semantic match on Task.title) "
+                   "- List: ['Task:title', 'Person:email'] (multiple constraints) "
+                   "- Dict: {'Task:title': {'set': {...}}} (with options) "
+                   "Syntax: "
+                   "- Node: 'Type:property', 'Type:prop=value' (exact), 'Type:prop~value' (semantic) "
+                   "- Edge: 'Source->EDGE->Target:property' (arrow syntax) "
+                   "- Via: 'Type.via(EDGE->Target:prop)' (relationship traversal) "
+                   "- Special: '$this', '$previous', '$context:N' "
+                   "Example: 'SecurityBehavior->MITIGATES->TacticDef:name' with {'create': 'never'}"
+    )
+
+    # DEPRECATED: Legacy graph generation (kept for backwards compatibility)
+    graph_generation: Optional[GraphGeneration] = Field(
+        default=None,
+        description="DEPRECATED: Use 'memory_policy' instead. Legacy graph generation configuration. "
+                   "If both memory_policy and graph_generation are provided, memory_policy takes precedence.",
+        json_schema_extra={"deprecated": True}
+    )
+
     model_config = ConfigDict(extra='allow')
 
 
@@ -1201,18 +1337,8 @@ class AddMemoryRequest(SchemaSpecificationMixin):
         default=MemoryType.TEXT,
         description="Memory item type; defaults to 'text' if omitted"
     )
-    metadata: Optional[MemoryMetadata] = Field(
-        None,   
-        description="Metadata used in Neo4J and Pinecone for a memory item. Include role and category here."
-    )
-    context: Optional[List[ContextItem]] = Field(
-        default_factory=list,
-        description="Context can be conversation history or any relevant context for a memory item"
-    )
-    relationships_json: Optional[List[RelationshipItem]] = Field(
-        default_factory=list,
-        description="Array of relationships that we can use in Graph DB (neo4J)"
-    )
+
+    # Organization and namespace IDs for multi-tenant scoping
     organization_id: Optional[str] = Field(
         default=None,
         description="Optional organization ID for multi-tenant memory scoping. When provided, memory is associated with this organization."
@@ -1221,7 +1347,52 @@ class AddMemoryRequest(SchemaSpecificationMixin):
         default=None,
         description="Optional namespace ID for multi-tenant memory scoping. When provided, memory is associated with this namespace."
     )
-    # schema_id, simple_schema_mode, graph_override, property_overrides inherited from SchemaSpecificationMixin
+
+    # User identification (simplified)
+    external_user_id: Optional[str] = Field(
+        default=None,
+        description="Your application's user identifier. This is the primary way to identify users. "
+                   "Use this for your app's user IDs (e.g., 'user_alice_123', UUID, email). "
+                   "Papr will automatically resolve or create internal users as needed."
+    )
+    # Deprecated fields (kept for backwards compatibility)
+    user_id: Optional[str] = Field(
+        default=None,
+        description="DEPRECATED: Use 'external_user_id' instead. Internal Papr Parse user ID. "
+                   "Most developers should not use this field directly.",
+        json_schema_extra={"deprecated": True}
+    )
+
+    metadata: Optional[MemoryMetadata] = Field(
+        None,
+        description="Metadata used in graph and vector store for a memory item. Include role and category here."
+    )
+    context: Optional[List[ContextItem]] = Field(
+        default_factory=list,
+        description="Conversation history context for this memory. "
+                   "Use for providing message history when adding a memory. "
+                   "Format: [{role: 'user'|'assistant', content: '...'}]"
+    )
+
+    # =========================================================================
+    # DEPRECATED: relationships_json - Use memory_policy instead
+    # =========================================================================
+    relationships_json: Optional[List[RelationshipItem]] = Field(
+        default_factory=list,
+        deprecated=True,
+        description="DEPRECATED: Use 'memory_policy' instead. "
+                   "Migration options: "
+                   "1. Specific memory: relationships=[{source: '$this', target: 'mem_123', type: 'FOLLOWS'}] "
+                   "2. Previous memory: link_to_previous_memory=True "
+                   "3. Related memories: link_to_related_memories=3",
+        json_schema_extra={"deprecated": True}
+    )
+
+
+    # memory_policy and graph_generation inherited from SchemaSpecificationMixin
+    # DO NOT redefine here - use the inherited field
+
+
 
     @field_validator("type", mode="before")
     @classmethod
@@ -1235,6 +1406,37 @@ class AddMemoryRequest(SchemaSpecificationMixin):
         return v
     
 
+    @model_validator(mode="after")
+    def handle_user_id_deprecation(self):
+        """Handle user_id deprecation and log warning if used."""
+        if self.user_id is not None:
+            # Log deprecation warning
+            logger.warning(
+                f"DEPRECATION WARNING: 'user_id' field is deprecated in AddMemoryRequest. "
+                f"Use 'external_user_id' instead. Provided user_id: {self.user_id[:20]}..."
+            )
+            # If external_user_id is not set but user_id is, copy it over for backwards compat
+            # Note: This assumes user_id was being used incorrectly as external_user_id
+            # The validation layer will catch actual Parse IDs vs external IDs
+            if self.external_user_id is None:
+                # Don't auto-copy - let the user fix their code
+                pass
+        return self
+
+    def get_effective_external_user_id(self) -> Optional[str]:
+        """Get the effective external user ID with precedence rules.
+
+        Precedence (highest to lowest):
+        1. external_user_id at request level
+        2. external_user_id in metadata
+        3. None (developer is the end user)
+        """
+        if self.external_user_id:
+            return self.external_user_id
+        if self.metadata and self.metadata.external_user_id:
+            return self.metadata.external_user_id
+        return None
+
     def as_handler_dict(self) -> dict:
         """Return a dict suitable for the common_add_memory_handler, handling nested serialization."""
         handler_dict = {
@@ -1246,13 +1448,19 @@ class AddMemoryRequest(SchemaSpecificationMixin):
             "graph_generation": self.graph_generation.model_dump() if self.graph_generation else None
         }
 
-        # Add multi-tenant fields if present
-        if self.organization_id is not None:
-            handler_dict["organization_id"] = self.organization_id
-        if self.namespace_id is not None:
-            handler_dict["namespace_id"] = self.namespace_id
+        # Add memory_policy field (from SchemaSpecificationMixin)
+        if self.memory_policy is not None:
+            handler_dict["memory_policy"] = self.memory_policy.model_dump()
 
-        return handler_dict
+        # Add link_to field (from SchemaSpecificationMixin)
+        if self.link_to is not None:
+            handler_dict["link_to"] = self.link_to
+
+        # Add user identification fields
+        if self.external_user_id is not None:
+            handler_dict["external_user_id"] = self.external_user_id
+        if self.user_id is not None:
+            handler_dict["user_id"] = self.user_id
 
         # Add multi-tenant fields if present
         if self.organization_id is not None:
@@ -1333,8 +1541,14 @@ class AddMemoryRequest(SchemaSpecificationMixin):
         extra='forbid'
     )
 
-class UpdateMemoryRequest(BaseModel):
-    """Request model for updating an existing memory"""
+class UpdateMemoryRequest(SchemaSpecificationMixin):
+    """Request model for updating an existing memory.
+
+    Inherits memory_policy from SchemaSpecificationMixin for controlling:
+    - Graph generation mode (auto, manual)
+    - Node constraints for LLM extraction (applied in auto mode when present)
+    - OMO safety standards (consent, risk, ACL)
+    """
     content: Optional[str] = Field(
         None,
         description="The new content of the memory item"
@@ -1363,6 +1577,7 @@ class UpdateMemoryRequest(BaseModel):
         default=None,
         description="Optional namespace ID for multi-tenant memory scoping. When provided, update is scoped to memories within this namespace."
     )
+    # memory_policy and graph_generation inherited from SchemaSpecificationMixin
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -1405,13 +1620,17 @@ class UpdateMemoryRequest(BaseModel):
 
 class BatchMemoryRequest(SchemaSpecificationMixin):
     """Request model for batch adding memories"""
-    user_id: Optional[str] = Field(
-        default=None,
-        description="Internal user ID for all memories in the batch. If not provided, developer's user ID will be used."
-    )
+    # Primary user identification
     external_user_id: Optional[str] = Field(
         default=None,
-        description="External user ID for all memories in the batch. If provided and user_id is not, will be resolved to internal user ID."
+        description="Your application's user identifier for all memories in the batch. This is the primary way to identify users. "
+                   "Papr will automatically resolve or create internal users as needed."
+    )
+    # Deprecated field (kept for backwards compatibility)
+    user_id: Optional[str] = Field(
+        default=None,
+        description="DEPRECATED: Use 'external_user_id' instead. Internal Papr Parse user ID.",
+        json_schema_extra={"deprecated": True}
     )
     organization_id: Optional[str] = Field(
         default=None,
@@ -1421,7 +1640,7 @@ class BatchMemoryRequest(SchemaSpecificationMixin):
         default=None,
         description="Optional namespace ID for multi-tenant batch memory scoping. When provided, all memories in the batch are associated with this namespace."
     )
-    # schema_id, simple_schema_mode, graph_override inherited from SchemaSpecificationMixin
+    # schema_id, graph_override inherited from SchemaSpecificationMixin
     memories: List[AddMemoryRequest] = Field(
         ...,  # Makes it required
         description="List of memory items to add in batch",
