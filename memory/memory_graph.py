@@ -13137,13 +13137,50 @@ class MemoryGraph:
                 relationship_schemas.append(rel_schema)
         
         # Use anyOf to allow any of the defined relationship types
-        relationships_schema = {
-            "type": "array",
-            "description": "List of relationships connecting the identified nodes. Only create relationships that are explicitly stated or strongly implied in the content. Each relationship must match one of the allowed relationship types with their specific source and target node type constraints.",
-            "items": {
-                "anyOf": relationship_schemas
+        if relationship_schemas:
+            relationships_schema = {
+                "type": "array",
+                "description": "List of relationships connecting the identified nodes. Only create relationships that are explicitly stated or strongly implied in the content. Each relationship must match one of the allowed relationship types with their specific source and target node type constraints.",
+                "items": {
+                    "anyOf": relationship_schemas
+                }
             }
-        }
+        else:
+            # No custom relationship types defined - use a generic relationship schema
+            # This avoids OpenAI's "[] should be non-empty" validation error for empty anyOf
+            relationships_schema = {
+                "type": "array",
+                "description": "List of relationships connecting the identified nodes. Create relationships that are explicitly stated or strongly implied in the content.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "source": {
+                            "type": "object",
+                            "properties": {
+                                "type": {"type": "string", "description": "Node type of the source node"},
+                                "llmGenNodeId": {"type": "string", "description": "llmGenNodeId of the source node"}
+                            },
+                            "required": ["type", "llmGenNodeId"],
+                            "additionalProperties": False
+                        },
+                        "target": {
+                            "type": "object",
+                            "properties": {
+                                "type": {"type": "string", "description": "Node type of the target node"},
+                                "llmGenNodeId": {"type": "string", "description": "llmGenNodeId of the target node"}
+                            },
+                            "required": ["type", "llmGenNodeId"],
+                            "additionalProperties": False
+                        },
+                        "type": {
+                            "type": "string",
+                            "description": "The relationship type"
+                        }
+                    },
+                    "required": ["source", "target", "type"],
+                    "additionalProperties": False
+                }
+            }
         
         # Validate and clean up node schemas - remove any None values from label enums
         # IMPORTANT: OpenAI doesn't allow None in string enum arrays - this causes validation errors

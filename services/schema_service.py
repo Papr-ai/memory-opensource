@@ -340,10 +340,13 @@ class SchemaService:
                     {"scope": "organization"}  # Legacy: all org schemas
                 ])
             
+            # When looking up by specific schema_id, allow both active and draft schemas.
+            # If a developer explicitly references a schema by ID, they should be able to use it.
+            # Only archived schemas are excluded (they are soft-deleted).
             where_conditions = {
                 "$and": [
                     {"objectId": schema_id},  # Filter by specific schema ID
-                    {"status": "active"},     # Only active schemas
+                    {"status": {"$ne": "archived"}},  # Exclude archived (soft-deleted) schemas
                     {"$or": query_conditions} # Apply multi-tenant access rules
                 ]
             }

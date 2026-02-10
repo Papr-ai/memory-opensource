@@ -1448,6 +1448,14 @@ class AddMemoryRequest(SchemaSpecificationMixin):
             "graph_generation": self.graph_generation.model_dump() if self.graph_generation else None
         }
 
+        # Add memory_policy field (from SchemaSpecificationMixin)
+        if self.memory_policy is not None:
+            handler_dict["memory_policy"] = self.memory_policy.model_dump()
+
+        # Add link_to field (from SchemaSpecificationMixin)
+        if self.link_to is not None:
+            handler_dict["link_to"] = self.link_to
+
         # Add user identification fields
         if self.external_user_id is not None:
             handler_dict["external_user_id"] = self.external_user_id

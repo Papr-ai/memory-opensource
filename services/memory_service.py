@@ -711,52 +711,57 @@ async def handle_incoming_memory(
                 )
                 logger.info(f"📋 RESOLVED POLICY: {resolved_policy}")
 
-                # Check if we should skip graph extraction (consent='none')
-                if should_skip_graph_extraction(resolved_policy):
-                    logger.warning(f"⚠️ Skipping graph extraction due to consent='none' policy")
-                    # Continue with memory storage, but skip graph generation
-                    graph_override = {'nodes': [], 'relationships': []}
-
-                # Extract OMO fields and add to metadata
-                omo_fields = extract_omo_fields_from_policy(resolved_policy)
-                metadata['consent'] = omo_fields.get('consent', 'implicit')
-                metadata['risk'] = omo_fields.get('risk', 'none')
-                if omo_fields.get('acl'):
-                    metadata['acl'] = omo_fields['acl']
-                    # Expand OMO ACL into granular access fields for storage/filtering
-                    try:
-                        acl_value = omo_fields['acl']
-                        if isinstance(acl_value, ACLConfig):
-                            granular_acl = acl_value.to_granular_acl()
-                        elif isinstance(acl_value, dict):
-                            granular_acl = ACLConfig(**acl_value).to_granular_acl()
-                        else:
-                            granular_acl = None
-                        if granular_acl:
-                            for field, values in granular_acl.items():
-                                if values:
-                                    existing = metadata.get(field) or []
-                                    metadata[field] = list(set(existing + values))
-                    except Exception as e:
-                        logger.warning(f"Failed to expand memory_policy.acl into granular fields: {e}")
-
-                # Extract node_constraints for graph processing
-                node_constraints = resolved_policy.get('node_constraints')
-                if node_constraints:
-                    if not property_overrides:
-                        property_overrides = []
-                    # Convert node_constraints to property_overrides format for compatibility
-                    for constraint in node_constraints:
-                        if constraint.get('force'):
-                            property_overrides.append({
-                                'node_type': constraint['node_type'],
-                                'properties': constraint['force']
-                            })
-                    logger.info(f"🔧 NODE CONSTRAINTS from policy: {len(node_constraints)} rules")
-
             except Exception as e:
                 logger.warning(f"Failed to resolve schema-level policy: {e}")
                 # Continue without schema policy
+
+        # Apply OMO fields and constraints from the effective policy
+        # Use resolved_policy (from schema) if available, otherwise use memory_policy_dict
+        effective_policy = resolved_policy or memory_policy_dict
+        if effective_policy:
+            # Check if we should skip graph extraction (consent='none')
+            if should_skip_graph_extraction(effective_policy):
+                logger.warning(f"⚠️ Skipping graph extraction due to consent='none' policy")
+                # Continue with memory storage, but skip graph generation
+                graph_override = {'nodes': [], 'relationships': []}
+
+            # Extract OMO fields and add to metadata
+            omo_fields = extract_omo_fields_from_policy(effective_policy)
+            metadata['consent'] = omo_fields.get('consent', 'implicit')
+            metadata['risk'] = omo_fields.get('risk', 'none')
+            logger.info(f"🔒 OMO FIELDS APPLIED: consent={metadata['consent']}, risk={metadata['risk']}")
+            if omo_fields.get('acl'):
+                metadata['acl'] = omo_fields['acl']
+                # Expand OMO ACL into granular access fields for storage/filtering
+                try:
+                    acl_value = omo_fields['acl']
+                    if isinstance(acl_value, ACLConfig):
+                        granular_acl = acl_value.to_granular_acl()
+                    elif isinstance(acl_value, dict):
+                        granular_acl = ACLConfig(**acl_value).to_granular_acl()
+                    else:
+                        granular_acl = None
+                    if granular_acl:
+                        for field, values in granular_acl.items():
+                            if values:
+                                existing = metadata.get(field) or []
+                                metadata[field] = list(set(existing + values))
+                except Exception as e:
+                    logger.warning(f"Failed to expand memory_policy.acl into granular fields: {e}")
+
+            # Extract node_constraints for graph processing
+            node_constraints = effective_policy.get('node_constraints')
+            if node_constraints:
+                if not property_overrides:
+                    property_overrides = []
+                # Convert node_constraints to property_overrides format for compatibility
+                for constraint in node_constraints:
+                    if constraint.get('force'):
+                        property_overrides.append({
+                            'node_type': constraint['node_type'],
+                            'properties': constraint['force']
+                        })
+                logger.info(f"🔧 NODE CONSTRAINTS from policy: {len(node_constraints)} rules")
 
         logger.info(f"🔍 DEBUG: Extracted graph_override: {graph_override is not None}")
         logger.info(f"🔍 DEBUG: Extracted schema_id: {schema_id}")

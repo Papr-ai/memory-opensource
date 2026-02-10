@@ -149,11 +149,11 @@ services:
       - papr-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "password", "RETURN 1"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:7474 || exit 1"]
       interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
 
   # Qdrant - Vector database for semantic search
   qdrant:
@@ -469,11 +469,9 @@ services:
     entrypoint: []
     command: ["python", "-m", "pytest", "tests/test_add_memory_fastapi.py::test_v1_add_memory_1", "-v", "--tb=short"]
     working_dir: /app
-    # Note: Volume mounting is optional. If Docker file sharing is configured,
-    # test reports will appear instantly in tests/test_reports/
-    # Otherwise, use scripts/run_tests_docker.sh which auto-copies reports
-    # volumes:
-    #   - .:/app
+    # Volume mount ensures code changes are reflected immediately in the test container
+    volumes:
+      - .:/app
     env_file:
       - .env.opensource
     environment:
