@@ -81,7 +81,7 @@ def create_api_key(email: str, name: str, rate_limit: int = 1000, enabled: bool 
 
     try:
         response = requests.post(
-            f"{parse_url}/classes/APIKey",
+            f"{parse_url}/parse/classes/APIKey",
             headers=headers,
             json=data,
             timeout=10
@@ -140,7 +140,7 @@ def list_api_keys():
 
     try:
         response = requests.get(
-            f"{parse_url}/classes/APIKey",
+            f"{parse_url}/parse/classes/APIKey",
             headers=headers,
             timeout=10
         )

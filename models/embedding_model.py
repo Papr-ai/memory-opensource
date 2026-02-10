@@ -91,6 +91,10 @@ vertex_ai_project = env.get("VERTEX_AI_PROJECT", "223473570766")
 vertex_ai_endpoint_id = env.get("VERTEX_AI_ENDPOINT_ID", "8078932164944592896")
 vertex_ai_location = env.get("VERTEX_AI_LOCATION", "us-west1")
 use_vertex_ai = env.get("USE_VERTEX_AI", "false").lower() == "true"
+# Local embedding configuration
+use_local_embeddings = env.get("USE_LOCAL_EMBEDDINGS", "true").lower() == "true"
+local_embedding_model = env.get("LOCAL_EMBEDDING_MODEL", "Qwen/Qwen3-Embedding-0.6B")
+local_embedding_dimensions = int(env.get("LOCAL_EMBEDDING_DIMENSIONS", "1024"))
 MAX_EMBEDDING_PAYLOAD_SIZE = int(env.get("MAX_EMBEDDING_PAYLOAD_SIZE", "2000000"))
 MAX_EMBEDDING_BATCH_TOKENS = int(env.get("MAX_EMBEDDING_BATCH_TOKENS", "16384"))
 MAX_EMBEDDING_CLIENT_BATCH_SIZE = int(env.get("MAX_EMBEDDING_CLIENT_BATCH_SIZE", "32"))
@@ -117,6 +121,7 @@ class EmbeddingModel:
     _qwen4b_config = None
     _qwen4b_splitter = None
     _qwen4b_model_instance = None
+    _qwen0pt6b_model_instance = None  # Local Qwen3-Embedding-0.6B model
     _vertex_ai_initialized = False  # Class-level flag to track Vertex AI initialization
     _vertex_ai_endpoint = None  # Class-level cached endpoint object for connection pooling
     def __init__(self):
@@ -199,6 +204,30 @@ class EmbeddingModel:
                 chunk_overlap=0
             )
             logger.info("Qwen3-Embedding-4B tokenizer, config and text splitter initialized")
+        
+        # Initialize local Qwen3-Embedding-0.6B model if USE_LOCAL_EMBEDDINGS is enabled
+        if use_local_embeddings and EmbeddingModel._qwen0pt6b_model_instance is None:
+            logger.info(f"Initializing local embedding model: {local_embedding_model}")
+            logger.info("This may take a few minutes on first run (~1.2GB download)...")
+            try:
+                _set_ssl_cert_paths()
+                # Use SentenceTransformer for easy local embedding generation
+                EmbeddingModel._qwen0pt6b_model_instance = SentenceTransformer(
+                    local_embedding_model,
+                    device="cpu",  # Use CPU by default, GPU if available
+                    trust_remote_code=True  # Required for Qwen models
+                )
+                # Enable GPU if available
+                if torch.cuda.is_available():
+                    EmbeddingModel._qwen0pt6b_model_instance = EmbeddingModel._qwen0pt6b_model_instance.to("cuda")
+                    logger.info(f"Local embedding model loaded on GPU: {local_embedding_model}")
+                else:
+                    logger.info(f"Local embedding model loaded on CPU: {local_embedding_model}")
+                self.qwen0pt6b_model_instance = EmbeddingModel._qwen0pt6b_model_instance
+            except Exception as e:
+                logger.error(f"Failed to initialize local embedding model {local_embedding_model}: {e}")
+                logger.warning("Falling back to cloud embeddings. Set USE_LOCAL_EMBEDDINGS=false to suppress this warning.")
+                # Don't raise - allow fallback to cloud embeddings
     #def get_sentence_embedding(self, text):
     #    embedding = self.sentence_model.encode([text])
     #    return embedding[0]
@@ -663,7 +692,11 @@ class EmbeddingModel:
 
     async def get_qwen_embedding_4b(self, text: str, max_retries: int = 3, retry_delay: float = 1.0, semaphore: Optional[asyncio.Semaphore] = None, use_async: bool = True) -> Tuple[List[List[float]], List[str]]:
         """
-        Get Qwen3-Embedding-4B embeddings for the given text asynchronously, with retry logic and concurrency control.
+        Get Qwen embeddings for the given text asynchronously, with retry logic and concurrency control.
+        
+        By default (USE_LOCAL_EMBEDDINGS=true), uses local Qwen3-Embedding-0.6B model.
+        Falls back to cloud APIs (Qwen3-Embedding-4B via DeepInfra/Vertex AI) if local is disabled.
+        
         Args:
             text (str): The text to embed
             max_retries (int): Maximum number of retries for each chunk (default: 3)
@@ -678,8 +711,40 @@ class EmbeddingModel:
         
         overall_start_time = time.time()
         logger.info("[TIMING] Starting get_qwen_embedding_4b")
+        
+        # Check if using local embeddings first (default for open source)
+        if use_local_embeddings and EmbeddingModel._qwen0pt6b_model_instance is not None:
+            logger.info(f"Using local embedding model: {local_embedding_model}")
+            loop = asyncio.get_event_loop()
+            try:
+                local_start = time.time()
+                # Generate embeddings using local model
+                embeddings_np = await loop.run_in_executor(
+                    None,
+                    lambda: EmbeddingModel._qwen0pt6b_model_instance.encode(
+                        text,
+                        convert_to_numpy=True,
+                        show_progress_bar=False,
+                        normalize_embeddings=True  # Normalize for better similarity search
+                    )
+                )
+                local_end = time.time()
+                logger.info(f"[TIMING] Local embedding generation took: {local_end - local_start:.4f} seconds")
+                logger.info(f"Local embedding dimensions: {embeddings_np.shape}")
+                
+                # Return in expected format: list of embeddings (one per chunk), list of chunks
+                # For single text input, we return one embedding
+                embeddings_list = [embeddings_np.tolist()]
+                chunks_list = [text]
+                
+                logger.info("[TIMING] Finished get_qwen_embedding_4b (local)")
+                return embeddings_list, chunks_list
+            except Exception as e:
+                logger.error(f"Error in local embedding generation: {str(e)}")
+                logger.warning("Falling back to cloud embeddings...")
+                # Continue to cloud embedding logic below
 
-        # Check if using Vertex AI or DeepInfra/HuggingFace
+        # Check if using Vertex AI or DeepInfra/HuggingFace for cloud embeddings
         if use_vertex_ai:
             logger.info(f"Using Vertex AI for Qwen4B embeddings: project={vertex_ai_project}, endpoint={vertex_ai_endpoint_id}, location={vertex_ai_location}")
             # Vertex AI will be used in process_chunk_with_retry
@@ -690,12 +755,18 @@ class EmbeddingModel:
             api_token = deepinfra_token or hugging_face_access_token
             
             if not api_url:
-                error_msg = "Qwen4B embedding API URL not configured. Please set DEEPINFRA_API_URL, HUGGING_FACE_API_URL_QWEN_4B, or USE_VERTEX_AI=true with VERTEX_AI_* variables."
+                if use_local_embeddings:
+                    error_msg = "Local embeddings failed and no cloud API configured. Please ensure Qwen3-Embedding-0.6B model loaded successfully, or set DEEPINFRA_API_URL/HUGGING_FACE_API_URL_QWEN_4B with USE_VERTEX_AI=true."
+                else:
+                    error_msg = "Qwen4B embedding API URL not configured. Please set DEEPINFRA_API_URL, HUGGING_FACE_API_URL_QWEN_4B, or USE_VERTEX_AI=true with VERTEX_AI_* variables, or enable local embeddings with USE_LOCAL_EMBEDDINGS=true."
                 logger.error(error_msg)
                 raise ValueError(error_msg)
             
             if not api_token:
-                error_msg = "Qwen4B embedding API token not configured. Please set DEEPINFRA_TOKEN, HUGGING_FACE_ACCESS_TOKEN, or USE_VERTEX_AI=true with Vertex AI credentials."
+                if use_local_embeddings:
+                    error_msg = "Local embeddings failed and no cloud API token configured. Please ensure Qwen3-Embedding-0.6B model loaded successfully, or set DEEPINFRA_TOKEN/HUGGING_FACE_ACCESS_TOKEN."
+                else:
+                    error_msg = "Qwen4B embedding API token not configured. Please set DEEPINFRA_TOKEN, HUGGING_FACE_ACCESS_TOKEN, or USE_VERTEX_AI=true with Vertex AI credentials, or enable local embeddings with USE_LOCAL_EMBEDDINGS=true."
                 logger.error(error_msg)
                 raise ValueError(error_msg)
 

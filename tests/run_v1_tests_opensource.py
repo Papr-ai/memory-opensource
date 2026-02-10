@@ -14,6 +14,10 @@ import os
 # Set PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION before any imports that might load protobuf/sentencepiece
 # This must be set BEFORE importing any modules that use protobuf
 os.environ.setdefault("PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION", "python")
+# Prevent OpenBLAS/OpenMP thread conflicts that cause hangs with local embedding models
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
 
 import asyncio
 import sys

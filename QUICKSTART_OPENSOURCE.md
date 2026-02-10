@@ -39,21 +39,19 @@ docker compose -f docker compose.yaml logs -f papr-memory
 - ✅ Initializes Parse Server schemas (if missing)
 - ✅ Creates default user account (`opensource@papr.ai`)
 - ✅ Generates API key automatically
-- ✅ Saves credentials to `/app/.env.generated` inside container
+- ✅ **Saves test credentials to `.env.opensource` on your host** (auto-synced via volume mount)
+- ✅ Saves additional credentials to `/app/.env.generated` inside container
 
 ## Step 3: Get Your API Key
 
-On first run, the container automatically creates a default user and generates an API key. To retrieve it:
+On first run, the container automatically creates a default user and generates an API key. **Test credentials are automatically written to your `.env.opensource` file** - no manual copying needed!
 
 ```bash
-# Copy the generated config file from container
-docker cp papr-memory:/app/.env.generated ./
-
-# View your API key
-cat .env.generated
+# View your API key and test credentials
+grep "TEST_" .env.opensource
 
 # Or check the container logs for the API key
-docker compose -f docker compose.yaml logs papr-memory | grep "API Key"
+docker compose logs papr-memory | grep "API Key"
 ```
 
 **Default credentials:**

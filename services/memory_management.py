@@ -578,7 +578,12 @@ def extract_relationship_types(relationships: List[dict]) -> List[str]:
     return extracted_types
 
 def convert_acl(metadata: dict) -> dict:
-    """Convert custom ACL to Parse ACL format."""
+    """Convert custom ACL to Parse ACL format.
+    
+    IMPORTANT: If no explicit ACL arrays are provided but user_id is in metadata,
+    the owner (user_id) will be granted read/write access by default.
+    This ensures memories are accessible to their creator.
+    """
     acl = {}
     
     # Handle user read/write access
@@ -589,6 +594,10 @@ def convert_acl(metadata: dict) -> dict:
         user_read = json.loads(user_read.replace("'", '"'))
     if isinstance(user_write, str):
         user_write = json.loads(user_write.replace("'", '"'))
+    
+    # Filter out None values from ACL arrays
+    user_read = [u for u in user_read if u is not None] if user_read else []
+    user_write = [u for u in user_write if u is not None] if user_write else []
     
     for user_id in set(user_read + user_write):
         acl[user_id] = {
@@ -627,6 +636,17 @@ def convert_acl(metadata: dict) -> dict:
             'read': workspace in workspace_read,
             'write': workspace in workspace_write
         }
+    
+    # CRITICAL: If ACL is empty but we have a user_id in metadata, grant owner access
+    # This ensures the memory creator can always access their own memories
+    if not acl:
+        owner_user_id = metadata.get('user_id')
+        if owner_user_id and isinstance(owner_user_id, str) and owner_user_id.strip():
+            acl[owner_user_id] = {
+                'read': True,
+                'write': True
+            }
+            logger.info(f"ACL was empty - granting owner access to user_id: {owner_user_id}")
     
     # Note: organization_read_access, organization_write_access, namespace_read_access, 
     # and namespace_write_access are stored as separate fields in Parse Server (like workspace_read_access),
@@ -1896,6 +1916,23 @@ async def _batch_store_single_request(
             if acl_field in memory_item.metadata:
                 optional_fields[acl_field] = memory_item.metadata[acl_field]
         
+        # Add organization and namespace pointers for multi-tenant scoping
+        # These are stored as Parse Pointers for relational queries
+        org_id = memory_item.metadata.get("organization_id")
+        ns_id = memory_item.metadata.get("namespace_id")
+        if org_id and str(org_id).strip().lower() != "none":
+            optional_fields["organization"] = {
+                "__type": "Pointer",
+                "className": "Organization",
+                "objectId": str(org_id)
+            }
+        if ns_id and str(ns_id).strip().lower() != "none":
+            optional_fields["namespace"] = {
+                "__type": "Pointer",
+                "className": "Namespace",
+                "objectId": str(ns_id)
+            }
+        
         # Remove None values
         body.update({k: v for k, v in optional_fields.items() if v is not None})
 
@@ -1946,6 +1983,14 @@ async def _batch_store_single_request(
                         external_id=None
                     )
                 
+                # Extract organization_id and namespace_id for multi-tenant scoping (as pointers)
+                org_id = memory_item.metadata.get('organization_id')
+                ns_id = memory_item.metadata.get('namespace_id')
+                
+                # Build organization/namespace pointers if IDs exist
+                org_pointer = OrganizationPointer(objectId=str(org_id)) if org_id else None
+                ns_pointer = NamespacePointer(objectId=str(ns_id)) if ns_id else None
+                
                 stored_memory = ParseStoredMemory(
                     objectId=success_data.get("objectId"),
                     createdAt=success_data.get("createdAt"),
@@ -1962,6 +2007,9 @@ async def _batch_store_single_request(
                         className='_User'
                     ),
                     developerUser=developer_user_pointer,
+                    # Multi-tenant scoping as pointers (from_internal extracts objectId)
+                    organization=org_pointer,
+                    namespace=ns_pointer,
                     external_user_read_access=memory_item.metadata.get('external_user_read_access', []),
                     external_user_write_access=memory_item.metadata.get('external_user_write_access', []),
                     user_read_access=memory_item.metadata.get('user_read_access', []),

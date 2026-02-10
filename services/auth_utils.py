@@ -1124,10 +1124,12 @@ async def get_user_from_token_optimized(
         # Apply fallback logic: use developer values when resolved values are None
         logger.info(f"🔍 TRACE AUTH STEP 1 - BEFORE FALLBACK: resolved_workspace_id={resolved_workspace_id}, developer_workspace_id={developer_workspace_id}")
         final_workspace_id = resolved_workspace_id if resolved_workspace_id is not None else developer_workspace_id
-        final_is_qwen_route = resolved_is_qwen_route if resolved_is_qwen_route is not None else (developer_is_qwen_route if developer_is_qwen_route is not None else False)
+        # Don't override final_is_qwen_route if already set by environment check above
+        if 'final_is_qwen_route' not in locals():
+            final_is_qwen_route = resolved_is_qwen_route if resolved_is_qwen_route is not None else (developer_is_qwen_route if developer_is_qwen_route is not None else False)
         final_user_roles = resolved_user_roles if resolved_user_roles else developer_user_roles
         final_user_workspace_ids = resolved_user_workspace_ids if resolved_user_workspace_ids else developer_user_workspace_ids
-        logger.info(f"🔍 TRACE AUTH STEP 2 - AFTER FALLBACK: final_workspace_id={final_workspace_id}")
+        logger.info(f"🔍 TRACE AUTH STEP 2 - AFTER FALLBACK: final_workspace_id={final_workspace_id}, final_is_qwen_route={final_is_qwen_route}")
         
         # Start cached schema lookup now that we have user_id and workspace_id
         # Only fetch schema cache for search requests with agentic graph enabled
@@ -1179,6 +1181,29 @@ async def get_user_from_token_optimized(
             api_key_info = enhanced_api_key_info
 
             logger.info(f"Multi-tenant auth detected - org_id: {organization_id}, namespace_id: {namespace_id}, auth_type: {auth_type}")
+        
+        # CRITICAL: Override is_qwen_route based on environment configuration
+        # If USE_LOCAL_EMBEDDINGS=true OR false (both use Qwen embeddings)
+        from os import environ as env
+        use_local_embeddings = env.get('USE_LOCAL_EMBEDDINGS', '').lower() == 'true'
+        local_embedding_model = env.get('LOCAL_EMBEDDING_MODEL', '')
+        
+        # If using local Qwen embeddings OR cloud embeddings (both are Qwen-based)
+        # Always set is_qwen_route=True for open source edition
+        if use_local_embeddings and 'qwen' in local_embedding_model.lower():
+            logger.info(f"🔧 EMBEDDING CONFIG: USE_LOCAL_EMBEDDINGS=true with {local_embedding_model} - forcing isQwenRoute=True")
+            # Override both developer and resolved is_qwen_route values
+            developer_is_qwen_route = True
+            resolved_is_qwen_route = True
+            final_is_qwen_route = True
+            logger.info(f"🔧 EMBEDDING CONFIG: Overriding isQwenRoute to True for local Qwen embeddings")
+        elif not use_local_embeddings:
+            # Cloud embeddings (DeepInfra/HuggingFace) also use Qwen
+            logger.info(f"🔧 EMBEDDING CONFIG: USE_LOCAL_EMBEDDINGS=false - using cloud Qwen embeddings, forcing isQwenRoute=True")
+            developer_is_qwen_route = True
+            resolved_is_qwen_route = True
+            final_is_qwen_route = True
+            logger.info(f"🔧 EMBEDDING CONFIG: Overriding isQwenRoute to True for cloud Qwen embeddings")
 
         # Now that multi-tenant fields are set, fetch schema cache if needed for agentic search
         if (search_request and resolved_user_id and final_workspace_id and 
@@ -2878,7 +2903,7 @@ async def get_enhanced_api_key_info(api_key: str, memory_graph: "MemoryGraph", h
                     # Get organization to find owner
                     org_doc = memory_graph.db["Organization"].find_one({"_id": organization_id})
                     if org_doc:
-                        # Extract owner user ID
+                        # Extract owner user ID (check both 'owner' and 'created_by' fields)
                         owner_user_id = None
                         if "owner" in org_doc and isinstance(org_doc["owner"], dict):
                             owner_user_id = org_doc["owner"].get("objectId")
@@ -2887,6 +2912,14 @@ async def get_enhanced_api_key_info(api_key: str, memory_graph: "MemoryGraph", h
                             owner_pointer = org_doc["_p_owner"]
                             if owner_pointer.startswith("_User$"):
                                 owner_user_id = owner_pointer.replace("_User$", "")
+                        # Fallback to created_by (used by bootstrap script)
+                        if not owner_user_id:
+                            if "created_by" in org_doc and isinstance(org_doc["created_by"], dict):
+                                owner_user_id = org_doc["created_by"].get("objectId")
+                            elif "_p_created_by" in org_doc:
+                                created_by_pointer = org_doc["_p_created_by"]
+                                if created_by_pointer.startswith("_User$"):
+                                    owner_user_id = created_by_pointer.replace("_User$", "")
 
                         # Extract workspace_id from organization
                         workspace_id = None
@@ -2989,6 +3022,33 @@ async def get_enhanced_api_key_info(api_key: str, memory_graph: "MemoryGraph", h
 
             if api_key_doc:
                 legacy_info["api_key_doc"] = api_key_doc
+                
+                # Extract organization_id and namespace_id from APIKey doc if not found from workspace
+                # This handles cases where the APIKey has direct org/ns references
+                if not organization_id:
+                    if "organization" in api_key_doc and isinstance(api_key_doc["organization"], dict):
+                        organization_id = api_key_doc["organization"].get("objectId")
+                    elif "_p_organization" in api_key_doc:
+                        org_pointer = api_key_doc["_p_organization"]
+                        if org_pointer and org_pointer.startswith("Organization$"):
+                            organization_id = org_pointer.replace("Organization$", "")
+                    if organization_id:
+                        legacy_info["organization_id"] = organization_id
+                        logger.info(f"Extracted organization_id from APIKey doc: {organization_id}")
+                
+                if not namespace_id:
+                    if "namespace" in api_key_doc and isinstance(api_key_doc["namespace"], dict):
+                        namespace_id = api_key_doc["namespace"].get("objectId")
+                    elif "_p_namespace" in api_key_doc:
+                        ns_pointer = api_key_doc["_p_namespace"]
+                        if ns_pointer and ns_pointer.startswith("Namespace$"):
+                            namespace_id = ns_pointer.replace("Namespace$", "")
+                    # Also check namespace_id field directly (some APIKey docs have this)
+                    elif "namespace_id" in api_key_doc:
+                        namespace_id = api_key_doc["namespace_id"]
+                    if namespace_id:
+                        legacy_info["namespace_id"] = namespace_id
+                        logger.info(f"Extracted namespace_id from APIKey doc: {namespace_id}")
 
             # Cache the result
             api_key_cache.set(cache_key, legacy_info)

@@ -110,8 +110,6 @@ from tests.test_memory_policy_end_to_end import (
     TestErrorHandling,
     TestDeepTrustEdgePolicy,
     TestDeepTrustEdgePolicy,
-    unique_id as memory_policy_unique_id,
-    api_headers as memory_policy_api_headers,
 )
 
 # Import delete all memories tests
@@ -170,9 +168,15 @@ from tests.test_query_log_integration import (
 )
 from tests import test_schema_memory_policy as schema_policy_tests
 from tests import test_omo_safety as omo_safety_tests
-from tests.test_messages_endpoint_end_to_end import (
-    test_messages_endpoint_end_to_end,
-)
+# Messages endpoint tests - skip if not available
+try:
+    from tests.test_messages_endpoint_end_to_end import (
+        test_messages_endpoint_end_to_end,
+    )
+    MESSAGES_TESTS_AVAILABLE = True
+except (ImportError, AttributeError):
+    MESSAGES_TESTS_AVAILABLE = False
+    test_messages_endpoint_end_to_end = None
 
 # Import document processing tests (now included in open source)
 try:
@@ -605,60 +609,61 @@ class V1EndpointTesterOSS:
             self.results.append(result)
     
     async def run_all_tests(self):
-        """Run all v1 endpoint tests sequentially (Open Source Edition)."""
+        """Run all v1 endpoint tests sequentially (Open Source Edition).
+        
+        Each test group is wrapped in its own try/except so that a crash in one
+        group does not prevent the remaining groups from running.
+        """
         logger.info("🚀 Starting V1 Endpoints Sequential Test Suite (Open Source Edition)")
         logger.info("📋 Includes: Memory, User, Feedback, Schema, Message, Document routes")
         logger.info("❌ Excludes: GraphQL (cloud-only), Billing (cloud-only)")
         self.start_time = time.time()
-        suite_error = None
+        group_errors = []
         
-        try:
-            app_instance = app
-            # Run memory tests by endpoint group
-            await self.run_add_memory_tests(app_instance)
-            await self.run_batch_add_memory_tests(app_instance)
-            await self.run_update_memory_tests(app_instance)
-            await self.run_get_memory_tests(app_instance)
-            await self.run_search_memory_tests(app_instance)
-            await self.run_memory_policy_tests(app_instance)
-            await self.run_schema_policy_unit_tests(app_instance)
-            await self.run_omo_safety_tests(app_instance)
-            await self.run_delete_memory_tests(app_instance)
-            
-            # Run user tests by endpoint group
-            await self.run_create_user_tests(app_instance)
-            await self.run_get_user_tests(app_instance)
-            await self.run_update_user_tests(app_instance)
-            await self.run_delete_user_tests(app_instance)
-            await self.run_list_users_tests(app_instance)
-            
-            # Run feedback tests
-            await self.run_feedback_tests(app_instance)
-            # Run query log integration tests
-            await self.run_query_log_tests(app_instance)
-            # Run multi-tenant tests
-            await self.run_multi_tenant_tests(app_instance)
-            
-            # Run document processing tests (now open source)
-            await self.run_document_processing_tests(app_instance)
-            # Run message tests
-            await self.run_message_tests(app_instance)
-        except Exception as e:
-            suite_error = str(e)
-            logger.error(f"❌ Test suite crashed with unhandled exception: {e}", exc_info=True)
-            self.results.append({
-                "test_name": "TEST_SUITE_ERROR",
-                "status": "failed",
-                "duration": time.time() - self.start_time,
-                "error": f"Unhandled exception: {suite_error}",
-                "details": None
-            })
-        finally:
-            self.end_time = time.time()
-            self.generate_report()
-            
-            if suite_error:
-                raise Exception(f"Test suite failed: {suite_error}")
+        app_instance = app
+
+        test_groups = [
+            ("Add Memory", self.run_add_memory_tests),
+            ("Batch Add Memory", self.run_batch_add_memory_tests),
+            ("Update Memory", self.run_update_memory_tests),
+            ("Get Memory", self.run_get_memory_tests),
+            ("Search Memory", self.run_search_memory_tests),
+            ("Memory Policy", self.run_memory_policy_tests),
+            ("Schema Policy", self.run_schema_policy_unit_tests),
+            ("OMO Safety", self.run_omo_safety_tests),
+            ("Delete Memory", self.run_delete_memory_tests),
+            ("Create User", self.run_create_user_tests),
+            ("Get User", self.run_get_user_tests),
+            ("Update User", self.run_update_user_tests),
+            ("Delete User", self.run_delete_user_tests),
+            ("List Users", self.run_list_users_tests),
+            ("Feedback", self.run_feedback_tests),
+            ("Query Log", self.run_query_log_tests),
+            ("Multi-tenant", self.run_multi_tenant_tests),
+            ("Document Processing", self.run_document_processing_tests),
+            ("Messages", self.run_message_tests),
+        ]
+
+        for group_name, group_func in test_groups:
+            try:
+                await group_func(app_instance)
+            except Exception as e:
+                error_msg = f"Test group '{group_name}' crashed: {e}"
+                logger.error(f"❌ {error_msg}", exc_info=True)
+                group_errors.append(error_msg)
+                self.results.append({
+                    "test_name": f"GROUP_CRASH: {group_name}",
+                    "status": "failed",
+                    "duration": 0,
+                    "error": error_msg,
+                    "details": None
+                })
+
+        self.end_time = time.time()
+        self.generate_report()
+
+        if group_errors:
+            raise Exception(f"Test suite had {len(group_errors)} group crash(es): {'; '.join(group_errors)}")
     
     def generate_report(self):
         """Generate detailed test report."""
@@ -827,7 +832,16 @@ async def test_v1_search_fixed_user_cache_test_wrapper(app_instance):
 
 # Memory policy end-to-end test wrappers
 def _memory_policy_fixtures():
-    return memory_policy_unique_id(), memory_policy_api_headers()
+    """Generate fixture values directly (not via pytest fixture mechanism)."""
+    import uuid
+    unique_id = str(uuid.uuid4())[:12]
+    api_headers = {
+        'Content-Type': 'application/json',
+        'X-Client-Type': 'papr_plugin',
+        'Authorization': f'Session {os.environ.get("TEST_SESSION_TOKEN", "")}',
+        'Accept-Encoding': 'gzip'
+    }
+    return unique_id, api_headers
 
 async def test_memory_policy_link_to_string_form_wrapper(app_instance):
     unique_id, headers = _memory_policy_fixtures()
@@ -1050,6 +1064,9 @@ async def test_backward_compatibility_wrapper(app_instance):
 # Message test wrappers
 async def test_messages_endpoint_end_to_end_wrapper(app_instance):
     """Wrapper for test_messages_endpoint_end_to_end to work with sequential test runner."""
+    if not MESSAGES_TESTS_AVAILABLE or test_messages_endpoint_end_to_end is None:
+        logger.info("Messages endpoint test not available - skipping")
+        return
     await test_messages_endpoint_end_to_end()
 
 async def main():

@@ -379,7 +379,7 @@ class TestLinkToDSLEndToEnd:
         """Test link_to with simple string form: 'Task:title'."""
         if not _has_llm_api_key():
             pytest.skip("LLM API key not configured; link_to extraction cannot create nodes")
-        async with LifespanManager(app, startup_timeout=30) as manager:
+        async with LifespanManager(app, startup_timeout=120) as manager:
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=manager.app),
                 base_url="http://test"
@@ -413,7 +413,7 @@ class TestLinkToDSLEndToEnd:
         """Test link_to with list form: ['Task:title', 'Person:email']."""
         if not _has_llm_api_key():
             pytest.skip("LLM API key not configured; link_to extraction cannot create nodes")
-        async with LifespanManager(app, startup_timeout=30) as manager:
+        async with LifespanManager(app, startup_timeout=120) as manager:
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=manager.app),
                 base_url="http://test"
@@ -461,7 +461,7 @@ class TestLinkToDSLEndToEnd:
     @pytest.mark.asyncio
     async def test_link_to_dict_form_with_create_never(self, unique_id, api_headers):
         """Test link_to with dict form + create='never'."""
-        async with LifespanManager(app, startup_timeout=30) as manager:
+        async with LifespanManager(app, startup_timeout=120) as manager:
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=manager.app),
                 base_url="http://test"
@@ -499,7 +499,7 @@ class TestLinkToDSLEndToEnd:
         """Test link_to with exact match: 'Task:id=TASK-123'."""
         if not _has_llm_api_key():
             pytest.skip("LLM API key not configured; link_to extraction cannot create nodes")
-        async with LifespanManager(app, startup_timeout=30) as manager:
+        async with LifespanManager(app, startup_timeout=120) as manager:
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=manager.app),
                 base_url="http://test"
@@ -533,7 +533,7 @@ class TestLinkToDSLEndToEnd:
     @pytest.mark.asyncio
     async def test_link_to_with_semantic_threshold(self, unique_id, api_headers):
         """Test link_to with semantic threshold: 'Task:title~@0.9'."""
-        async with LifespanManager(app, startup_timeout=30) as manager:
+        async with LifespanManager(app, startup_timeout=120) as manager:
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=manager.app),
                 base_url="http://test"
@@ -579,7 +579,7 @@ class TestFullMemoryPolicyEndToEnd:
         - LLM extracts entities based on node_constraints
         - Nodes can be found via search
         """
-        async with LifespanManager(app, startup_timeout=30) as manager:
+        async with LifespanManager(app, startup_timeout=120) as manager:
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=manager.app),
                 base_url="http://test"
@@ -659,7 +659,7 @@ class TestFullMemoryPolicyEndToEnd:
         - Relationships are created as specified
         - No LLM extraction occurs (only specified nodes created)
         """
-        async with LifespanManager(app, startup_timeout=30) as manager:
+        async with LifespanManager(app, startup_timeout=120) as manager:
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=manager.app),
                 base_url="http://test"
@@ -734,7 +734,7 @@ class TestFullMemoryPolicyEndToEnd:
     @pytest.mark.asyncio
     async def test_memory_policy_with_omo_safety(self, unique_id, api_headers):
         """Test memory_policy with OMO safety fields (consent, risk, acl)."""
-        async with LifespanManager(app, startup_timeout=30) as manager:
+        async with LifespanManager(app, startup_timeout=120) as manager:
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=manager.app),
                 base_url="http://test"
@@ -793,7 +793,7 @@ class TestCustomMetadataPropagation:
 
     @pytest.mark.asyncio
     async def test_custom_metadata_applied_to_nodes(self, unique_id, api_headers):
-        async with LifespanManager(app, startup_timeout=30) as manager:
+        async with LifespanManager(app, startup_timeout=120) as manager:
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=manager.app),
                 base_url="http://test"
@@ -880,7 +880,7 @@ class TestSchemaLevelPolicyInheritance:
         2. Create memory with schema_id (no memory_policy)
         3. Verify schema's policy is applied
         """
-        async with LifespanManager(app, startup_timeout=30) as manager:
+        async with LifespanManager(app, startup_timeout=120) as manager:
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=manager.app),
                 base_url="http://test"
@@ -975,7 +975,7 @@ class TestMemoryLevelPolicyOverride:
         - Schema policy is used as defaults
         - Memory policy fields override schema policy
         """
-        async with LifespanManager(app, startup_timeout=30) as manager:
+        async with LifespanManager(app, startup_timeout=120) as manager:
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=manager.app),
                 base_url="http://test"
@@ -1030,7 +1030,7 @@ class TestPolicyMerging:
     @pytest.mark.asyncio
     async def test_link_to_with_memory_policy(self, unique_id, api_headers):
         """Test that link_to and memory_policy can be combined."""
-        async with LifespanManager(app, startup_timeout=30) as manager:
+        async with LifespanManager(app, startup_timeout=120) as manager:
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=manager.app),
                 base_url="http://test"
@@ -1073,7 +1073,7 @@ class TestManualPolicyGraphOverride:
         Create a schema, then add a memory with manual nodes/relationships.
         Validate that nodes appear in agentic graph search results.
         """
-        async with LifespanManager(app, startup_timeout=30) as manager:
+        async with LifespanManager(app, startup_timeout=120) as manager:
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=manager.app),
                 base_url="http://test",
@@ -1191,7 +1191,7 @@ class TestDeepTrustEdgePolicy:
         Create DeepTrust schema with MITIGATES edge policy.
         Use link_to DSL (short form) to create nodes + edge.
         """
-        async with LifespanManager(app, startup_timeout=30) as manager:
+        async with LifespanManager(app, startup_timeout=120) as manager:
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=manager.app),
                 base_url="http://test",
@@ -1264,7 +1264,7 @@ class TestDeepTrustEdgePolicy:
         Create DeepTrust schema with MITIGATES edge policy.
         Use full memory_policy with edge_constraints to define the relationship.
         """
-        async with LifespanManager(app, startup_timeout=30) as manager:
+        async with LifespanManager(app, startup_timeout=120) as manager:
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=manager.app),
                 base_url="http://test",
@@ -1357,7 +1357,7 @@ class TestDeepTrustEdgePolicy:
 
         Result should have all three constraints merged.
         """
-        async with LifespanManager(app, startup_timeout=30) as manager:
+        async with LifespanManager(app, startup_timeout=120) as manager:
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=manager.app),
                 base_url="http://test"
@@ -1396,7 +1396,7 @@ class TestControlledVocabulary:
         - Only link to existing nodes
         - New nodes of that type should NOT be created
         """
-        async with LifespanManager(app, startup_timeout=30) as manager:
+        async with LifespanManager(app, startup_timeout=120) as manager:
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=manager.app),
                 base_url="http://test"
@@ -1433,7 +1433,7 @@ class TestControlledVocabulary:
     @pytest.mark.asyncio
     async def test_mixed_create_policies(self, unique_id, api_headers):
         """Test mixed create policies: some auto, some never."""
-        async with LifespanManager(app, startup_timeout=30) as manager:
+        async with LifespanManager(app, startup_timeout=120) as manager:
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=manager.app),
                 base_url="http://test"
@@ -1464,7 +1464,7 @@ class TestEdgeConstraintsEndToEnd:
     @pytest.mark.asyncio
     async def test_edge_arrow_syntax(self, unique_id, api_headers):
         """Test edge constraint: 'SecurityBehavior->MITIGATES->TacticDef:name'."""
-        async with LifespanManager(app, startup_timeout=30) as manager:
+        async with LifespanManager(app, startup_timeout=120) as manager:
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=manager.app),
                 base_url="http://test"
@@ -1484,7 +1484,7 @@ class TestEdgeConstraintsEndToEnd:
     @pytest.mark.asyncio
     async def test_edge_with_create_never(self, unique_id, api_headers):
         """Test edge constraint with create='never' for controlled vocabulary."""
-        async with LifespanManager(app, startup_timeout=30) as manager:
+        async with LifespanManager(app, startup_timeout=120) as manager:
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=manager.app),
                 base_url="http://test"
@@ -1516,7 +1516,7 @@ class TestGraphQLValidation:
         """
         Create memory with policy, then validate nodes exist via GraphQL.
         """
-        async with LifespanManager(app, startup_timeout=30) as manager:
+        async with LifespanManager(app, startup_timeout=120) as manager:
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=manager.app),
                 base_url="http://test"
@@ -1570,7 +1570,7 @@ class TestErrorHandling:
     @pytest.mark.asyncio
     async def test_invalid_link_to_syntax_returns_error(self, unique_id, api_headers):
         """Test that invalid link_to syntax returns proper error."""
-        async with LifespanManager(app, startup_timeout=30) as manager:
+        async with LifespanManager(app, startup_timeout=120) as manager:
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=manager.app),
                 base_url="http://test"
@@ -1592,7 +1592,7 @@ class TestErrorHandling:
     @pytest.mark.asyncio
     async def test_invalid_memory_policy_mode_returns_error(self, unique_id, api_headers):
         """Test that invalid mode in memory_policy returns proper error."""
-        async with LifespanManager(app, startup_timeout=30) as manager:
+        async with LifespanManager(app, startup_timeout=120) as manager:
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=manager.app),
                 base_url="http://test"

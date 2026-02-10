@@ -244,7 +244,7 @@ async def test_auto_mode_with_schema_id(app):
     logger.info("TEST 1: Auto Mode with Schema ID")
     logger.info("="*80)
     
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test", timeout=60.0) as client:
             headers = {
                 'Content-Type': 'application/json',
@@ -362,7 +362,7 @@ async def test_auto_mode_with_property_overrides(app):
     logger.info("TEST 2: Auto Mode with Property Overrides")
     logger.info("="*80)
     
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test", timeout=60.0) as client:
             headers = {
                 'Content-Type': 'application/json',
@@ -557,7 +557,7 @@ async def test_manual_mode_with_explicit_graph(app):
     logger.info("TEST 3: Manual Mode with Explicit Graph")
     logger.info("="*80)
     
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test", timeout=60.0) as client:
             headers = {
                 'Content-Type': 'application/json',

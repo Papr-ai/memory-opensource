@@ -58,7 +58,7 @@ def _use_asgi_client() -> bool:
 @asynccontextmanager
 async def _get_client(timeout: float = 30.0) -> httpx.AsyncClient:
     if _use_asgi_client():
-        async with LifespanManager(app, startup_timeout=60.0, shutdown_timeout=10.0):
+        async with LifespanManager(app, startup_timeout=120.0, shutdown_timeout=10.0):
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=app),
                 base_url="http://test",

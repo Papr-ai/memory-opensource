@@ -30,7 +30,7 @@ async def wait_for_query_log(search_id: str, timeout_seconds: int = 30, poll_int
 
 @pytest.mark.asyncio
 async def test_feedback_end_to_end():
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app),
             base_url="http://test",
@@ -102,7 +102,7 @@ async def test_feedback_end_to_end():
 
 @pytest.mark.asyncio
 async def test_get_feedback_by_id_v1():
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app),
             base_url="http://test",

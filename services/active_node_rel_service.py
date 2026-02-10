@@ -78,7 +78,7 @@ class ActiveNodeRelParseService:
             }
             
             headers = get_parse_headers()
-            url = f"{self.parse_server_url}/classes/{self.class_name}"
+            url = f"{self.parse_server_url}/parse/classes/{self.class_name}"
             
             # Use provided client or create new one
             if httpx_client:
@@ -211,7 +211,7 @@ class ActiveNodeRelParseService:
                     }
                 
                 params = {"where": json.dumps(where_clause), "limit": 1}
-                url = f"{self.parse_server_url}/classes/{self.class_name}"
+                url = f"{self.parse_server_url}/parse/classes/{self.class_name}"
                 
                 # Use provided client or create new one
                 if httpx_client:
@@ -225,7 +225,7 @@ class ActiveNodeRelParseService:
                     results = data.get("results", [])
                     if results:
                         object_id = results[0]["objectId"]
-                        update_url = f"{self.parse_server_url}/classes/{self.class_name}/{object_id}"
+                        update_url = f"{self.parse_server_url}/parse/classes/{self.class_name}/{object_id}"
                         
                         # Use provided client or create new one
                         if httpx_client:
@@ -242,7 +242,7 @@ class ActiveNodeRelParseService:
                             return False
             else:
                 # Create new record
-                url = f"{self.parse_server_url}/classes/{self.class_name}"
+                url = f"{self.parse_server_url}/parse/classes/{self.class_name}"
                 
                 # Use provided client or create new one
                 if httpx_client:
@@ -287,7 +287,7 @@ class ActiveNodeRelParseService:
             
             params = {"where": json.dumps(where_clause)}
             headers = get_parse_headers()
-            url = f"{self.parse_server_url}/classes/{self.class_name}"
+            url = f"{self.parse_server_url}/parse/classes/{self.class_name}"
             
             # Use provided client or create new one
             if httpx_client:
@@ -303,7 +303,7 @@ class ActiveNodeRelParseService:
                 # Delete all matching records
                 for result in results:
                     object_id = result["objectId"]
-                    delete_url = f"{self.parse_server_url}/classes/{self.class_name}/{object_id}"
+                    delete_url = f"{self.parse_server_url}/parse/classes/{self.class_name}/{object_id}"
                     
                     # Use provided client or create new one
                     if httpx_client:

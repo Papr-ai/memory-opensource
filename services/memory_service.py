@@ -160,6 +160,52 @@ async def batch_handle_incoming_memories(
             metadata['user_id'] = str(end_user_id)
             metadata['workspace_id'] = workspace_id if workspace_id is not None else None
             
+            # CRITICAL: Add organization_id and namespace_id for multi-tenant scoping
+            # These come from the AddMemoryRequest and/or its metadata
+            req_org_id = getattr(memory_request, 'organization_id', None)
+            req_ns_id = getattr(memory_request, 'namespace_id', None)
+            meta_org_id = memory_request.metadata.organization_id if memory_request.metadata and hasattr(memory_request.metadata, 'organization_id') else None
+            meta_ns_id = memory_request.metadata.namespace_id if memory_request.metadata and hasattr(memory_request.metadata, 'namespace_id') else None
+            
+            # Use request-level first, then metadata-level
+            final_org_id = req_org_id or meta_org_id or metadata.get('organization_id')
+            final_ns_id = req_ns_id or meta_ns_id or metadata.get('namespace_id')
+            
+            if final_org_id:
+                metadata['organization_id'] = str(final_org_id)
+                logger.info(f"Setting organization_id={final_org_id} on memory metadata")
+            if final_ns_id:
+                metadata['namespace_id'] = str(final_ns_id)
+                logger.info(f"Setting namespace_id={final_ns_id} on memory metadata")
+            
+            # Handle ACL for batch requests (match handle_add_memory default behavior)
+            acl_fields = [
+                'user_read_access', 'user_write_access',
+                'workspace_read_access', 'workspace_write_access',
+                'role_read_access', 'role_write_access'
+            ]
+            acl_already_set = any(metadata.get(field) for field in acl_fields)
+            if not acl_already_set:
+                acl_user_id = end_user_id if end_user_id else developer_user_id
+                if acl_user_id:
+                    metadata['user_read_access'] = [acl_user_id]
+                    metadata['user_write_access'] = [acl_user_id]
+                    logger.info(
+                        f"Setting default ACL for user: {acl_user_id} "
+                        f"(end_user_id={end_user_id}, developer_user_id={developer_user_id})"
+                    )
+                else:
+                    logger.warning(
+                        f"No valid user ID for ACL: end_user_id={end_user_id}, "
+                        f"developer_user_id={developer_user_id}"
+                    )
+                    metadata['user_read_access'] = []
+                    metadata['user_write_access'] = []
+                metadata['workspace_read_access'] = []
+                metadata['workspace_write_access'] = []
+                metadata['role_read_access'] = []
+                metadata['role_write_access'] = []
+
             # Add createdAt if not present
             if 'createdAt' not in metadata:
                 from datetime import datetime, timezone
@@ -499,8 +545,18 @@ async def handle_incoming_memory(
                 metadata[field] = merge_acl_lists(metadata.get(field), acl.get(field) if acl else [])
         elif not acl_already_set:
             # If no ACLs at all, set to private
-            metadata['user_read_access'] = [end_user_id]
-            metadata['user_write_access'] = [end_user_id]
+            # Use end_user_id if available, otherwise fall back to developer_user_id
+            # This ensures the creator (either end user or developer) has access to the memory
+            acl_user_id = end_user_id if end_user_id else developer_user_id
+            if acl_user_id:
+                metadata['user_read_access'] = [acl_user_id]
+                metadata['user_write_access'] = [acl_user_id]
+                logger.info(f"Setting default ACL for user: {acl_user_id} (end_user_id={end_user_id}, developer_user_id={developer_user_id})")
+            else:
+                # No valid user ID available - log warning but don't set empty ACL
+                logger.warning(f"No valid user ID for ACL: end_user_id={end_user_id}, developer_user_id={developer_user_id}")
+                metadata['user_read_access'] = []
+                metadata['user_write_access'] = []
             metadata['workspace_read_access'] = []
             metadata['workspace_write_access'] = []
             metadata['role_read_access'] = []

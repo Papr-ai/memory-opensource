@@ -498,7 +498,7 @@ async def get_or_create_chat_session(session_id: str, user_id: str, workspace_id
 
         async with httpx.AsyncClient() as client:
             response = await client.get(
-                f"{url}/parse/classes/Chat",
+                f"{url}/classes/Chat",
                 headers=headers,
                 params=query_params
             )
@@ -548,7 +548,7 @@ async def get_or_create_chat_session(session_id: str, user_id: str, workspace_id
 
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                f"{url}/parse/classes/Chat",
+                f"{url}/classes/Chat",
                 headers=headers,
                 json=chat_data
             )
@@ -594,7 +594,7 @@ async def update_chat_message_count(session_id: str, user_id: str, increment: in
 
         async with httpx.AsyncClient() as client:
             response = await client.put(
-                f"{url}/parse/classes/Chat/{chat['objectId']}",
+                f"{url}/classes/Chat/{chat['objectId']}",
                 headers=headers,
                 json=update_data
             )
@@ -644,7 +644,7 @@ async def get_previous_chat_needing_processing(user_id: str, current_session_id:
 
         async with httpx.AsyncClient() as client:
             response = await client.get(
-                f"{url}/parse/classes/Chat",
+                f"{url}/classes/Chat",
                 headers=headers,
                 params=query_params
             )

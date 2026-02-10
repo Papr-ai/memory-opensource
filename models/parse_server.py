@@ -1419,10 +1419,19 @@ class TierLimits(TypedDict):
     enterprise: InteractionLimits
 
 class SystemUpdateStatus(BaseModel):
-    """Status of update operation for each system"""
+    """Status of update operation for each system.
+    
+    Note: 'pinecone' field is used for vector store status (Pinecone or Qdrant).
+    The 'vector_store' property provides a vendor-neutral alias.
+    """
     pinecone: bool = False
     neo4j: bool = False
     parse: bool = False
+
+    @property
+    def vector_store(self) -> bool:
+        """Vendor-neutral alias for the vector store update status (pinecone/qdrant)."""
+        return self.pinecone
 
 class UpdateMemoryItem(BaseModel):
     """Model for a single updated memory item"""

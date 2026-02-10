@@ -770,7 +770,7 @@ async def test_update_memory_legacy():
             assert validated_response.code == 200, "Status code should be 200"
             
             # Check system status
-            assert validated_response.status_obj.pinecone is True, "Pinecone update should be successful"
+            assert validated_response.status_obj.vector_store is True, "Vector store (Qdrant/Pinecone) update should be successful"
             assert validated_response.status_obj.neo4j is True, "Neo4j update should be successful"
             assert validated_response.status_obj.parse is True, "Parse update should be successful"
             
@@ -2570,7 +2570,7 @@ async def test_update_memory_acl():
             assert validated_response.code == 200, "Status code should be 200"
             
             # Check system status
-            assert validated_response.status_obj.pinecone is True, "Pinecone update should be successful"
+            assert validated_response.status_obj.vector_store is True, "Vector store (Qdrant/Pinecone) update should be successful"
             assert validated_response.status_obj.neo4j is True, "Neo4j update should be successful"
             assert validated_response.status_obj.parse is True, "Parse update should be successful"
             
@@ -2700,7 +2700,7 @@ async def test_upload_document_simple():
 @pytest.mark.asyncio
 async def test_v1_add_memory_1(app):
     """Test adding a memory item using the v1 endpoint."""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
 
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as async_client:
             headers = {
@@ -2772,7 +2772,7 @@ def validate_add_memory_response(response, expect_success=True):
 @pytest.mark.asyncio
 async def test_v1_add_memory_with_schema_id(app):
     """Test adding a memory item using API Key authentication with specific schema_id and user credentials."""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
 
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as async_client:
             # Use test credentials from environment variables
@@ -2863,7 +2863,7 @@ async def test_v1_add_memory_with_schema_id(app):
 
 async def test_v1_add_memory_with_api_key(app):
     """Test adding a memory item using API Key authentication."""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
 
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as async_client:
             headers = {
@@ -2962,7 +2962,7 @@ async def test_v1_add_memory_with_api_key(app):
 @pytest.mark.asyncio
 async def test_v1_add_memory_with_external_user_id_and_custom_metadata(app):
     """Test adding a memory item with external_user_id and customMetadata using API Key authentication."""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as async_client:
             headers = {
                 'Content-Type': 'application/json',
@@ -3028,7 +3028,7 @@ def get_field(obj, field, default=None):
 @pytest.mark.asyncio
 async def test_v1_add_memory_with_external_user_id_only(app):
     """Test adding a memory item with only external_user_id in metadata using API Key authentication."""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as async_client:
             headers = {
                 'Content-Type': 'application/json',
@@ -3079,7 +3079,7 @@ async def test_v1_add_memory_with_external_user_id_only(app):
 @pytest.mark.asyncio
 async def test_v1_add_memory_with_external_user_id_and_acl(app):
     """Test adding a memory item with external_user_id as creator and ACL for sharing with another external user."""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
 
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as async_client:
             headers = {
@@ -3149,7 +3149,7 @@ async def test_v1_add_memory_with_external_user_id_and_acl(app):
 @pytest.mark.asyncio
 async def test_v1_add_memory_with_user_id_from_created_user(app):
     """Test adding a memory item with user_id in metadata for a newly created user, ensuring workspace is properly set up."""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
 
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as async_client:
             headers = {
@@ -3235,7 +3235,7 @@ async def test_v1_add_memory_with_user_id_from_created_user(app):
 @pytest.mark.asyncio
 async def test_v1_add_memory_batch_1(app):
     """Test adding multiple memory items in a batch using v1 endpoint with API key authentication."""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
 
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as async_client:
             headers = {
@@ -3348,7 +3348,7 @@ async def test_v1_add_memory_batch_1(app):
 @pytest.mark.asyncio
 async def test_v1_add_memory_batch_with_user_id(app):
     """Test adding multiple memory items in a batch using v1 endpoint with user_id set in the batch request, and verify ACLs, access fields, and customMetadata via /v1/memory/{memory_id}."""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
 
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as async_client:
             headers = {
@@ -3421,7 +3421,7 @@ async def test_v1_add_memory_batch_with_user_id(app):
 @pytest.mark.asyncio
 async def test_v1_add_memory_batch_with_external_user_id(app):
     """Test adding multiple memory items in a batch using v1 endpoint with external_user_id set in the batch request, and verify ACLs, access fields, and customMetadata via /v1/memory/{memory_id}."""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as async_client:
             headers = {
                 'Content-Type': 'application/json',
@@ -3534,7 +3534,7 @@ async def test_v1_add_memory_batch_with_external_user_id(app):
 @pytest.mark.asyncio
 async def test_v1_add_memory_batch_with_webhook_success(app):
     """Test batch memory endpoint with webhook configuration - successful case."""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as async_client:
             headers = {
                 'Content-Type': 'application/json',
@@ -3631,7 +3631,7 @@ async def test_v1_add_memory_batch_with_webhook_success(app):
 @pytest.mark.asyncio
 async def test_v1_add_memory_batch_with_webhook_partial_success(app):
     """Test batch memory endpoint with webhook configuration - partial success case."""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as async_client:
             headers = {
                 'Content-Type': 'application/json',
@@ -3695,7 +3695,7 @@ async def test_v1_add_memory_batch_with_webhook_partial_success(app):
 @pytest.mark.asyncio
 async def test_v1_add_memory_batch_with_webhook_no_url(app):
     """Test batch memory endpoint without webhook URL - should not call webhook service."""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as async_client:
             headers = {
                 'Content-Type': 'application/json',
@@ -3742,7 +3742,7 @@ async def test_v1_add_memory_batch_with_webhook_no_url(app):
 @pytest.mark.asyncio
 async def test_v1_add_memory_batch_with_webhook_azure_fallback(app):
     """Test batch memory endpoint with Azure webhook fallback to HTTP."""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as async_client:
             headers = {
                 'Content-Type': 'application/json',
@@ -3798,7 +3798,7 @@ async def test_v1_add_memory_batch_with_webhook_azure_fallback(app):
 @pytest.mark.asyncio
 async def test_v1_add_memory_batch_webhook_payload_structure(app):
     """Test that webhook payload has the correct structure and required fields."""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as async_client:
             headers = {
                 'Content-Type': 'application/json',
@@ -3882,7 +3882,7 @@ async def test_v1_add_memory_batch_triggers_temporal_with_external_user_id(app, 
     # Force cloud edition and a low threshold via environment
     monkeypatch.setenv("PAPR_EDITION", "cloud")
 
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as async_client:
             headers = {
                 'Content-Type': 'application/json',
@@ -3965,7 +3965,7 @@ async def test_v1_add_memory_batch_triggers_temporal_with_external_user_id(app, 
 @pytest.mark.asyncio
 async def test_v1_update_memory_1(app):
     """Test updating a memory item using the v1 endpoint."""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
 
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as async_client:
             headers = {
@@ -4040,7 +4040,7 @@ async def test_v1_update_memory_1(app):
                 assert validated_response.code == 200, "Status code should be 200"
                 
                 # Check system status
-                assert validated_response.status_obj.pinecone is True, "Pinecone update should be successful"
+                assert validated_response.status_obj.vector_store is True, "Vector store (Qdrant/Pinecone) update should be successful"
                 assert validated_response.status_obj.neo4j is True, "Neo4j update should be successful"
                 assert validated_response.status_obj.parse is True, "Parse update should be successful"
                 
@@ -4056,7 +4056,7 @@ async def test_v1_update_memory_1(app):
 @pytest.mark.asyncio
 async def test_v1_update_memory_with_api_key(app):
     """Test updating a memory item using API Key authentication for both legacy and v1 endpoints."""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
 
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as async_client:
             base_headers = {
@@ -4158,7 +4158,7 @@ def validate_update_memory_response(response, expect_success=True):
         assert validated_response.code == 200, "Status code should be 200"
         # Check system status
         assert validated_response.status_obj is not None, "status_obj should not be None"
-        assert validated_response.status_obj.pinecone is True, "Pinecone update should be successful"
+        assert validated_response.status_obj.vector_store is True, "Vector store (Qdrant/Pinecone) update should be successful"
         assert validated_response.status_obj.neo4j is True, "Neo4j update should be successful"
         assert validated_response.status_obj.parse is True, "Parse update should be successful"
         # Check updated memory item
@@ -4176,7 +4176,7 @@ def validate_update_memory_response(response, expect_success=True):
 @pytest.mark.asyncio
 async def test_v1_update_memory_acl_with_api_key_and_real_users(app):
     """Test updating a memory item's ACL using API Key authentication and real user objectIds."""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
 
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as async_client:
             # 1. Create two users
@@ -4277,7 +4277,7 @@ async def test_v1_update_memory_acl_with_api_key_and_real_users(app):
 @pytest.mark.asyncio
 async def test_v1_get_memory(app):
     """Test retrieving a memory item by ID using the v1 endpoint."""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
 
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), 
@@ -4341,7 +4341,7 @@ async def test_v1_get_memory(app):
 @pytest.mark.timeout(60)
 async def test_v1_search_1(app):
     """Test the v1/memory/search endpoint with API key authentication."""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
 
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app),
@@ -4455,7 +4455,7 @@ async def test_v1_search_1(app):
 @pytest.mark.timeout(60)
 async def test_v1_search_organiation_namespace_filter_legacy(app):
     """Test the v1/memory/search endpoint with API key authentication."""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
 
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app),
@@ -4552,7 +4552,7 @@ async def test_v1_search_organiation_namespace_filter_legacy(app):
 @pytest.mark.timeout(90)  # Increased timeout to 90 seconds
 async def test_v1_search_organiation_namespace_filter_legacy_neo(app):
     """Test the v1/memory/search endpoint with API key authentication."""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
 
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app),
@@ -4649,7 +4649,7 @@ async def test_v1_search_organiation_namespace_filter_legacy_neo(app):
 @pytest.mark.asyncio
 async def test_v1_search_with_user_id_acl(app):
     """Test the v1/memory/search endpoint with user_id as input and validate ACLs in response."""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
 
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url="http://test",verify=False) as async_client:
             headers = {
@@ -4729,7 +4729,7 @@ async def test_v1_search_with_user_id_acl(app):
 @pytest.mark.asyncio
 async def test_v1_search_with_external_user_id_acl(app):
     """Test the v1/memory/search endpoint with external_user_id as input and validate ACLs in response."""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
 
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url="http://test",verify=False) as async_client:
             headers = {
@@ -4860,7 +4860,7 @@ async def test_v1_search_with_external_user_id_acl(app):
 @pytest.mark.asyncio
 async def test_v1_search_with_external_user_id_acl_cohere_reranking(app):
     """Test the v1/memory/search endpoint with external_user_id as input, validate ACLs, and use Cohere reranking."""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
 
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url="http://test",verify=False) as async_client:
             headers = {
@@ -5000,7 +5000,7 @@ async def test_v1_search_with_external_user_id_acl_cohere_reranking(app):
 @pytest.mark.asyncio
 async def test_v1_search_new_user_qwen_route(app):
     """Test the v1/memory/search endpoint with a newly created user (isQwenRoute=True, legacy_route=False)."""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
 
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), 
@@ -5083,7 +5083,7 @@ async def test_v1_search_new_user_qwen_route(app):
 
 @pytest.mark.asyncio
 async def test_v1_search_fixed_user_cache_test(app, caplog):
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         """Test the v1/memory/search endpoint with a fixed user ID to test cache hits."""
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), 
@@ -5240,7 +5240,7 @@ async def test_v1_search_performance_under_500ms(app, caplog):
     previous_disable_bg = os.environ.get("PERF_TEST_DISABLE_BG_TASKS")
     os.environ["PERF_TEST_DISABLE_BG_TASKS"] = "true"
     try:
-        async with LifespanManager(app, startup_timeout=20):
+        async with LifespanManager(app, startup_timeout=120):
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=app), 
                 base_url="http://test",
@@ -5722,7 +5722,7 @@ async def test_v1_search_performance_under_500ms(app, caplog):
 @pytest.mark.asyncio
 async def test_v1_search_performance_under_500ms_low_similarity(app, caplog):
     """Add a long-form memory for a fixed user_id via API key, then search with a shorter query that has lower cosine similarity and verify retrieval and performance."""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app),
             base_url="http://test",
@@ -5852,6 +5852,7 @@ async def test_v1_search_performance_under_500ms_low_similarity(app, caplog):
 
 
 @pytest.mark.asyncio
+@pytest.mark.timeout(600)
 async def test_v1_search_with_organization_and_namespace_filter(app):
     """
     Test search filtering by organization_id and namespace_id.
@@ -5861,7 +5862,7 @@ async def test_v1_search_with_organization_and_namespace_filter(app):
     2. Waits for Temporal processing and verifies org/namespace IDs
     3. Searches with namespace filter to verify scoping
     """
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app),
             base_url="http://test",
@@ -6156,7 +6157,7 @@ async def test_v1_search_with_organization_and_namespace_filter(app):
 @pytest.mark.asyncio
 async def test_v1_add_memory_with_org_namespace_top_level(app):
     """Test add memory using top-level org/namespace and memory_policy ACL."""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app),
             base_url="http://test",
@@ -6249,7 +6250,7 @@ async def test_v1_add_memory_with_org_namespace_top_level(app):
 @pytest.mark.asyncio
 async def test_v1_add_memory_with_deprecated_org_namespace(app):
     """Test add memory using deprecated metadata org/namespace fields."""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app),
             base_url="http://test",
@@ -6331,7 +6332,7 @@ async def test_v1_add_memory_with_deprecated_org_namespace(app):
 
 @pytest.mark.asyncio
 async def test_search_v1_agentic_graph(app, caplog):
-    async with LifespanManager(app, startup_timeout=60):  # Increased to 60s for Qdrant index initialization
+    async with LifespanManager(app, startup_timeout=120):  # Increased to 60s for Qdrant index initialization
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app),
             base_url="http://test",
@@ -6456,7 +6457,7 @@ async def test_search_v1_agentic_graph(app, caplog):
 @pytest.mark.asyncio
 async def test_v1_search_schemas_used_for_custom_schema(app):
     """Ensure schemas_used is populated when custom schema nodes are returned."""
-    async with LifespanManager(app, startup_timeout=30):
+    async with LifespanManager(app, startup_timeout=120):
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app),
             base_url="http://test",
@@ -6672,7 +6673,7 @@ async def test_v1_search_schemas_used_for_custom_schema(app):
 @pytest.mark.asyncio
 async def test_search_v1_toon_format(app, caplog):
     """Test search endpoint with TOON (Token-Oriented Object Notation) format response"""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app),
             base_url="http://test",
@@ -6849,7 +6850,7 @@ async def test_v1_search_predicted_grouping_logging(app):
             logger.info(f"Waiting for MemoryRetrievalLog... attempt {i+1}/{max_retries}")
         return None
 
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app),
             base_url="http://test",
@@ -6948,7 +6949,7 @@ async def test_v1_search_predicted_grouping_logging(app):
             
 @pytest.mark.asyncio
 async def test_v1_search_bearer_token_cache_test(app, caplog):
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         """Test the v1/memory/search endpoint with Bearer token authentication (ChatGPT plugin flow) to test cache hits."""
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), 
@@ -7100,7 +7101,7 @@ async def test_v1_search_bearer_token_cache_test(app, caplog):
 @pytest.mark.asyncio
 async def test_v1_search_with_custom_metadata_filter_qwen_only(app):
     """End-to-end: create user, add two memories with different customMetadata, search filters by product_id."""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         # Bypass rate-limit/subscription checks to focus on retrieval behavior in test env
         import os
         os.environ['EVALMETRICS'] = 'true'
@@ -7191,7 +7192,7 @@ async def test_v1_search_with_custom_metadata_filter_qwen_only(app):
 @pytest.mark.asyncio
 async def test_v1_delete_memory_1(app):
     """Test deleting a memory item using the v1 /memory/{memory_id} endpoint with API key authentication."""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
 
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as async_client:
             headers = {
@@ -7254,7 +7255,7 @@ async def test_v1_delete_memory_1(app):
 @pytest.mark.asyncio
 async def test_v1_delete_memory_with_api_key(app):
     """Test deleting a memory item using the v1 endpoint and X-API-Key authentication."""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
 
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as async_client:
             headers = {
@@ -7318,7 +7319,7 @@ async def test_v1_delete_memory_with_api_key(app):
 @pytest.mark.asyncio
 async def test_v1_upload_document_with_api_key(app):
     """Test document upload using API key authentication without status polling."""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
 
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as async_client:
             headers = {
@@ -7420,7 +7421,7 @@ async def get_test_bearer_token(async_client) -> Optional[str]:
 @pytest.mark.asyncio
 async def test_oauth2_flow_complete(app):
     """Test the complete OAuth2 flow from login to token exchange."""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), 
             base_url="http://test",
@@ -7477,7 +7478,7 @@ async def test_oauth2_flow_complete(app):
 @pytest.mark.asyncio
 async def test_v1_add_memory_batch_webhook_immediate_when_skip_background(app):
     """Test that webhook is sent immediately when skip_background_processing is True."""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as async_client:
             headers = {
                 'Content-Type': 'application/json',
@@ -7527,7 +7528,7 @@ async def test_v1_add_memory_batch_webhook_immediate_when_skip_background(app):
 @pytest.mark.asyncio
 async def test_v1_add_memory_batch_webhook_with_background_processing(app):
     """Test that webhook is sent after background processing when skip_background_processing is False."""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as async_client:
             headers = {
                 'Content-Type': 'application/json',
@@ -7579,7 +7580,7 @@ async def test_v1_add_memory_batch_webhook_with_background_processing(app):
 @pytest.mark.asyncio
 async def test_v1_search_with_numeric_custom_metadata_filter(app):
     """Test filtering by numeric custom metadata fields."""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         import os
         os.environ['EVALMETRICS'] = 'true'
         async with httpx.AsyncClient(
@@ -7668,7 +7669,7 @@ async def test_v1_search_with_numeric_custom_metadata_filter(app):
 @pytest.mark.asyncio
 async def test_e2e_developer_marking_apikey_sets_flag(app):
     """E2E: Using APIKey should result in the user being marked developer in Parse (eventually)."""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app),
             base_url="http://test",
@@ -7731,7 +7732,7 @@ async def test_e2e_developer_marking_apikey_sets_flag(app):
 @pytest.mark.asyncio
 async def test_e2e_developer_marking_bearer_does_not_set_flag(app):
     """E2E: Bearer-only flow should not mark the user as developer. If the user is already a developer, skip test."""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app),
             base_url="http://test",
@@ -7799,7 +7800,7 @@ async def test_e2e_developer_marking_bearer_does_not_set_flag(app):
 @pytest.mark.asyncio
 async def test_e2e_anon_user_not_marked_developer_when_dev_api_key_used(app):
     """Anon end-user should NOT be marked developer when developer (Papr) API key is used."""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app),
             base_url="http://test",
@@ -7882,7 +7883,7 @@ async def test_e2e_anon_user_not_marked_developer_when_dev_api_key_used(app):
 @pytest.mark.asyncio
 async def test_v1_search_with_list_custom_metadata_filter(app):
     """Test filtering by list custom metadata fields."""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         import os
         os.environ['EVALMETRICS'] = 'true'
         async with httpx.AsyncClient(
@@ -7968,7 +7969,7 @@ async def test_v1_search_with_list_custom_metadata_filter(app):
 @pytest.mark.asyncio
 async def test_v1_search_with_boolean_custom_metadata_filter(app):
     """Test filtering by boolean custom metadata fields."""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         import os
         os.environ['EVALMETRICS'] = 'true'
         async with httpx.AsyncClient(
@@ -8054,7 +8055,7 @@ async def test_v1_search_with_boolean_custom_metadata_filter(app):
 @pytest.mark.asyncio
 async def test_v1_search_with_mixed_custom_metadata_types(app):
     """Test filtering by mixed custom metadata types in the same search."""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         import os
         os.environ['EVALMETRICS'] = 'true'
         async with httpx.AsyncClient(

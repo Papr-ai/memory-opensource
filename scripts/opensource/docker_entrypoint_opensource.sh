@@ -14,15 +14,13 @@ set -e
 echo "🚀 Papr Memory Open Source - Starting..."
 echo "=========================================="
 
-# Wait for Neo4j to be ready
+# Wait for Neo4j to be ready (HTTP endpoint check)
 echo "⏳ Waiting for Neo4j to be ready..."
 max_attempts=30
 attempt=0
 
 while [ $attempt -lt $max_attempts ]; do
-    if cypher-shell -u "${NEO4J_USERNAME:-neo4j}" -p "${NEO4J_PASSWORD:-password}" \
-        -a "${NEO4J_URL:-bolt://neo4j:7687}" \
-        "RETURN 1" > /dev/null 2>&1; then
+    if curl -s -f "http://neo4j:7474" > /dev/null 2>&1; then
         echo "✅ Neo4j is ready!"
         break
     fi
@@ -91,34 +89,21 @@ while [ $attempt -lt $max_attempts ]; do
     sleep 2
 done
 
-# Check if this is first run (no users exist)
+# Initialize Parse schemas (idempotent - safe to run multiple times)
 echo ""
-echo "🔍 Checking if Parse schemas are initialized..."
+echo "🔍 Initializing Parse schemas..."
+echo ""
 
-# Check if Organization class exists (custom class that we create)
-schema_check=$(curl -s \
-    -H "X-Parse-Application-Id: ${PARSE_APPLICATION_ID}" \
-    -H "X-Parse-Master-Key: ${PARSE_MASTER_KEY}" \
-    "${PARSE_SERVER_URL}/schemas/Organization" 2>/dev/null | \
-    python3 -c "import sys, json; data = json.load(sys.stdin); print('exists' if 'className' in data else 'missing')" 2>/dev/null || echo "missing")
+cd /app
+python3 scripts/opensource/init_parse_schema_opensource.py \
+    --parse-url "${PARSE_SERVER_URL}" \
+    --app-id "${PARSE_APPLICATION_ID}" \
+    --master-key "${PARSE_MASTER_KEY}" || {
+    echo "⚠️  Schema initialization failed - continuing anyway"
+}
 
-if [ "$schema_check" = "missing" ]; then
-    echo "📋 Schemas not initialized - running schema initialization..."
-    echo ""
-
-    cd /app
-    python3 scripts/opensource/init_parse_schema_opensource.py \
-        --parse-url "${PARSE_SERVER_URL}" \
-        --app-id "${PARSE_APPLICATION_ID}" \
-        --master-key "${PARSE_MASTER_KEY}" || {
-        echo "⚠️  Schema initialization failed - continuing anyway"
-    }
-
-    echo ""
-else
-    echo "✅ Parse schemas already initialized"
-fi
-
+echo ""
+echo "✅ Parse schema initialization complete"
 echo ""
 echo "🔍 Checking if this is first run..."
 
@@ -153,6 +138,10 @@ if [ "$user_count" = "0" ]; then
         echo "❌ Failed to create default user"
         echo "⚠️  Starting anyway - you can run bootstrap manually"
     }
+
+    echo ""
+    echo "📝 Test credentials have been written to .env.opensource"
+    echo ""
 
     # Write API key to generated env file
     cat > /app/.env.generated << EOF

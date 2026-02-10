@@ -33,7 +33,14 @@ from services.memory_management import (
     get_query_log_retrieved_memories_async,
 )
 from services.memory_management import get_memory_retrieval_log_by_query_log_id_async
-from cloud_scripts.backfill_memory_counters import backfill_retrieval_counters
+
+# Cloud-only import - make it optional for open source edition
+try:
+    from cloud_scripts.backfill_memory_counters import backfill_retrieval_counters
+except ImportError:
+    # Open source edition - backfill_retrieval_counters not available
+    backfill_retrieval_counters = None
+
 import math
 
 # Create a logger instance for this module
@@ -61,7 +68,7 @@ def test_app():
 @pytest.fixture
 async def async_client(test_app):
     """Create an async test client with explicit lifespan manager."""
-    async with LifespanManager(test_app, startup_timeout=30):
+    async with LifespanManager(test_app, startup_timeout=120):
         transport = httpx.ASGITransport(app=test_app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
             yield client
@@ -1372,6 +1379,7 @@ if __name__ == "__main__":
     pytest.main(["-v", __file__])
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(backfill_retrieval_counters is None, reason="Cloud-only feature - backfill_retrieval_counters not available in open source")
 async def test_backfill_retrieval_counters_small_batch(async_client: httpx.AsyncClient):
     """Run a small backfill over up to 10 logs and assert at least one Memory counter updates."""
     import asyncio

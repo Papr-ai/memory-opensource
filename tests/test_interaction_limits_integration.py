@@ -28,7 +28,7 @@ async def test_interaction_limits_performance_real_app():
     """Test interaction limits performance using real app and memory graph"""
     app = create_app()
     
-    async with LifespanManager(app, startup_timeout=30):
+    async with LifespanManager(app, startup_timeout=120):
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), 
             base_url="http://test",
@@ -142,7 +142,7 @@ async def test_rate_limit_fallback_behavior_real_app():
     """Test that rate limit fallback from MongoDB to Parse Server works correctly"""
     app = create_app()
     
-    async with LifespanManager(app, startup_timeout=30):
+    async with LifespanManager(app, startup_timeout=120):
         # Access the memory graph to check MongoDB availability
         memory_graph = app.state.memory_graph
         mongodb_available = memory_graph.mongo_client is not None

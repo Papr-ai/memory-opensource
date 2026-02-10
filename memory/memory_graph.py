@@ -685,15 +685,26 @@ class MemoryGraph:
                     )
                     logger.info(f"Qdrant client initialized without API key (open-source mode): {qdrant_url}")
             
-            # Set collection name based on environment variables
-            if env.get("QDRANT_COLLECTION_QWEN4B"):
-                self.qdrant_collection = env.get("QDRANT_COLLECTION_QWEN4B")
-                logger.info(f"Qdrant collection set to: {self.qdrant_collection}")
-            elif env.get("QDRANT_COLLECTION_QWEN0pt6B"):
-                self.qdrant_collection = env.get("QDRANT_COLLECTION_QWEN0pt6B")
-                logger.info(f"Qdrant collection set to: {self.qdrant_collection}")
+            # Set collection name based on embedding dimensions
+            # Auto-select the correct collection based on LOCAL_EMBEDDING_DIMENSIONS
+            embedding_dimensions = int(env.get("LOCAL_EMBEDDING_DIMENSIONS", "1024"))
+            if embedding_dimensions == 1024:
+                # Using 0.6B model - use Qwen0pt6B collection
+                self.qdrant_collection = env.get("QDRANT_COLLECTION_QWEN0pt6B", "Qwen0pt6B")
+                logger.info(f"Qdrant collection set to: {self.qdrant_collection} (1024 dimensions)")
+            elif embedding_dimensions == 2560:
+                # Using 4B model - use Qwen4B collection
+                self.qdrant_collection = env.get("QDRANT_COLLECTION_QWEN4B", "Qwen4B")
+                logger.info(f"Qdrant collection set to: {self.qdrant_collection} (2560 dimensions)")
             else:
-                logger.warning("No Qdrant collection environment variable found")
+                # Fallback to old behavior if unexpected dimension
+                logger.warning(f"Unexpected LOCAL_EMBEDDING_DIMENSIONS: {embedding_dimensions}")
+                if env.get("QDRANT_COLLECTION_QWEN4B"):
+                    self.qdrant_collection = env.get("QDRANT_COLLECTION_QWEN4B")
+                elif env.get("QDRANT_COLLECTION_QWEN0pt6B"):
+                    self.qdrant_collection = env.get("QDRANT_COLLECTION_QWEN0pt6B")
+                else:
+                    logger.error("No Qdrant collection environment variable found")
         else:
             logger.warning("QDRANT_URL not set - Qdrant client will not be initialized")
         
@@ -1098,15 +1109,22 @@ class MemoryGraph:
             if self.qdrant_client and not self.qdrant_indexes_created:
                 logger.info("Initializing Qdrant indexes")
                 
-                # Ensure collection name is set
+                # Ensure collection name is set based on embedding dimensions
                 if not self.qdrant_collection:
-                    if env.get("QDRANT_COLLECTION_QWEN4B"):
-                        self.qdrant_collection = env.get("QDRANT_COLLECTION_QWEN4B")
-                    elif env.get("QDRANT_COLLECTION_QWEN0pt6B"):
-                        self.qdrant_collection = env.get("QDRANT_COLLECTION_QWEN0pt6B")
+                    embedding_dimensions = int(env.get("LOCAL_EMBEDDING_DIMENSIONS", "1024"))
+                    if embedding_dimensions == 1024:
+                        self.qdrant_collection = env.get("QDRANT_COLLECTION_QWEN0pt6B", "Qwen0pt6B")
+                    elif embedding_dimensions == 2560:
+                        self.qdrant_collection = env.get("QDRANT_COLLECTION_QWEN4B", "Qwen4B")
                     else:
-                        logger.error("No Qdrant collection environment variable found")
-                        return
+                        # Fallback to old behavior
+                        if env.get("QDRANT_COLLECTION_QWEN4B"):
+                            self.qdrant_collection = env.get("QDRANT_COLLECTION_QWEN4B")
+                        elif env.get("QDRANT_COLLECTION_QWEN0pt6B"):
+                            self.qdrant_collection = env.get("QDRANT_COLLECTION_QWEN0pt6B")
+                        else:
+                            logger.error("No Qdrant collection environment variable found")
+                            return
                 
                 logger.info(f"Using Qdrant collection: {self.qdrant_collection}")
 

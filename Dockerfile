@@ -23,7 +23,7 @@ RUN apt-get install -y --no-install-recommends \
 
 # Upgrade pip and install poetry
 RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir poetry==1.8.5
+    && pip install --no-cache-dir poetry==2.1.3
 
 # Copy only pyproject.toml and poetry.lock first
 COPY pyproject.toml poetry.lock ./

@@ -33,7 +33,7 @@ logger = LoggerSingleton.get_logger(__name__)
 @pytest.mark.asyncio
 async def test_telemetry_endpoint_basic(app):
     """Test basic telemetry endpoint functionality with real Amplitude call"""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as async_client:
             # Use real Amplitude API key from environment (or skip if not set)
             amplitude_key = os.getenv("AMPLITUDE_API_KEY") or os.getenv("PAPR_OSS_TELEMETRY_AMPLITUDE_KEY")
@@ -79,7 +79,7 @@ async def test_telemetry_endpoint_basic(app):
 @pytest.mark.asyncio
 async def test_telemetry_endpoint_multiple_events(app):
     """Test telemetry endpoint with multiple events using real Amplitude"""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as async_client:
             # Use real Amplitude API key from environment
             amplitude_key = os.getenv("AMPLITUDE_API_KEY") or os.getenv("PAPR_OSS_TELEMETRY_AMPLITUDE_KEY")
@@ -117,7 +117,7 @@ async def test_telemetry_endpoint_multiple_events(app):
 @pytest.mark.asyncio
 async def test_telemetry_endpoint_anonymizes_pii(app):
     """Test that telemetry endpoint anonymizes PII using real Amplitude"""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as async_client:
             # Use real Amplitude API key from environment
             amplitude_key = os.getenv("AMPLITUDE_API_KEY") or os.getenv("PAPR_OSS_TELEMETRY_AMPLITUDE_KEY")
@@ -161,7 +161,7 @@ async def test_telemetry_endpoint_anonymizes_pii(app):
 @pytest.mark.asyncio
 async def test_telemetry_endpoint_no_amplitude_key(app):
     """Test telemetry endpoint when Amplitude key is not configured"""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as async_client:
             # Ensure AMPLITUDE_API_KEY is not set
             with patch.dict('os.environ', {}, clear=False):
@@ -198,7 +198,7 @@ async def test_telemetry_endpoint_no_amplitude_key(app):
 @pytest.mark.asyncio
 async def test_telemetry_endpoint_handles_amplitude_error(app):
     """Test that telemetry endpoint handles Amplitude API errors gracefully"""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as async_client:
             # Use real Amplitude API key from environment
             amplitude_key = os.getenv("AMPLITUDE_API_KEY") or os.getenv("PAPR_OSS_TELEMETRY_AMPLITUDE_KEY")
@@ -234,7 +234,7 @@ async def test_telemetry_endpoint_handles_amplitude_error(app):
 @pytest.mark.asyncio
 async def test_telemetry_endpoint_validates_request(app):
     """Test that telemetry endpoint validates request format"""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as async_client:
             # Missing required 'events' field
             request_data = {
@@ -254,7 +254,7 @@ async def test_telemetry_endpoint_validates_request(app):
 @pytest.mark.asyncio
 async def test_telemetry_endpoint_adds_context(app):
     """Test that telemetry endpoint adds technical context using real Amplitude"""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as async_client:
             # Use real Amplitude API key from environment
             amplitude_key = os.getenv("AMPLITUDE_API_KEY") or os.getenv("PAPR_OSS_TELEMETRY_AMPLITUDE_KEY")

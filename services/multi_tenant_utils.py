@@ -250,10 +250,20 @@ def apply_multi_tenant_scoping_to_batch_request(
         batch_request.namespace_id = auth_context['namespace_id']
         logger.info(f"Applied namespace scoping from auth: {auth_context['namespace_id']}")
 
-    # Apply scoping to each memory in the batch
+    # Create an enhanced context that includes both auth context AND batch-level IDs
+    # This allows top-level batch org/namespace to propagate to individual memories
+    enhanced_context = dict(auth_context)
+    if batch_request.organization_id is not None and enhanced_context.get('organization_id') is None:
+        enhanced_context['organization_id'] = batch_request.organization_id
+        logger.info(f"Propagating batch-level organization_id to memories: {batch_request.organization_id}")
+    if batch_request.namespace_id is not None and enhanced_context.get('namespace_id') is None:
+        enhanced_context['namespace_id'] = batch_request.namespace_id
+        logger.info(f"Propagating batch-level namespace_id to memories: {batch_request.namespace_id}")
+
+    # Apply scoping to each memory in the batch using enhanced context
     for memory_request in batch_request.memories:
         # Use the utility function to apply scoping to each individual memory
-        apply_multi_tenant_scoping_to_memory_request(memory_request, auth_context)
+        apply_multi_tenant_scoping_to_memory_request(memory_request, enhanced_context)
 
 def apply_multi_tenant_scoping_to_update_request(
     update_request: UpdateMemoryRequest,
