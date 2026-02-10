@@ -21,12 +21,14 @@ class ActiveNodeRelParseService:
     """Parse server operations for ActiveNodeRel caching"""
     
     def __init__(self, parse_server_url: str, application_id: str, master_key: str):
-        # Normalize base URL: ensure scheme and /parse suffix
-        url = (parse_server_url or "").strip()
+        # Normalize base URL: ensure scheme, but do NOT append /parse here
+        # Convention: /parse is added in each URL path (e.g., /parse/classes/...)
+        url = (parse_server_url or "").strip().rstrip('/')
         if url and not (url.startswith("http://") or url.startswith("https://")):
             url = f"https://{url}"
-        if url and not url.endswith('/parse'):
-            url = f"{url}/parse"
+        # Strip trailing /parse if present (code paths add it)
+        if url.endswith('/parse'):
+            url = url[:-6]
         self.parse_server_url = url
         self.application_id = application_id
         self.master_key = master_key

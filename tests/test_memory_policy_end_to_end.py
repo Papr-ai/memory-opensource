@@ -434,29 +434,52 @@ class TestLinkToDSLEndToEnd:
                 assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
                 memory_id = _extract_memory_id(response)
 
-                task_count = await _neo4j_count(
+                # Verify Task nodes were created with title property (link_to: Task:title)
+                task_records = await _neo4j_records(
                     manager.app,
                     """
                     MATCH (t:Task)
                     WHERE t._omo_source_memory_id = $memory_id
-                      AND t.title CONTAINS $unique_id
-                    RETURN count(t) AS count
+                    RETURN t.title AS title, t.id AS id
                     """,
-                    {"memory_id": memory_id, "unique_id": unique_id}
+                    {"memory_id": memory_id}
                 )
-                assert task_count > 0, "Task node not found"
+                assert task_records, "Task node not found"
+                assert task_records[0]["title"], "Task node missing 'title' property (link_to policy: Task:title)"
 
-                person_count = await _neo4j_count(
+                # Verify Person nodes were created with name property (link_to: Person:name)
+                person_records = await _neo4j_records(
                     manager.app,
                     """
                     MATCH (p:Person)
                     WHERE p._omo_source_memory_id = $memory_id
-                      AND p.name CONTAINS $unique_id
-                    RETURN count(p) AS count
+                    RETURN p.name AS name, p.id AS id
                     """,
-                    {"memory_id": memory_id, "unique_id": unique_id}
+                    {"memory_id": memory_id}
                 )
-                assert person_count > 0, "Person node not found"
+                assert person_records, "Person node not found"
+                assert len(person_records) >= 2, f"Expected at least 2 Person nodes (Alice, Bob), got {len(person_records)}"
+                person_names = {r["name"] for r in person_records}
+                assert "Alice" in person_names or "Bob" in person_names, (
+                    f"Expected Person nodes for Alice/Bob, got names: {person_names}"
+                )
+
+                # Verify EXTRACTED relationships connect Memory -> at least one entity node
+                # Note: Person nodes may get deduplicated across test runs, so EXTRACTED
+                # targets may collapse. We check >= 1 to confirm the relationship exists.
+                extracted_count = await _neo4j_count(
+                    manager.app,
+                    """
+                    MATCH (m:Memory {id: $memory_id})-[:EXTRACTED]->(n)
+                    WHERE n:Task OR n:Person
+                    RETURN count(n) AS count
+                    """,
+                    {"memory_id": memory_id},
+                    min_count=1
+                )
+                assert extracted_count >= 1, (
+                    f"Expected at least 1 EXTRACTED relationship from Memory, got {extracted_count}"
+                )
 
     @pytest.mark.asyncio
     async def test_link_to_dict_form_with_create_never(self, unique_id, api_headers):

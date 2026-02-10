@@ -12555,7 +12555,7 @@ class MemoryGraph:
             # CRITICAL FIX: Handle NULL/missing organization_id and namespace_id
             # In Neo4j, {property: null} doesn't match nodes without that property
             # Build conditional MATCH based on which tenant IDs are present
-            match_conditions = [f"{source_match_field}: $source_llm_id"]
+            match_conditions = [f"{source_match_field}: $source_id"]
             if workspace_id:
                 match_conditions.append("workspace_id: $workspace_id")
             if organization_id:
@@ -12564,7 +12564,7 @@ class MemoryGraph:
                 match_conditions.append("namespace_id: $namespace_id")
             
             source_match_clause = ", ".join(match_conditions)
-            target_match_clause = source_match_clause.replace("source_llm_id", "target_llm_id")
+            target_match_clause = source_match_clause.replace("source_id", "target_id")
             
             query = f"""
             MATCH (source:{source_label} {{{source_match_clause}}})
