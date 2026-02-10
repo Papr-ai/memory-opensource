@@ -518,7 +518,7 @@ async def process_batch_workflow(
     # are automatically routed to the default build ID configured on the task queue.
     # This workflow will use whatever build ID is set as default via:
     # tctl task-queue version-set update --add-build-ids v0.2.0+batch-default.20251117
-    handle = await client.start_workflow(
+    await client.start_workflow(
         ProcessBatchMemoryWorkflow.run,
         workflow_data,
         id=workflow_id,
