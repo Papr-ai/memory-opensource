@@ -3777,7 +3777,7 @@ description = "Cython bindings for MurmurHash"
 optional = false
 python-versions = "<3.14,>=3.6"
 groups = ["main"]
-markers = "python_version <= \"3.13\""
+markers = "python_version < \"3.14\""
 files = [
     {file = "murmurhash-1.0.13-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:136c7017e7d59ef16f065c2285bf5d30557ad8260adf47714c3c2802725e3e07"},
     {file = "murmurhash-1.0.13-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:d0292f6fcd99361157fafad5c86d508f367931b7699cce1e14747364596950cb"},
@@ -4902,7 +4902,7 @@ description = "Cython hash table that trusts the keys are pre-hashed"
 optional = false
 python-versions = "<3.14,>=3.6"
 groups = ["main"]
-markers = "python_version <= \"3.13\""
+markers = "python_version < \"3.14\""
 files = [
     {file = "preshed-3.0.10-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:14593c32e6705fda0fd54684293ca079530418bb1fb036dcbaa6c0ef0f144b7d"},
     {file = "preshed-3.0.10-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:ba1960a3996678aded882260133853e19e3a251d9f35a19c9d7d830c4238c4eb"},
@@ -7096,7 +7096,7 @@ description = "Modern high-performance serialization utilities for Python"
 optional = false
 python-versions = "<3.14,>=3.9"
 groups = ["main"]
-markers = "python_version <= \"3.13\""
+markers = "python_version < \"3.14\""
 files = [
     {file = "srsly-2.5.1-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:d0cda6f65cc0dd1daf47e856b0d6c5d51db8a9343c5007723ca06903dcfe367d"},
     {file = "srsly-2.5.1-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:cf643e6f45c266cfacea54997a1f9cfe0113fadac1ac21a1ec5b200cfe477ba0"},
@@ -7965,18 +7965,18 @@ files = [
 
 [[package]]
 name = "werkzeug"
-version = "3.0.1"
+version = "3.1.4"
 description = "The comprehensive WSGI web application library."
 optional = false
-python-versions = ">=3.8"
+python-versions = ">=3.9"
 groups = ["main"]
 files = [
-    {file = "werkzeug-3.0.1-py3-none-any.whl", hash = "sha256:90a285dc0e42ad56b34e696398b8122ee4c681833fb35b8334a095d82c56da10"},
-    {file = "werkzeug-3.0.1.tar.gz", hash = "sha256:507e811ecea72b18a404947aded4b3390e1db8f826b494d76550ef45bb3b1dcc"},
+    {file = "werkzeug-3.1.4-py3-none-any.whl", hash = "sha256:2ad50fb9ed09cc3af22c54698351027ace879a0b60a3b5edf5730b2f7d876905"},
+    {file = "werkzeug-3.1.4.tar.gz", hash = "sha256:cd3cd98b1b92dc3b7b3995038826c68097dcb16f9baa63abe35f20eafeb9fe5e"},
 ]
 
 [package.dependencies]
-MarkupSafe = ">=2.1.1"
+markupsafe = ">=2.1.1"
 
 [package.extras]
 watchdog = ["watchdog (>=2.3)"]
@@ -8353,4 +8353,4 @@ cffi = ["cffi (>=1.11)"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.11"
-content-hash = "887344ab61c4913fc0b3c7d0a4fb79899fb199501e3368956d4ed2b27d10cc00"
+content-hash = "b5c14260bb450cdda6c820a6091833c93b88d50dba26b5cba41d0798ad56c8a7"
