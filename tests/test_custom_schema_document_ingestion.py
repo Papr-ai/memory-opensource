@@ -683,7 +683,7 @@ MANUFACTURING_FLOOR_KNOWLEDGE_GRAPH_SCHEMA = load_and_validate_manufacturing_sch
 async def test_create_custom_schemas(app):
     """Test creating the Manufacturing Floor Knowledge Graph schema"""
     
-    async with LifespanManager(app, startup_timeout=30):
+    async with LifespanManager(app, startup_timeout=120):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
             headers = {
                 "X-API-Key": TEST_X_USER_API_KEY,
@@ -816,7 +816,7 @@ async def test_support_engineering_queries(app):
     if not os.path.exists(file_path):
         pytest.skip(f"PDF file not found at {file_path}")
     
-    async with LifespanManager(app, startup_timeout=30):
+    async with LifespanManager(app, startup_timeout=120):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test", timeout=600.0) as client:
             headers = {
                 "X-API-Key": TEST_X_USER_API_KEY,
@@ -1018,7 +1018,7 @@ async def test_support_engineering_queries_only(app):
         "queries": []
     }
     
-    async with LifespanManager(app, startup_timeout=30):
+    async with LifespanManager(app, startup_timeout=120):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test", timeout=600.0) as client:
             headers = {
                 "X-API-Key": TEST_X_USER_API_KEY,

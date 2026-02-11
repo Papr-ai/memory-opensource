@@ -43,6 +43,14 @@ from typing import Tuple, List, Optional
 from services.logging_config import get_logger
 import json
 from transformers import AutoTokenizer, AutoModel, AutoConfig
+
+# Import Vertex AI at module level to avoid slow import on first use
+try:
+    from google.cloud import aiplatform
+    VERTEX_AI_AVAILABLE = True
+except ImportError:
+    aiplatform = None
+    VERTEX_AI_AVAILABLE = False
 # Create a logger instance for this module
 logger = get_logger(__name__)  # Will use 'models.embedding_model' as the logger name
 
@@ -78,6 +86,15 @@ hugging_face_access_token = env.get("HUGGING_FACE_ACCESS_TOKEN")
 hugging_face_api_url_qwen_4b = env.get("HUGGING_FACE_API_URL_QWEN_4B")
 deepinfra_api_url = env.get("DEEPINFRA_API_URL")  
 deepinfra_token = env.get("DEEPINFRA_TOKEN")
+# Vertex AI configuration for custom trained model (Qwen4B embeddings)
+vertex_ai_project = env.get("VERTEX_AI_PROJECT", "223473570766")
+vertex_ai_endpoint_id = env.get("VERTEX_AI_ENDPOINT_ID", "8078932164944592896")
+vertex_ai_location = env.get("VERTEX_AI_LOCATION", "us-west1")
+use_vertex_ai = env.get("USE_VERTEX_AI", "false").lower() == "true"
+# Local embedding configuration
+use_local_embeddings = env.get("USE_LOCAL_EMBEDDINGS", "true").lower() == "true"
+local_embedding_model = env.get("LOCAL_EMBEDDING_MODEL", "Qwen/Qwen3-Embedding-0.6B")
+local_embedding_dimensions = int(env.get("LOCAL_EMBEDDING_DIMENSIONS", "1024"))
 MAX_EMBEDDING_PAYLOAD_SIZE = int(env.get("MAX_EMBEDDING_PAYLOAD_SIZE", "2000000"))
 MAX_EMBEDDING_BATCH_TOKENS = int(env.get("MAX_EMBEDDING_BATCH_TOKENS", "16384"))
 MAX_EMBEDDING_CLIENT_BATCH_SIZE = int(env.get("MAX_EMBEDDING_CLIENT_BATCH_SIZE", "32"))
@@ -104,6 +121,9 @@ class EmbeddingModel:
     _qwen4b_config = None
     _qwen4b_splitter = None
     _qwen4b_model_instance = None
+    _qwen0pt6b_model_instance = None  # Local Qwen3-Embedding-0.6B model
+    _vertex_ai_initialized = False  # Class-level flag to track Vertex AI initialization
+    _vertex_ai_endpoint = None  # Class-level cached endpoint object for connection pooling
     def __init__(self):
         if env.get("LOCALPROCESSING"):
             logger.info("Applying local processing  ")  
@@ -184,6 +204,30 @@ class EmbeddingModel:
                 chunk_overlap=0
             )
             logger.info("Qwen3-Embedding-4B tokenizer, config and text splitter initialized")
+        
+        # Initialize local Qwen3-Embedding-0.6B model if USE_LOCAL_EMBEDDINGS is enabled
+        if use_local_embeddings and EmbeddingModel._qwen0pt6b_model_instance is None:
+            logger.info(f"Initializing local embedding model: {local_embedding_model}")
+            logger.info("This may take a few minutes on first run (~1.2GB download)...")
+            try:
+                _set_ssl_cert_paths()
+                # Use SentenceTransformer for easy local embedding generation
+                EmbeddingModel._qwen0pt6b_model_instance = SentenceTransformer(
+                    local_embedding_model,
+                    device="cpu",  # Use CPU by default, GPU if available
+                    trust_remote_code=True  # Required for Qwen models
+                )
+                # Enable GPU if available
+                if torch.cuda.is_available():
+                    EmbeddingModel._qwen0pt6b_model_instance = EmbeddingModel._qwen0pt6b_model_instance.to("cuda")
+                    logger.info(f"Local embedding model loaded on GPU: {local_embedding_model}")
+                else:
+                    logger.info(f"Local embedding model loaded on CPU: {local_embedding_model}")
+                self.qwen0pt6b_model_instance = EmbeddingModel._qwen0pt6b_model_instance
+            except Exception as e:
+                logger.error(f"Failed to initialize local embedding model {local_embedding_model}: {e}")
+                logger.warning("Falling back to cloud embeddings. Set USE_LOCAL_EMBEDDINGS=false to suppress this warning.")
+                # Don't raise - allow fallback to cloud embeddings
     #def get_sentence_embedding(self, text):
     #    embedding = self.sentence_model.encode([text])
     #    return embedding[0]
@@ -648,7 +692,11 @@ class EmbeddingModel:
 
     async def get_qwen_embedding_4b(self, text: str, max_retries: int = 3, retry_delay: float = 1.0, semaphore: Optional[asyncio.Semaphore] = None, use_async: bool = True) -> Tuple[List[List[float]], List[str]]:
         """
-        Get Qwen3-Embedding-4B embeddings for the given text asynchronously, with retry logic and concurrency control.
+        Get Qwen embeddings for the given text asynchronously, with retry logic and concurrency control.
+        
+        By default (USE_LOCAL_EMBEDDINGS=true), uses local Qwen3-Embedding-0.6B model.
+        Falls back to cloud APIs (Qwen3-Embedding-4B via DeepInfra/Vertex AI) if local is disabled.
+        
         Args:
             text (str): The text to embed
             max_retries (int): Maximum number of retries for each chunk (default: 3)
@@ -663,31 +711,75 @@ class EmbeddingModel:
         
         overall_start_time = time.time()
         logger.info("[TIMING] Starting get_qwen_embedding_4b")
-
-        # Validate that we have a valid API URL
-        # Try deepinfra_api_url first, then fallback to hugging_face_api_url_qwen_4b
-        api_url = deepinfra_api_url or hugging_face_api_url_qwen_4b
-        api_token = deepinfra_token or hugging_face_access_token
         
-        if not api_url:
-            error_msg = "Qwen4B embedding API URL not configured. Please set DEEPINFRA_API_URL or HUGGING_FACE_API_URL_QWEN_4B environment variable."
-            logger.error(error_msg)
-            raise ValueError(error_msg)
-        
-        if not api_token:
-            error_msg = "Qwen4B embedding API token not configured. Please set DEEPINFRA_TOKEN or HUGGING_FACE_ACCESS_TOKEN environment variable."
-            logger.error(error_msg)
-            raise ValueError(error_msg)
+        # Check if using local embeddings first (default for open source)
+        if use_local_embeddings and EmbeddingModel._qwen0pt6b_model_instance is not None:
+            logger.info(f"Using local embedding model: {local_embedding_model}")
+            loop = asyncio.get_event_loop()
+            try:
+                local_start = time.time()
+                # Generate embeddings using local model
+                embeddings_np = await loop.run_in_executor(
+                    None,
+                    lambda: EmbeddingModel._qwen0pt6b_model_instance.encode(
+                        text,
+                        convert_to_numpy=True,
+                        show_progress_bar=False,
+                        normalize_embeddings=True  # Normalize for better similarity search
+                    )
+                )
+                local_end = time.time()
+                logger.info(f"[TIMING] Local embedding generation took: {local_end - local_start:.4f} seconds")
+                logger.info(f"Local embedding dimensions: {embeddings_np.shape}")
+                
+                # Return in expected format: list of embeddings (one per chunk), list of chunks
+                # For single text input, we return one embedding
+                embeddings_list = [embeddings_np.tolist()]
+                chunks_list = [text]
+                
+                logger.info("[TIMING] Finished get_qwen_embedding_4b (local)")
+                return embeddings_list, chunks_list
+            except Exception as e:
+                logger.error(f"Error in local embedding generation: {str(e)}")
+                logger.warning("Falling back to cloud embeddings...")
+                # Continue to cloud embedding logic below
 
-        # Initialize Qwen tokenizer/config if not already
-        if not hasattr(self, '_qwen4b_splitter'):
+        # Check if using Vertex AI or DeepInfra/HuggingFace for cloud embeddings
+        if use_vertex_ai:
+            logger.info(f"Using Vertex AI for Qwen4B embeddings: project={vertex_ai_project}, endpoint={vertex_ai_endpoint_id}, location={vertex_ai_location}")
+            # Vertex AI will be used in process_chunk_with_retry
+        else:
+            # Validate that we have a valid API URL for DeepInfra/HuggingFace
+            # Try deepinfra_api_url first, then fallback to hugging_face_api_url_qwen_4b
+            api_url = deepinfra_api_url or hugging_face_api_url_qwen_4b
+            api_token = deepinfra_token or hugging_face_access_token
+            
+            if not api_url:
+                if use_local_embeddings:
+                    error_msg = "Local embeddings failed and no cloud API configured. Please ensure Qwen3-Embedding-0.6B model loaded successfully, or set DEEPINFRA_API_URL/HUGGING_FACE_API_URL_QWEN_4B with USE_VERTEX_AI=true."
+                else:
+                    error_msg = "Qwen4B embedding API URL not configured. Please set DEEPINFRA_API_URL, HUGGING_FACE_API_URL_QWEN_4B, or USE_VERTEX_AI=true with VERTEX_AI_* variables, or enable local embeddings with USE_LOCAL_EMBEDDINGS=true."
+                logger.error(error_msg)
+                raise ValueError(error_msg)
+            
+            if not api_token:
+                if use_local_embeddings:
+                    error_msg = "Local embeddings failed and no cloud API token configured. Please ensure Qwen3-Embedding-0.6B model loaded successfully, or set DEEPINFRA_TOKEN/HUGGING_FACE_ACCESS_TOKEN."
+                else:
+                    error_msg = "Qwen4B embedding API token not configured. Please set DEEPINFRA_TOKEN, HUGGING_FACE_ACCESS_TOKEN, or USE_VERTEX_AI=true with Vertex AI credentials, or enable local embeddings with USE_LOCAL_EMBEDDINGS=true."
+                logger.error(error_msg)
+                raise ValueError(error_msg)
+
+        # Initialize Qwen tokenizer/config if not already (only needed for DeepInfra/HuggingFace, not Vertex AI)
+        if not use_vertex_ai and not hasattr(self, '_qwen4b_splitter'):
             logger.info("Initializing Qwen3-Embedding-4B tokenizer and config...")
             # Set certificate path for HuggingFace
             _set_ssl_cert_paths()
             
-            #model_name = "Qwen/Qwen-4B"  # Use appropriate model name
-            #self._qwen4b_tokenizer = AutoTokenizer.from_pretrained(model_name)
-            #self._qwen4b_config = AutoConfig.from_pretrained(model_name)
+            # Initialize tokenizer and config for token counting (only needed for DeepInfra path)
+            model_name = "Qwen/Qwen3-Embedding-4B"
+            self._qwen4b_tokenizer = AutoTokenizer.from_pretrained(model_name)
+            self._qwen4b_config = AutoConfig.from_pretrained(model_name)
             
             # Use a simpler text splitter since we're using the API endpoint
             self._qwen4b_splitter = TokenTextSplitter(
@@ -695,6 +787,14 @@ class EmbeddingModel:
                 chunk_overlap=0
             )
             logger.info("Qwen3-Embedding-4B tokenizer, config and splitter initialized")
+        elif use_vertex_ai and not hasattr(self, '_qwen4b_splitter'):
+            # For Vertex AI, we only need the text splitter (no tokenizer needed)
+            logger.info("Initializing Qwen3-Embedding-4B text splitter for Vertex AI...")
+            self._qwen4b_splitter = TokenTextSplitter(
+                chunk_size=2048,  # Conservative token limit
+                chunk_overlap=0
+            )
+            logger.info("Qwen3-Embedding-4B text splitter initialized for Vertex AI")
 
         # Chunking
         chunking_start = time.time()
@@ -715,100 +815,243 @@ class EmbeddingModel:
             async with semaphore:
                 for attempt in range(1, max_retries + 1):
                     attempt_start = time.time()
-                    # Tokenization timing
-                    token_start = time.time()
-                    tokenized_chunk = self._qwen4b_tokenizer(
-                        chunk,
-                        truncation=True,
-                        max_length=self._qwen4b_config.max_position_embeddings,
-                        return_tensors="pt"
-                    )
-                    token_end = time.time()
-                    logger.info(f"[TIMING] [Qwen4B Chunk {i}] Tokenization took: {token_end - token_start:.4f} seconds (attempt {attempt})")
-
-                    num_tokens = len(tokenized_chunk['input_ids'][0])
-                    if num_tokens > self._qwen4b_config.max_position_embeddings:
-                        logger.warning(f"Qwen4B Chunk {i} exceeds max token size: {num_tokens} tokens")
-                        return None
-                    if num_tokens > MAX_EMBEDDING_BATCH_TOKENS:
-                        logger.warning(f"Qwen4B Chunk {i} exceeds configured MAX_EMBEDDING_BATCH_TOKENS: {num_tokens} > {MAX_EMBEDDING_BATCH_TOKENS}")
-                        return None
-
-                    # Payload prep timing
-                    payload_start = time.time()
-                    payload = {
-                        "input": chunk,
-                        "model": "Qwen/Qwen3-Embedding-4B",
-                        "encoding_format": "float"
-                    }
-                    payload_size = get_payload_size(payload)
-                    logger.info(f"[Qwen4B Chunk {i}] Payload size: {payload_size} bytes (limit: {MAX_EMBEDDING_PAYLOAD_SIZE})")
-                    if payload_size > MAX_EMBEDDING_PAYLOAD_SIZE:
-                        logger.error(f"[Qwen4B Chunk {i}] Payload size {payload_size} exceeds limit of {MAX_EMBEDDING_PAYLOAD_SIZE} bytes. Skipping.")
-                        return None
-                    payload_end = time.time()
-                    logger.info(f"[TIMING] [Qwen4B Chunk {i}] Payload prep took: {payload_end - payload_start:.4f} seconds (attempt {attempt})")
-
-                    headers = {
-                        "Authorization": f"Bearer {api_token}",
-                        "Content-Type": "application/json"
-                    }
-
-                    try:
-                        
-                        http_start = time.time()
-                        # Use a shared client instance for better connection reuse
-                        if not hasattr(self, '_http_client'):
-                            self._http_client = httpx.AsyncClient(verify=False)
-                        response = await self._http_client.post(
-                            api_url,
-                            headers=headers,
-                            json=payload,
-                            timeout=60.0  # Increased from 20.0 to handle slow API responses
+                    
+                    if use_vertex_ai:
+                        # Use Vertex AI prediction API
+                        try:
+                            if not VERTEX_AI_AVAILABLE:
+                                raise ImportError("google-cloud-aiplatform not installed. Install with: poetry add google-cloud-aiplatform")
+                            
+                            # Initialize Vertex AI client if not already done (class-level check)
+                            if not EmbeddingModel._vertex_ai_initialized:
+                                init_start = time.time()
+                                aiplatform.init(project=vertex_ai_project, location=vertex_ai_location)
+                                EmbeddingModel._vertex_ai_initialized = True
+                                init_end = time.time()
+                                logger.info(f"Vertex AI initialized: project={vertex_ai_project}, location={vertex_ai_location}, endpoint={vertex_ai_endpoint_id} (took {init_end - init_start:.4f}s)")
+                            
+                            # Prepare instance for prediction
+                            prep_start = time.time()
+                            # Vertex AI expects instances as a list of dictionaries
+                            # The model expects "inputs" field (plural) based on the model's input schema
+                            instances = [{"inputs": chunk}]
+                            prep_end = time.time()
+                            logger.info(f"[TIMING] [Qwen4B Chunk {i}] Instance preparation took: {prep_end - prep_start:.4f} seconds (attempt {attempt})")
+                            
+                            # Cache endpoint object for connection pooling (reuse across all calls)
+                            # This avoids creating a new endpoint object for each prediction, improving performance
+                            if EmbeddingModel._vertex_ai_endpoint is None:
+                                endpoint_init_start = time.time()
+                                try:
+                                    EmbeddingModel._vertex_ai_endpoint = aiplatform.Endpoint(vertex_ai_endpoint_id)
+                                    endpoint_init_end = time.time()
+                                    logger.info(f"Vertex AI endpoint cached for connection pooling (took {endpoint_init_end - endpoint_init_start:.4f}s)")
+                                except Exception as endpoint_error:
+                                    error_str = str(endpoint_error).lower()
+                                    if "permission" in error_str or "iam_permission_denied" in error_str or "403" in error_str:
+                                        logger.error(f"❌ VERTEX AI PERMISSION ERROR: Cannot access endpoint {vertex_ai_endpoint_id}")
+                                        logger.error(f"❌ Required permission: 'aiplatform.endpoints.get' on resource 'projects/{vertex_ai_project}/locations/{vertex_ai_location}/endpoints/{vertex_ai_endpoint_id}'")
+                                        logger.error(f"❌ Please grant the Vertex AI User role or 'aiplatform.endpoints.get' permission to your service account")
+                                        logger.error(f"❌ Service account: Check GOOGLE_APPLICATION_CREDENTIALS or default credentials")
+                                        # If DeepInfra/HuggingFace is available, suggest fallback
+                                        if deepinfra_api_url or hugging_face_api_url_qwen_4b:
+                                            logger.warning(f"🔄 FALLBACK AVAILABLE: DeepInfra/HuggingFace API is configured. Consider setting USE_VERTEX_AI=false to use fallback.")
+                                        raise ValueError(f"Vertex AI permission denied. Please grant 'aiplatform.endpoints.get' permission or use DeepInfra/HuggingFace fallback by setting USE_VERTEX_AI=false")
+                                    raise
+                            
+                            endpoint = EmbeddingModel._vertex_ai_endpoint
+                            
+                            # Vertex AI inference timing
+                            # Run synchronous predict() in executor to avoid blocking event loop (async optimization)
+                            # This allows other async operations to continue while waiting for the prediction
+                            inference_start = time.time()
+                            loop = asyncio.get_event_loop()
+                            predictions = await loop.run_in_executor(
+                                None,  # Use default ThreadPoolExecutor
+                                endpoint.predict,
+                                instances
+                            )
+                            inference_end = time.time()
+                            inference_duration = inference_end - inference_start
+                            logger.info(f"[TIMING] [Qwen4B Chunk {i}] Vertex AI inference took: {inference_duration:.4f} seconds (attempt {attempt})")
+                            logger.info(f"[TIMING] [Qwen4B Chunk {i}] Vertex AI inference rate: {len(chunk)/inference_duration:.2f} chars/sec (attempt {attempt})")
+                            
+                            # Extract embedding from Vertex AI response
+                            # Vertex AI returns predictions as a list, each prediction is a dict
+                            if predictions and len(predictions.predictions) > 0:
+                                prediction = predictions.predictions[0]
+                                logger.debug(f"Vertex AI prediction type: {type(prediction)}, value: {prediction}")
+                                
+                                # The embedding might be in different fields depending on model output
+                                # Common formats: 'embedding', 'output', 'predictions', or direct list
+                                embedding = None
+                                
+                                if isinstance(prediction, list):
+                                    # If prediction is directly a list, use it
+                                    embedding = prediction
+                                elif isinstance(prediction, dict):
+                                    # Try common field names
+                                    embedding = prediction.get('embedding') or prediction.get('output') or prediction.get('predictions')
+                                    if embedding is None:
+                                        # Try to get the first value if it's a dict with one key
+                                        values = list(prediction.values())
+                                        if values and isinstance(values[0], list):
+                                            embedding = values[0]
+                                else:
+                                    embedding = None
+                                
+                                # Flatten nested lists if needed (handle list of lists)
+                                if embedding is not None:
+                                    if isinstance(embedding, list) and len(embedding) > 0:
+                                        # Check if first element is a list (nested structure)
+                                        if isinstance(embedding[0], list):
+                                            # Flatten: take the first inner list or concatenate all
+                                            embedding = embedding[0] if len(embedding) == 1 else [item for sublist in embedding for item in sublist]
+                                            logger.info(f"Flattened nested embedding structure: {len(embedding)} dimensions")
+                                        
+                                        # Ensure all elements are floats (not strings or other types)
+                                        try:
+                                            parse_start = time.time()
+                                            embedding = [float(x) for x in embedding]
+                                            parse_end = time.time()
+                                            logger.info(f"Qwen4B Chunk {i} embedding dimensions: {len(embedding)}")
+                                            logger.info(f"[TIMING] [Qwen4B Chunk {i}] Embedding parsing took: {parse_end - parse_start:.4f} seconds (attempt {attempt})")
+                                            
+                                            attempt_end = time.time()
+                                            total_attempt_time = attempt_end - attempt_start
+                                            logger.info(f"[TIMING] [Qwen4B Chunk {i}] Total attempt time: {total_attempt_time:.4f} seconds (attempt {attempt})")
+                                            logger.info(f"[TIMING] [Qwen4B Chunk {i}] Breakdown - Prep: {prep_end - prep_start:.4f}s, Inference: {inference_duration:.4f}s, Parse: {parse_end - parse_start:.4f}s")
+                                            return embedding
+                                        except (ValueError, TypeError) as e:
+                                            logger.error(f"Qwen4B Vertex AI embedding contains non-numeric values: {e}, embedding: {embedding[:5] if len(embedding) > 5 else embedding}")
+                                            return None
+                                    else:
+                                        logger.error(f"Qwen4B Vertex AI embedding is not a list: {type(embedding)}")
+                                        return None
+                                else:
+                                    logger.error(f"Qwen4B Vertex AI unexpected response format: {type(prediction)}, value: {prediction}")
+                                    return None
+                            else:
+                                logger.error(f"Qwen4B Vertex AI returned empty predictions")
+                                return None
+                                
+                        except ImportError:
+                            logger.error("google-cloud-aiplatform not installed. Install with: poetry add google-cloud-aiplatform")
+                            raise
+                        except Exception as e:
+                            error_str = str(e).lower()
+                            is_permission_error = "permission" in error_str or "iam_permission_denied" in error_str or "403" in error_str
+                            
+                            if is_permission_error:
+                                logger.error(f"❌ Qwen4B Vertex AI PERMISSION ERROR (attempt {attempt}/{max_retries}): {str(e)}")
+                                logger.error(f"❌ This is a permanent permission issue - retrying won't help")
+                                # Don't retry permission errors - they won't resolve by retrying
+                                raise ValueError(f"Vertex AI permission denied: {str(e)}. Please grant 'aiplatform.endpoints.get' permission or set USE_VERTEX_AI=false to use DeepInfra/HuggingFace fallback")
+                            else:
+                                logger.error(f"Qwen4B Vertex AI error (attempt {attempt}/{max_retries}): {str(e)}")
+                                last_exception = e
+                                if attempt < max_retries:
+                                    delay = retry_delay * (2 ** (attempt - 1))
+                                    logger.warning(f"Retrying Qwen4B chunk {i} after {delay:.2f}s (attempt {attempt}/{max_retries})")
+                                    await asyncio.sleep(delay)
+                                continue
+                    else:
+                        # Original DeepInfra/HuggingFace API code
+                        # Tokenization timing
+                        token_start = time.time()
+                        tokenized_chunk = self._qwen4b_tokenizer(
+                            chunk,
+                            truncation=True,
+                            max_length=self._qwen4b_config.max_position_embeddings,
+                            return_tensors="pt"
                         )
-                        http_end = time.time()
-                        logger.info(f"[TIMING] [Qwen4B Chunk {i}] HTTP request took: {http_end - http_start:.4f} seconds (attempt {attempt})")
+                        token_end = time.time()
+                        logger.info(f"[TIMING] [Qwen4B Chunk {i}] Tokenization took: {token_end - token_start:.4f} seconds (attempt {attempt})")
 
-                        if response.status_code == 400:
-                            error_text = response.text
-                            logger.error(f"Qwen4B Bad Request: {error_text}")
+                        num_tokens = len(tokenized_chunk['input_ids'][0])
+                        if num_tokens > self._qwen4b_config.max_position_embeddings:
+                            logger.warning(f"Qwen4B Chunk {i} exceeds max token size: {num_tokens} tokens")
                             return None
-                        if response.status_code == 413:
-                            logger.error(f"[Qwen4B Chunk {i}] Received 413 Payload Too Large from embedding API. Payload size: {payload_size} bytes.")
+                        if num_tokens > MAX_EMBEDDING_BATCH_TOKENS:
+                            logger.warning(f"Qwen4B Chunk {i} exceeds configured MAX_EMBEDDING_BATCH_TOKENS: {num_tokens} > {MAX_EMBEDDING_BATCH_TOKENS}")
                             return None
 
-                        parse_start = time.time()
-                        response.raise_for_status()
-                        response_json = response.json()
-                        parse_end = time.time()
-                        logger.info(f"[TIMING] [Qwen4B Chunk {i}] Response parsing took: {parse_end - parse_start:.4f} seconds (attempt {attempt})")
-
-                        # The DeepInfra API returns an OpenAI-compatible object.
-                        # We need to extract the embedding from response_json['data'][0]['embedding']
-                        if 'data' in response_json and response_json['data'] and 'embedding' in response_json['data'][0]:
-                            embedding = response_json['data'][0]['embedding']
-                            logger.info(f"Qwen4B Chunk {i} embedding dimensions: {len(embedding)}")
-                            attempt_end = time.time()
-                            logger.info(f"[TIMING] [Qwen4B Chunk {i}] Total attempt time: {attempt_end - attempt_start:.4f} seconds (attempt {attempt})")
-                            return embedding
-                        else:
-                            logger.error(f"Qwen4B Unexpected API response format: {response_json}")
-                            attempt_end = time.time()
-                            logger.info(f"[TIMING] [Qwen4B Chunk {i}] Unexpected format, total attempt time: {attempt_end - attempt_start:.4f} seconds (attempt {attempt})")
+                        # Payload prep timing
+                        payload_start = time.time()
+                        payload = {
+                            "input": chunk,
+                            "model": "Qwen/Qwen3-Embedding-4B",
+                            "encoding_format": "float"
+                        }
+                        payload_size = get_payload_size(payload)
+                        logger.info(f"[Qwen4B Chunk {i}] Payload size: {payload_size} bytes (limit: {MAX_EMBEDDING_PAYLOAD_SIZE})")
+                        if payload_size > MAX_EMBEDDING_PAYLOAD_SIZE:
+                            logger.error(f"[Qwen4B Chunk {i}] Payload size {payload_size} exceeds limit of {MAX_EMBEDDING_PAYLOAD_SIZE} bytes. Skipping.")
                             return None
-                    except httpx.HTTPError as e:
-                        logger.error(f"Qwen4B HTTP error in async API request (attempt {attempt}/{max_retries}): {str(e)}")
-                        last_exception = e
-                    except Exception as e:
-                        logger.error(f"Qwen4B Unexpected error in async API request (attempt {attempt}/{max_retries}): {str(e)}")
-                        last_exception = e
-                    if attempt < max_retries:
-                        delay = retry_delay * (2 ** (attempt - 1))
-                        logger.warning(f"Retrying Qwen4B chunk {i} after {delay:.2f}s (attempt {attempt}/{max_retries})")
-                        sleep_start = time.time()
-                        await asyncio.sleep(delay)
-                        sleep_end = time.time()
-                        logger.info(f"[TIMING] [Qwen4B Chunk {i}] Slept for: {sleep_end - sleep_start:.4f} seconds before retry (attempt {attempt})")
+                        payload_end = time.time()
+                        logger.info(f"[TIMING] [Qwen4B Chunk {i}] Payload prep took: {payload_end - payload_start:.4f} seconds (attempt {attempt})")
+
+                        headers = {
+                            "Authorization": f"Bearer {api_token}",
+                            "Content-Type": "application/json"
+                        }
+
+                        try:
+                            
+                            http_start = time.time()
+                            # Use a shared client instance for better connection reuse
+                            if not hasattr(self, '_http_client'):
+                                self._http_client = httpx.AsyncClient(verify=False)
+                            response = await self._http_client.post(
+                                api_url,
+                                headers=headers,
+                                json=payload,
+                                timeout=60.0  # Increased from 20.0 to handle slow API responses
+                            )
+                            http_end = time.time()
+                            logger.info(f"[TIMING] [Qwen4B Chunk {i}] HTTP request took: {http_end - http_start:.4f} seconds (attempt {attempt})")
+
+                            if response.status_code == 400:
+                                error_text = response.text
+                                logger.error(f"Qwen4B Bad Request: {error_text}")
+                                return None
+                            if response.status_code == 413:
+                                logger.error(f"[Qwen4B Chunk {i}] Received 413 Payload Too Large from embedding API. Payload size: {payload_size} bytes.")
+                                return None
+
+                            parse_start = time.time()
+                            response.raise_for_status()
+                            response_json = response.json()
+                            parse_end = time.time()
+                            logger.info(f"[TIMING] [Qwen4B Chunk {i}] Response parsing took: {parse_end - parse_start:.4f} seconds (attempt {attempt})")
+
+                            # The DeepInfra API returns an OpenAI-compatible object.
+                            # We need to extract the embedding from response_json['data'][0]['embedding']
+                            if 'data' in response_json and response_json['data'] and 'embedding' in response_json['data'][0]:
+                                embedding = response_json['data'][0]['embedding']
+                                logger.info(f"Qwen4B Chunk {i} embedding dimensions: {len(embedding)}")
+                                attempt_end = time.time()
+                                logger.info(f"[TIMING] [Qwen4B Chunk {i}] Total attempt time: {attempt_end - attempt_start:.4f} seconds (attempt {attempt})")
+                                return embedding
+                            else:
+                                logger.error(f"Qwen4B Unexpected API response format: {response_json}")
+                                attempt_end = time.time()
+                                logger.info(f"[TIMING] [Qwen4B Chunk {i}] Unexpected format, total attempt time: {attempt_end - attempt_start:.4f} seconds (attempt {attempt})")
+                                return None
+                        except httpx.HTTPError as e:
+                            logger.error(f"Qwen4B HTTP error in async API request (attempt {attempt}/{max_retries}): {str(e)}")
+                            last_exception = e
+                        except Exception as e:
+                            logger.error(f"Qwen4B Unexpected error in async API request (attempt {attempt}/{max_retries}): {str(e)}")
+                            last_exception = e
+                        if attempt < max_retries:
+                            delay = retry_delay * (2 ** (attempt - 1))
+                            logger.warning(f"Retrying Qwen4B chunk {i} after {delay:.2f}s (attempt {attempt}/{max_retries})")
+                            sleep_start = time.time()
+                            await asyncio.sleep(delay)
+                            sleep_end = time.time()
+                            logger.info(f"[TIMING] [Qwen4B Chunk {i}] Slept for: {sleep_end - sleep_start:.4f} seconds before retry (attempt {attempt})")
+                
                 logger.error(f"All {max_retries} attempts failed for Qwen4B chunk {i}")
                 if last_exception:
                     raise last_exception

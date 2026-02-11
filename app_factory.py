@@ -4,6 +4,8 @@ import secrets
 import asyncio
 import json
 import yaml
+import httpx
+import time
 from pathlib import Path
 from fastapi import FastAPI, Request, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
@@ -73,6 +75,7 @@ organization_id = env.get("OPENAI_ORGANIZATION")
 async def lifespan(app: FastAPI):
     warmup_task = None
     mongodb_warmup_task = None
+    app.state.httpx_client = None
     # Ensure AsyncNeo4jConnection singleton is reset before creating the app-scoped MemoryGraph
     # to avoid reusing asyncio primitives across different event loops in tests.
     try:
@@ -96,6 +99,18 @@ async def lifespan(app: FastAPI):
         logger.error("❌ MongoDB client initialization returned None - THIS WILL CAUSE FALLBACK TO PARSE SERVER!")
     
     app.state.memory_graph = MemoryGraph()
+
+    # Initialize shared httpx client for connection pooling (auth/Parse/Qdrant-adjacent HTTP calls)
+    try:
+        app.state.httpx_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(10.0, connect=3.0),
+            limits=httpx.Limits(max_keepalive_connections=20, max_connections=50, keepalive_expiry=30.0),
+            http2=True,
+            follow_redirects=True,
+        )
+        logger.info("✅ Shared httpx client initialized for connection pooling")
+    except Exception as e:
+        logger.warning(f"Failed to initialize shared httpx client: {e}")
     
     # Initialize Qdrant with optimizations
     await app.state.memory_graph.init_qdrant()
@@ -106,6 +121,12 @@ async def lifespan(app: FastAPI):
             await app.state.memory_graph.optimize_qdrant_collection()
         except Exception as e:
             logger.warning(f"Could not optimize Qdrant collection: {e}")
+
+    # Warm up Qdrant connection to avoid first-search cold start
+    try:
+        await app.state.memory_graph.warm_qdrant_connection()
+    except Exception as e:
+        logger.warning(f"Qdrant warmup failed (non-critical): {e}")
     
     try:
         logger.info("Starting up application...")
@@ -220,6 +241,14 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logger.error(f"Error during MemoryGraph cleanup: {e}")
 
+        # Close shared httpx client
+        if getattr(app.state, "httpx_client", None):
+            try:
+                await app.state.httpx_client.aclose()
+                logger.info("Shared httpx client closed successfully")
+            except Exception as e:
+                logger.warning(f"Error closing shared httpx client: {e}")
+
         # Telemetry cleanup (if needed in future)
         try:
             # Telemetry service handles its own cleanup
@@ -275,6 +304,20 @@ def create_app() -> FastAPI:
         expose_headers=["*"]  # Expose all response headers
     )
     app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+    @app.middleware("http")
+    async def add_server_timing_headers(request: Request, call_next):
+        start_time = time.perf_counter()
+        response = await call_next(request)
+        duration_ms = (time.perf_counter() - start_time) * 1000
+        response.headers["X-Server-Processing-Ms"] = f"{duration_ms:.2f}"
+        existing_server_timing = response.headers.get("Server-Timing")
+        timing_value = f"app;dur={duration_ms:.2f}"
+        if existing_server_timing:
+            response.headers["Server-Timing"] = f"{existing_server_timing}, {timing_value}"
+        else:
+            response.headers["Server-Timing"] = timing_value
+        return response
     
     # Add authentication middleware to support request.auth
     from starlette.middleware.authentication import AuthenticationMiddleware

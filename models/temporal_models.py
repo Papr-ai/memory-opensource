@@ -34,7 +34,6 @@ class TemporalBatchMemoryRequest(BaseModel):
     organization_id: Optional[str] = Field(default=None, description="Organization ID for multi-tenant scoping")
     namespace_id: Optional[str] = Field(default=None, description="Namespace ID for multi-tenant scoping")
     schema_id: Optional[str] = Field(default=None, description="Schema ID for structured memory extraction (from graph_generation.auto.schema_id)")
-    simple_schema_mode: Optional[bool] = Field(default=False, description="Use simplified schema mode (from graph_generation.auto.simple_schema_mode)")
     # Note: graph_override (manual mode) is handled via schema_specification dict in BatchWorkflowData
     memories: List[TemporalAddMemoryRequest] = Field(..., description="List of memory items to add")
     batch_size: Optional[int] = Field(default=10, description="Number of items to process in parallel")
@@ -67,14 +66,46 @@ class BatchWorkflowData(BaseModel):
 
 class SchemaSpecification(BaseModel):
     """Temporal-safe schema specification to avoid heavy imports in workflows.
-    
+
     Note: property_overrides uses Dict[str, Any] instead of PropertyOverrideRule to avoid
     circular imports. The actual PropertyOverrideRule validation happens in shared_types.py.
+
+    This model now supports the full memory_policy API including:
+    - mode: Processing mode (auto, manual). Deprecated: 'structured' → 'manual', 'hybrid' → 'auto'
+    - node_constraints: Rules for LLM-extracted nodes (applied in auto mode when present)
+    - OMO fields: consent, risk, acl for safety standards
     """
+    # Core schema fields
     schema_id: Optional[str] = Field(default=None, description="Schema ID to enforce")
-    simple_schema_mode: bool = Field(default=False, description="Use simplified schema mode")
     graph_override: Optional[Dict[str, Any]] = Field(default=None, description="Graph override structure")
     property_overrides: Optional[List[Dict[str, Any]]] = Field(default=None, description="Property overrides with match conditions (PropertyOverrideRule dicts)")
+
+    # Memory Policy fields (from unified API)
+    mode: Optional[str] = Field(
+        default="auto",
+        description="Processing mode: 'auto' (LLM extracts, constraints applied if provided), 'manual' (exact nodes). "
+                   "Deprecated aliases: 'structured' → 'manual', 'hybrid' → 'auto'"
+    )
+    node_constraints: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description="Rules for how LLM-extracted nodes should be created/updated (applied in auto mode when present)"
+    )
+
+    # OMO Safety Standards
+    consent: Optional[str] = Field(
+        default="implicit",
+        description="How the data owner allowed this memory to be stored/used. "
+                   "Values: 'explicit', 'implicit', 'terms', 'none'"
+    )
+    risk: Optional[str] = Field(
+        default="none",
+        description="Post-ingest safety assessment. "
+                   "Values: 'none', 'sensitive', 'flagged'"
+    )
+    acl: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Access control list. Format: {'read': [...], 'write': [...]}"
+    )
 
 
 class DocumentFileReference(BaseModel):
@@ -124,7 +155,7 @@ def flatten_graph_generation_for_temporal(graph_generation: Optional[Any]) -> Di
     
     Handles:
     - GraphGeneration (mode, auto, manual)
-    - AutoGraphGeneration (schema_id, simple_schema_mode, property_overrides)
+    - AutoGraphGeneration (schema_id, property_overrides)
     - ManualGraphGeneration (nodes, relationships)
     - GraphOverrideNode (id, label, properties)
     - GraphOverrideRelationship (source_node_id, target_node_id, relationship_type, properties)
@@ -168,8 +199,6 @@ def flatten_graph_generation_for_temporal(graph_generation: Optional[Any]) -> Di
             # Flatten auto configuration fields
             if 'schema_id' in auto_config and auto_config['schema_id']:
                 result['schema_id'] = auto_config['schema_id']
-            if 'simple_schema_mode' in auto_config:
-                result['simple_schema_mode'] = auto_config['simple_schema_mode']
             if 'property_overrides' in auto_config and auto_config['property_overrides']:
                 # property_overrides is a list of PropertyOverrideRule dicts
                 # Already converted to plain dicts by to_dict()

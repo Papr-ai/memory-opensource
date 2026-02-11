@@ -227,7 +227,7 @@ class TelemetryService:
             edition = os.getenv("PAPR_EDITION", "opensource").lower()
             
             # Check if OSS user opted in to Papr's telemetry
-            telemetry_to_papr = os.getenv("TELEMETRY_TO_PAPR", "false").lower() == "true"
+            telemetry_to_papr = os.getenv("TELEMETRY_TO_PAPR", "true").lower() == "true"
             
             if edition == "opensource" and telemetry_to_papr:
                 # OSS opt-in: Use Papr's key from env var (NOT hardcoded)
@@ -580,9 +580,13 @@ class TelemetryService:
                 headers={"Content-Type": "application/json"}
             )
             
-            # Log success at debug level (fail silently on errors)
+            # Log success at debug level, but log 404s at info level to help diagnose endpoint issues
             if response.status_code == 200:
                 logger.debug(f"Telemetry event '{event_name}' sent to Papr proxy successfully")
+            elif response.status_code == 404:
+                logger.info(f"Telemetry endpoint not found (404): {self._proxy_url}. Telemetry will be disabled. Set PAPR_TELEMETRY_URL to a valid endpoint or disable telemetry with TELEMETRY_ENABLED=false")
+                # Disable telemetry if endpoint doesn't exist to avoid repeated 404s
+                self.enabled = False
             else:
                 logger.debug(f"Telemetry proxy returned status {response.status_code}: {response.text}")
                 

@@ -41,7 +41,7 @@ def fetch_all_schemas(parse_url: str, app_id: str, master_key: str):
     }
 
     try:
-        response = requests.get(f"{parse_url}/schemas", headers=headers, timeout=30)
+        response = requests.get(f"{parse_url}/parse/schemas", headers=headers, timeout=30)
         response.raise_for_status()
 
         data = response.json()

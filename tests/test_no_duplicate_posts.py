@@ -51,7 +51,7 @@ async def test_document_upload_creates_single_post(
     await asyncio.sleep(30)  # Adjust based on your processing time
     
     # Query Parse for Posts related to this upload
-    parse_url = f"{PARSE_SERVER_URL}/classes/Post"
+    parse_url = f"{PARSE_SERVER_URL}/parse/classes/Post"
     where_clause = {"uploadId": upload_id}
     params = {
         "where": json.dumps(where_clause),
@@ -132,7 +132,7 @@ async def test_no_standalone_batch_posts_created(
     await asyncio.sleep(30)
     
     # Query for standalone batch_memories Posts (no uploadId, no extractionResultFile)
-    parse_url = f"{PARSE_SERVER_URL}/classes/Post"
+    parse_url = f"{PARSE_SERVER_URL}/parse/classes/Post"
     where_clause = {
         "type": "batch_memories",
         "uploadId": {"$exists": False},

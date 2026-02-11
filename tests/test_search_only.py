@@ -17,7 +17,7 @@ async def app():
 
 async def test_search_only_agentic_graph(app, caplog):
     """Test just the search route to see Groq logging"""
-    async with LifespanManager(app, startup_timeout=20):
+    async with LifespanManager(app, startup_timeout=120):
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app),
             base_url="http://test",

@@ -61,4 +61,4 @@ pymongo
 azure-servicebus>=7.11.0
 
 PyMuPDF>=1.26.6
-cryptography==41.0.7
+cryptography==44.0.1

@@ -71,7 +71,7 @@ def create_or_update_schema(parse_url: str, app_id: str, master_key: str, schema
     }
 
     # Check if schema already exists
-    check_url = f"{parse_url}/schemas/{class_name}"
+    check_url = f"{parse_url}/parse/schemas/{class_name}"
     response = requests.get(check_url, headers=headers)
 
     if response.status_code == 200:
@@ -81,7 +81,7 @@ def create_or_update_schema(parse_url: str, app_id: str, master_key: str, schema
     else:
         # Schema doesn't exist, create it
         print(f"Creating schema '{class_name}'...")
-        response = requests.post(f"{parse_url}/schemas", headers=headers, json=schema)
+        response = requests.post(f"{parse_url}/parse/schemas", headers=headers, json=schema)
 
     if response.status_code in [200, 201]:
         print(f"✓ Schema '{class_name}' created successfully")
@@ -840,7 +840,11 @@ def main():
                                 'user_write_access': {'required': False, 'type': 'Array'},
                                 'workspace': {'required': False, 'targetClass': 'WorkSpace', 'type': 'Pointer'},
                                 'workspace_read_access': {'required': False, 'type': 'Array'},
-                                'workspace_write_access': {'required': False, 'type': 'Array'}}},
+                                'workspace_write_access': {'required': False, 'type': 'Array'},
+                                # Relevance scores for predictive memory retrieval
+                                'relevance_score': {'required': False, 'type': 'Number'},
+                                'predicted_importance': {'required': False, 'type': 'Number'},
+                                'behavioral_score': {'required': False, 'type': 'Number'}}},
     'MemoryCollection': {   'classLevelPermissions': {   'count': {'*': True},
                                                          'create': {'*': True},
                                                          'delete': {'*': True},

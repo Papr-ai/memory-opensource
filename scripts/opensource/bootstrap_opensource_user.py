@@ -64,7 +64,7 @@ class OpenSourceBootstrap:
         print(f"\n📝 Creating Parse User: {email}")
 
         # Check if user already exists
-        check_url = f"{self.parse_url}/users"
+        check_url = f"{self.parse_url}/parse/users"
         params = {
             "where": f'{{"email": "{email}"}}'
         }
@@ -96,7 +96,7 @@ class OpenSourceBootstrap:
         }
 
         response = requests.post(
-            f"{self.parse_url}/users",
+            f"{self.parse_url}/parse/users",
             headers=self.headers,
             json=user_data,
             timeout=10
@@ -132,7 +132,7 @@ class OpenSourceBootstrap:
         }
 
         response = requests.post(
-            f"{self.parse_url}/classes/WorkSpace",
+            f"{self.parse_url}/parse/classes/WorkSpace",
             headers=self.headers,
             json=workspace_data,
             timeout=10
@@ -172,7 +172,7 @@ class OpenSourceBootstrap:
         }
 
         response = requests.post(
-            f"{self.parse_url}/classes/workspace_follower",
+            f"{self.parse_url}/parse/classes/workspace_follower",
             headers=self.headers,
             json=follower_data,
             timeout=10
@@ -200,7 +200,7 @@ class OpenSourceBootstrap:
         }
 
         response = requests.put(
-            f"{self.parse_url}/users/{user_id}",
+            f"{self.parse_url}/parse/users/{user_id}",
             headers=self.headers,
             json=update_data,
             timeout=10
@@ -241,7 +241,7 @@ class OpenSourceBootstrap:
         }
 
         response = requests.post(
-            f"{self.parse_url}/classes/Organization",
+            f"{self.parse_url}/parse/classes/Organization",
             headers=self.headers,
             json=org_data,
             timeout=10
@@ -280,7 +280,7 @@ class OpenSourceBootstrap:
         }
 
         response = requests.post(
-            f"{self.parse_url}/classes/Namespace",
+            f"{self.parse_url}/parse/classes/Namespace",
             headers=self.headers,
             json=namespace_data,
             timeout=10
@@ -308,7 +308,7 @@ class OpenSourceBootstrap:
         }
 
         response = requests.put(
-            f"{self.parse_url}/classes/Organization/{org_id}",
+            f"{self.parse_url}/parse/classes/Organization/{org_id}",
             headers=self.headers,
             json=update_data,
             timeout=10
@@ -359,7 +359,7 @@ class OpenSourceBootstrap:
         }
 
         response = requests.post(
-            f"{self.parse_url}/classes/APIKey",
+            f"{self.parse_url}/parse/classes/APIKey",
             headers=self.headers,
             json=key_data,
             timeout=10
@@ -386,7 +386,7 @@ class OpenSourceBootstrap:
         }
 
         response = requests.put(
-            f"{self.parse_url}/users/{user_id}",
+            f"{self.parse_url}/parse/users/{user_id}",
             headers=self.headers,
             json=update_data,
             timeout=10
@@ -421,9 +421,9 @@ Examples:
         """
     )
 
-    parser.add_argument("--email", required=True, help="User email address")
-    parser.add_argument("--name", required=True, help="User full name")
-    parser.add_argument("--organization", required=True, help="Organization name")
+    parser.add_argument("--email", help="User email address (default: test@papr.dev)")
+    parser.add_argument("--name", help="User full name (default: Test User)")
+    parser.add_argument("--organization", help="Organization name (default: Test Organization)")
     parser.add_argument("--password", help="Password (auto-generated if not provided)")
     parser.add_argument("--api-key", help="API key (auto-generated if not provided)")
     parser.add_argument("--parse-url", default=os.getenv("PARSE_SERVER_URL", "http://localhost:1337/parse"),
@@ -434,6 +434,14 @@ Examples:
                        help="Parse Master Key")
 
     args = parser.parse_args()
+
+    # Use defaults if not provided (for Docker auto-bootstrap)
+    if not args.email:
+        args.email = "test@papr.dev"
+    if not args.name:
+        args.name = "Test User"
+    if not args.organization:
+        args.organization = "Test Organization"
 
     # Load environment variables
     env_file = ".env.opensource" if os.path.exists(".env.opensource") else ".env"
@@ -520,6 +528,46 @@ Examples:
                 if not api_key_created:
                     print("   ⚠️  Warning: API key not created in APIKey class, but userAPIkey still set on _User")
 
+        # Update .env file with test credentials
+        env_file = ".env.opensource" if os.path.exists(".env.opensource") else ".env"
+        if os.path.exists(env_file):
+            print(f"\n📝 Updating {env_file} with test credentials...")
+            
+            # Read existing .env content
+            with open(env_file, 'r') as f:
+                env_content = f.read()
+            
+            # Update test environment variables
+            updates = {
+                'TEST_X_USER_API_KEY': api_key,
+                'TEST_USER_ID': user_id,
+                'TEST_TENANT_ID': workspace_id,
+                'TEST_WORKSPACE_ID': workspace_id,
+                'TEST_NAMESPACE_ID': namespace_id if namespace else '',
+                'TEST_ORGANIZATION_ID': org_id if org else '',
+            }
+            
+            for key, value in updates.items():
+                # Check if the key exists in the file
+                if f'{key}=' in env_content:
+                    # Replace existing value
+                    import re
+                    env_content = re.sub(
+                        f'^{key}=.*$',
+                        f'{key}={value}',
+                        env_content,
+                        flags=re.MULTILINE
+                    )
+                else:
+                    # Append new key-value pair
+                    env_content += f'\n{key}={value}'
+            
+            # Write back to .env file
+            with open(env_file, 'w') as f:
+                f.write(env_content)
+            
+            print(f"   ✅ Updated {env_file} with test credentials")
+
         # Success!
         print("\n" + "="*70)
         print("✅ Bootstrap Complete!")
@@ -531,8 +579,14 @@ Examples:
         print(f"\n🔑 API Key: {api_key}")
         print("   ⚠️  SAVE THIS API KEY - You won't see it again!")
 
-        print(f"\n📋 Add to your .env file:")
-        print(f"   PAPR_API_KEY={api_key}")
+        print(f"\n📋 Test credentials saved to {env_file}:")
+        print(f"   TEST_X_USER_API_KEY={api_key}")
+        print(f"   TEST_USER_ID={user_id}")
+        print(f"   TEST_WORKSPACE_ID={workspace_id}")
+        if namespace:
+            print(f"   TEST_NAMESPACE_ID={namespace_id}")
+        if org:
+            print(f"   TEST_ORGANIZATION_ID={org_id}")
 
         print(f"\n🧪 Test your setup:")
         print(f"   curl -X POST http://localhost:5001/v1/memory \\")

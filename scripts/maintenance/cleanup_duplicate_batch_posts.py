@@ -76,7 +76,7 @@ async def find_duplicate_batch_posts(
         "keys": "objectId,type,createdAt,batchMetadata,content,uploadId,extractionResultFile"
     }
     
-    url = f"{PARSE_SERVER_URL}/classes/Post"
+    url = f"{PARSE_SERVER_URL}/parse/classes/Post"
     
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.get(url, params=params, headers=get_parse_headers())
@@ -93,7 +93,7 @@ async def find_duplicate_batch_posts(
 
 async def delete_post(post_id: str) -> bool:
     """Delete a Post by objectId"""
-    url = f"{PARSE_SERVER_URL}/classes/Post/{post_id}"
+    url = f"{PARSE_SERVER_URL}/parse/classes/Post/{post_id}"
     
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.delete(url, headers=get_parse_headers())

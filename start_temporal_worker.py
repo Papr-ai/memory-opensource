@@ -68,8 +68,7 @@ async def main():
         logger.info("Successfully connected to Temporal")
 
         # Get task queue from config
-        # Use -v2 queue to avoid conflicts with old worker registrations
-        task_queue = "memory-processing-v2"
+        task_queue = "memory-processing"
 
         # Build ID format: v{semver}+{feature}.{timestamp}
         # See start_all_workers.py for full explanation

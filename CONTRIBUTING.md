@@ -47,7 +47,7 @@ Before contributing, ensure you have:
    ```bash
    cp .env.example .env
    # Edit .env with your configuration
-   docker-compose up -d
+   docker compose up -d
    ```
 4. **Create a feature branch**:
    ```bash
@@ -60,16 +60,16 @@ Before contributing, ensure you have:
 
 ```bash
 # Start all services
-docker-compose up -d
+docker compose up -d
 
 # View logs
-docker-compose logs -f web
+docker compose logs -f web
 
 # Run tests inside container
-docker-compose exec web pytest
+docker compose exec web pytest
 
 # Access shell
-docker-compose exec web bash
+docker compose exec web bash
 ```
 
 ### Option 2: Local Development
@@ -83,7 +83,7 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 
 # Start services (MongoDB, Neo4j, Redis, Qdrant, Parse Server)
-docker-compose up -d mongodb neo4j redis qdrant parse-server
+docker compose up -d mongodb neo4j redis qdrant parse-server
 
 # Run the application
 python main.py
