@@ -43,7 +43,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.8267534419894218
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/72ddb5ac-45cd-4c35-bf79-eaf4fbe61811.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=10eb0319129fecff5f9fcefc12f746cced83116b4925658ed30601432daf3dc6"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/72ddb5ac-45cd-4c35-bf79-eaf4fbe61811.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=10eb0319129fecff5f9fcefc12f746cced83116b4925658ed30601432daf3dc6"
                             },
                             {
                                 "bbox": {
@@ -115,7 +115,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.6559090420603753
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/8084285f-5bbb-4cf1-bafe-5e0521090de1.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=f58a5534b8e1f72bae7ae1fe9c038de7ecd5a0f8e53a1ea1e76d1a7d59eb7f06"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/8084285f-5bbb-4cf1-bafe-5e0521090de1.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=f58a5534b8e1f72bae7ae1fe9c038de7ecd5a0f8e53a1ea1e76d1a7d59eb7f06"
                             },
                             {
                                 "bbox": {
@@ -133,7 +133,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.3224735289812088
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/c903bbd0-be3d-4770-bf5c-0c3793e03f55.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=0925da38fed3f714a335058fb5e49c5d40e3159272a900b9433f376ec07753dd"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/c903bbd0-be3d-4770-bf5c-0c3793e03f55.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=0925da38fed3f714a335058fb5e49c5d40e3159272a900b9433f376ec07753dd"
                             },
                             {
                                 "bbox": {
@@ -231,7 +231,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.5505005188286305
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/e39bf333-1740-4f23-9a38-fda91eb445f3.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=e477d3acc8e6f4dbed0931f472a855297be15b60fa73a39cba671e36504294e8"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/e39bf333-1740-4f23-9a38-fda91eb445f3.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=e477d3acc8e6f4dbed0931f472a855297be15b60fa73a39cba671e36504294e8"
                             },
                             {
                                 "bbox": {
@@ -373,7 +373,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.8723502039909363
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/1036a9d1-0240-4c2a-b40d-06551c20292f.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=d4a3cdb502f24fe9a95e6460130267553096cd4ec5d0c3d1772f76ff3a72759e"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/1036a9d1-0240-4c2a-b40d-06551c20292f.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=d4a3cdb502f24fe9a95e6460130267553096cd4ec5d0c3d1772f76ff3a72759e"
                             },
                             {
                                 "bbox": {
@@ -703,7 +703,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.9476848542690277
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/2501215d-127c-44dd-96e2-0f7cbab7faab.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=b1e8ef6a21e6b6b8d353fa97c93331f459f0f1466d863193db50428587483e2a"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/2501215d-127c-44dd-96e2-0f7cbab7faab.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=b1e8ef6a21e6b6b8d353fa97c93331f459f0f1466d863193db50428587483e2a"
                             },
                             {
                                 "bbox": {
@@ -721,7 +721,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.8931907917772021
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/82a5ee63-3491-416b-82c3-03c0a3e86aad.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=de0954b1ac260f91fa0703eb72b4dce9da3552958d6c6c250bc6f2555bf87d51"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/82a5ee63-3491-416b-82c3-03c0a3e86aad.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=de0954b1ac260f91fa0703eb72b4dce9da3552958d6c6c250bc6f2555bf87d51"
                             }
                         ],
                         "content": "# ENGLISH (cont.)\n\n## DRYER FLOW DIAGRAM\n\n| Label | Description |\n| -------- | ----------- |\n| 1 | Compressor |\n| 2 | Cooling fan |\n| 3 | Cooling unit |\n| 4 | Water outlet |\n| 5 | Evaporator |\n| 6 | Condensate |\n| 7 | Capillary tube |\n| 8 | Filter dryer |\n| 9 | Expansion valve |\n| 10 | Water inlet |\n| 11 | Water level |\n| 13 | Drain |\n\n<table><tr><th>1)</th><th>REFRIGERANT COMPRESSOR</th><th>8) REFRIGERANT FILTER</th></tr><tr><td>2)</td><td>CONDENSER</td><td>9) HOT GAS BYPASS VALVE</td></tr><tr><td>3)</td><td>MOTOR FAN</td><td>10) AIR-TO-AIR EXCANGER</td></tr><tr><td>4)</td><td>EVAPORATOR</td><td>11) DIGITAL CONTROLLER</td></tr><tr><td>5)</td><td>DEMISTER CONDENSATE SEPARATOR</td><td>13) CONDENSATE DRAIN</td></tr><tr><td>6)</td><td>IMPURITY TRAP</td><td></td></tr><tr><td>7)</td><td>EXPANSION CAPILLARY TUBE</td><td></td></tr></table>",
@@ -783,7 +783,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.8359579026699067
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/ea39efad-96ad-41f6-b03d-cc3e9c6d98b2.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=f600ddfb426f7c0d5abbfb90917bf19e9a973d708e8ac40f710f2f15b0846418"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/ea39efad-96ad-41f6-b03d-cc3e9c6d98b2.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=f600ddfb426f7c0d5abbfb90917bf19e9a973d708e8ac40f710f2f15b0846418"
                             },
                             {
                                 "bbox": {
@@ -873,7 +873,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.38895507007837293
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/b7a0e538-93f2-43a2-bbde-78de5bfb74f7.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=a383b4fa6400fc06cfe905b2bb3679123c495a02afbf179e77510cd32ac83188"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/b7a0e538-93f2-43a2-bbde-78de5bfb74f7.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=a383b4fa6400fc06cfe905b2bb3679123c495a02afbf179e77510cd32ac83188"
                             },
                             {
                                 "bbox": {
@@ -891,7 +891,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.35567352604120966
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/d135b647-3e74-4eaa-a9b0-c3e3aa1aba78.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=f1017f38eb0b7a401a56c91500012c98877402491f1e0c60a7615243006fa773"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/d135b647-3e74-4eaa-a9b0-c3e3aa1aba78.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=f1017f38eb0b7a401a56c91500012c98877402491f1e0c60a7615243006fa773"
                             },
                             {
                                 "bbox": {
@@ -909,7 +909,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.3918906055390835
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/d0764f3c-0aaf-4ca0-b3c0-d571bb060a5d.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=526b42b041eefbaac896a0a30e46c8031437948a9a70931b59ab35ccc280cef8"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/d0764f3c-0aaf-4ca0-b3c0-d571bb060a5d.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=526b42b041eefbaac896a0a30e46c8031437948a9a70931b59ab35ccc280cef8"
                             },
                             {
                                 "bbox": {
@@ -927,7 +927,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.39942805394530295
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/135d20c4-f042-4240-9bb1-732374d01aa2.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=528a718fa7de925ad64e0590c37e609b4ce30b54636188672b93781809ac8c59"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/135d20c4-f042-4240-9bb1-732374d01aa2.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=528a718fa7de925ad64e0590c37e609b4ce30b54636188672b93781809ac8c59"
                             },
                             {
                                 "bbox": {
@@ -945,7 +945,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.42330603674054146
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/7a996064-408f-4ef9-b112-a579a2c898ea.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=94989c0ec2f83223562a184e2fbbb731bf6e8311bc626d266761c0a22022c01a"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/7a996064-408f-4ef9-b112-a579a2c898ea.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=94989c0ec2f83223562a184e2fbbb731bf6e8311bc626d266761c0a22022c01a"
                             },
                             {
                                 "bbox": {
@@ -981,7 +981,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.45334572270512574
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/6800d92d-bb62-411d-ba1b-0464e4fe7578.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=ba1a023ce725c42146070e14bb15e3978c3808f2be3dfeb9d40a8107b4ae672d"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/6800d92d-bb62-411d-ba1b-0464e4fe7578.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=ba1a023ce725c42146070e14bb15e3978c3808f2be3dfeb9d40a8107b4ae672d"
                             }
                         ],
                         "content": "# ENGLISH (cont.)\n\n## 4.0 GENERAL SAFETY STANDARD\n\nThe appliance may be used only by specially trained and authorized personnel. Any tampering with the machine or alterations not approved beforehand by the Manufacturer relieve the latter of responsibility for any damage resulting from the above actions. The removal of or tampering with the safety devices constitutes a violation of the European Standards on safety.\n\nA\n\nALL WORK ON THE ELECTRIC PLANT, HOWEVER SLIGHT, MUST BE CARRIED OUT BY PROFESSIONALLY SKILLED PERSONNEL.\n\nCod. 2200780127 04 Edition 09/2020 - 3\n\nENGLISH\n\n5.0 DESCRIPTION OF DANGER SIGNALS\n\n1) Dangerous\nelectricvoltage\n\nA\n\n2) Air not fit for\nbreathing\n\n3) High pressure\n\n4) Fan rotating\n\n5) Hot parts\n\n6.0 DANGER ZONES\n6.1 DANGER ZONES\n\n(1) (2) (3) (4)\n\nRisks present on the whole machine",
@@ -1007,7 +1007,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.7566822707653046
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/36479099-25b9-47fe-b733-81aa73a5750c.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=8a4e35d15546c920f04eac1cc0e7ecb83863b4828e6d28dad9b1ae5e346e5949"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/36479099-25b9-47fe-b733-81aa73a5750c.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=8a4e35d15546c920f04eac1cc0e7ecb83863b4828e6d28dad9b1ae5e346e5949"
                             }
                         ],
                         "content": "# ENGLISH (cont.)\n\n## 4.0 GENERAL SAFETY STANDARD (cont.)\n\n| Component | Location in image | Warning icon(s) shown | Meaning |\n|---|---:|---|---|\n| Control / electrical box | Top rear (both left and right views) | Triangle with lightning bolt; triangle with plug symbol (on left view) | Electrical shock hazard — disconnect power / service by qualified personnel |\n| Axial fan / fan blades | Lower rear, behind compressor (left view) | Triangle with hand being struck/caught by rotating blades | Rotating parts — keep hands clear |\n| Compressor (hermetic) | Base, front of assembly (left view) | Triangle with plug symbol (near base) | Power/disconnect warning — isolate power before servicing |\n| Motor / pump assembly (compressor mounting) | Base, shown in right view | Multiple triangles with lightning bolt pointing at terminals/mounting | Electrical shock hazard at motor/terminal area |\n| Rear grille / air intake/outlet | Rear panel (right view) | Triangle with rotating-parts/hand symbol (near grille) | Moving parts/air intake hazard — keep clear |\n| Condenser coil & refrigerant tubing | Left view, left side of unit | No direct icon on coil; adjacent electrical icons | Coil/tubing present — service caution (adjacent electrical hazards) |\n| Control panel inset | Small inset at top center | Triangle with lightning bolt | Electrical shock hazard at control/interface |\n\nFIG. 2 — illustration showing serviceable internal components and placement of electrical and rotating-parts hazard warnings.",
@@ -1087,7 +1087,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.7451927363872528
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/d9d186e0-3901-4d84-9b81-37891a3303a9.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=65f5586bab22287783281a4a7aef014943d4a456cc2e72fd70f96d622c3c760e"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/d9d186e0-3901-4d84-9b81-37891a3303a9.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=65f5586bab22287783281a4a7aef014943d4a456cc2e72fd70f96d622c3c760e"
                             },
                             {
                                 "bbox": {
@@ -1177,7 +1177,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.7547541558742523
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/d1b34d95-b415-401c-a463-465b92beb276.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=39a147c258390cabdf9140db3c137743d44c9755fb0f97d920be88cd43a638df"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/d1b34d95-b415-401c-a463-465b92beb276.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=39a147c258390cabdf9140db3c137743d44c9755fb0f97d920be88cd43a638df"
                             }
                         ],
                         "content": "# ENGLISH (cont.)\n\n## 7.0 SAFETY DEVICES\n7.1 SAFETY DEVICES\n\n1) Cooling fan shield\n\n2) Earth\n\n| Label | Description | Location |\n|---|---:|---|\n| 1 | Earth/ground point on equipment chassis (near condenser fan/compressor assembly) | Inside unit, on base/chassis adjacent to fan |\n| 2 | Earth/ground terminal on control panel/door | On the exterior control panel/door (inset) |\n\nAdditional elements: compressor, condenser coil, condenser fan, and control box shown in the main assembly.\n\n4-Edition 09/2020 Cod. 2200780127 04 -\n\nENGLISH\n\n## 8.0 POSITION OF PLATES 8.1 POSITION OF THE DANGER PLATES (Fig. 4)\n\nThe plates fitted on the compressor unit are part of the machine; they have been applied for safety purposes and must not be removed or spoiled for any reason. Ref.1 Spare plate Code 1079 9903 48\n\nThe image shows FIG. 4.\n\n*   A compressor unit is depicted with labeled components 1, 2, 3, and 4.\n*   A \"spare plate\" safety labels sheet is shown, marked with code \"1079 9903 48\".",
@@ -1221,7 +1221,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.8432085871696473
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/c05020ef-055f-45cc-8a55-cf805655e496.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=621817eb9bd5af255a969541a363db72860d2802cfda861b291016df1aae1198"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/c05020ef-055f-45cc-8a55-cf805655e496.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=621817eb9bd5af255a969541a363db72860d2802cfda861b291016df1aae1198"
                             }
                         ],
                         "content": "# ENGLISH (cont.)\n\n## 8.2 POSITION OF THE DATA PLATES (Fig. 4)\n\n<table><tr><th>Ref. 2) \"IN\"</th><th>Ref. 4) Identification plate</th></tr><tr><td>Ref. 3) \"OUT\"</td><td> </td></tr><tr><th>Min. room temperature: +5 °C (+ 41 °F) (compulsory)</th><th>Min. temperature of incoming air: 10 °C ( 50 °F).</th></tr><tr><td>Max. room temperature: +43 °C (+ 109 °F) (compulsory)</td><td>Max. working pressure: 14 bar (203 psi)</td></tr><tr><td>Max. temperature of incoming air: 55 °C (131 °F)</td><td> </td></tr></table>",
@@ -1435,7 +1435,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.4780699491500855
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/9db1f00d-5dca-4ec3-9a6b-824fd0e5167e.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=ee44eca8dd41a01ccb317f5361ddf32452027582d20dd865f7cee4edb345ca5b"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/9db1f00d-5dca-4ec3-9a6b-824fd0e5167e.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=ee44eca8dd41a01ccb317f5361ddf32452027582d20dd865f7cee4edb345ca5b"
                             },
                             {
                                 "bbox": {
@@ -1471,7 +1471,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.8703773319721222
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/e00d899e-116d-46c1-8fce-a783c7532307.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=25205651ecd432b668a772881b4e30142cedcfc995d5db95a463fd61cd7e48e5"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/e00d899e-116d-46c1-8fce-a783c7532307.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=25205651ecd432b668a772881b4e30142cedcfc995d5db95a463fd61cd7e48e5"
                             },
                             {
                                 "bbox": {
@@ -1659,7 +1659,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.9344236254692078
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/4434cd35-6277-408a-b9f9-fd49edf27d8f.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=be3a66bb1c2fe62eafb9dfd7aab1f775b91936d170c6b2488d16e443c1a8039d"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/4434cd35-6277-408a-b9f9-fd49edf27d8f.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=be3a66bb1c2fe62eafb9dfd7aab1f775b91936d170c6b2488d16e443c1a8039d"
                             }
                         ],
                         "content": "# ENGLISH (cont.)\n\n## 12.0 INSTALLATION\n\n12.1 POSITIONING\n\nAfter unpacking the equipment and preparing the dryers room, put the machine into position, checking the following items:\n\nensure that there is sufficient space around the machine to allow maintenance (see Fig. 6).\n\nENSURE THAT THE OPERATOR CAN SEE THE WHOLE MACHINE FROM THE CONTROL PANEL AND CHECK THE PRESENCE OF ANY UNAUTHORIZED PERSONS IN THE VICINITY OF THE MACHINE.\n\nKey information from the image:\n\n*   Figure depicts a machine, a disconnector switch (ref. 1), and a minimum distance of 1.5 meters.\n*   Warning: The disconnector switch and fuses are not supplied with the machine.\n*   Warning symbol included.",
@@ -1757,7 +1757,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.5402669847011566
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/53244af6-31d2-4772-899a-a5dee55e9670.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=93ef354166ffd28f0c0319d4a75eca394a7ebed5d08a81d2dcec5b2134eec8d8"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/53244af6-31d2-4772-899a-a5dee55e9670.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=93ef354166ffd28f0c0319d4a75eca394a7ebed5d08a81d2dcec5b2134eec8d8"
                             },
                             {
                                 "bbox": {
@@ -1855,7 +1855,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.8380298614501953
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/25707435-e484-49dc-82ff-e0627dd62896.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=598c5a0ae148d3a2cf8f64bb5cb0fea1d5adf8e7dd1811c81c19ab1a90e82494"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/25707435-e484-49dc-82ff-e0627dd62896.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=598c5a0ae148d3a2cf8f64bb5cb0fea1d5adf8e7dd1811c81c19ab1a90e82494"
                             },
                             {
                                 "bbox": {
@@ -1927,7 +1927,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.8666233748197556
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/fda5f0fd-b615-45db-a71c-7cc7cefc7d2f.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=c2bcf51903daeed78ac9b8c6fa89b314c4dd1a5977c4197baf91f4eac3a510bc"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/fda5f0fd-b615-45db-a71c-7cc7cefc7d2f.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=c2bcf51903daeed78ac9b8c6fa89b314c4dd1a5977c4197baf91f4eac3a510bc"
                             },
                             {
                                 "bbox": {
@@ -2007,7 +2007,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.38887259438633914
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/91339a2b-8736-4a09-a83a-b32a13d166ce.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=67b4d1c2e95418573ce08c6c1b1831d35fe3d19c4d5a9891bfcaeaafcaca04b7"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/91339a2b-8736-4a09-a83a-b32a13d166ce.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=67b4d1c2e95418573ce08c6c1b1831d35fe3d19c4d5a9891bfcaeaafcaca04b7"
                             },
                             {
                                 "bbox": {
@@ -2025,7 +2025,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.8583202868700028
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/0f7b1c0f-8794-4cee-88b5-b27c20175de1.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=4e7a0fa10e9a3413ae75af8f61ef99a7a145c3716ef0d53723eb25ceee9f2f7b"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/0f7b1c0f-8794-4cee-88b5-b27c20175de1.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=4e7a0fa10e9a3413ae75af8f61ef99a7a145c3716ef0d53723eb25ceee9f2f7b"
                             },
                             {
                                 "bbox": {
@@ -2043,7 +2043,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.7935223937034608
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/321817e5-cb02-4e3f-a20e-96d894e659f7.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=1cb47c799d396832acfb2a9ed678c7d9701f7a68e6b96761a9e127809ca3fde1"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/321817e5-cb02-4e3f-a20e-96d894e659f7.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=1cb47c799d396832acfb2a9ed678c7d9701f7a68e6b96761a9e127809ca3fde1"
                             }
                         ],
                         "content": "# ENGLISH (cont.)\n\n## 12.4 STARTING UP (cont.)\n\nENGLISH\n\n13.0 DIMENSIONS AND TECHNICAL DATA (E5 - E6)\n\nThe image shows two diagrams of a device. The diagrams show its dimensions (Height, Width, Length) and ports on the back (electrical cable, air inlet, air outlet, condensate draining).\n\n<table><tr><th rowspan=\"2\">TYPE</th><th colspan=\"3\">in (mm)</th></tr><tr><td>L</td><td>W</td><td>L</td></tr><tr><td>83 (E5)</td><td>370 (14,57)</td><td>515 (20,28)</td><td>764 (30,08)</td></tr><tr><td>106 (E6)</td><td>370 (14,57)</td><td>515 (20,28)</td><td>764 (30,08)</td></tr><tr><th>Refrigerant gas (1)</th><th>GWP 100 (2)</th></tr><tr><td>R-513A</td><td>631</td></tr><tr><td>(1) According to ISO 817</td><td> </td></tr><tr><td>(2) According to EN-378-1</td><td> </td></tr></table>\n\n<table><tr><th>TYPE</th><th>A</th><th>B</th></tr><tr><td>83 (E5)</td><td>1\" GAS F.</td><td>1\" GAS F.</td></tr><tr><td>106 (E6)</td><td>1\" GAS F.</td><td>1\" GAS F.</td></tr></table>",
@@ -2069,7 +2069,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.7630562682946523
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/1c2857d4-5f72-4d5f-a82c-d62b84051900.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=31b5a8d1924ee7e3a1b8750948114af8debf59c574f9dbfd2642316c7ba74995"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/1c2857d4-5f72-4d5f-a82c-d62b84051900.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=31b5a8d1924ee7e3a1b8750948114af8debf59c574f9dbfd2642316c7ba74995"
                             }
                         ],
                         "content": "# ENGLISH (cont.)\n\n## 12.4 STARTING UP (cont.)\n\n<table><tr><th>TYPE</th><th>Weight\nKg.\n(lb.)</th><th colspan=\"3\">V230\nFreon R513A\nKg. (lb.)</th><th colspan=\"3\">Nominal\nPower\nW (hp)</th><th colspan=\"2\">Nominal\nPower\nW (hp)</th><th colspan=\"3\">Nominal\nPower W (hp)</th><th rowspan=\"2\">bar (psi)\nMAX.</th></tr><tr><td></td><td></td><td>50 Hz</td><td></td><td>230-115/60 Hz</td><td>50 Hz</td><td>230/60 Hz</td><td>115/60 Hz</td><td>50 Hz</td><td>230-115/60 Hz</td><td>50 Hz</td><td>230/60 Hz</td><td>115/60 Hz</td></tr><tr><td>83 (E5)</td><td>44 (97)</td><td>0.33</td><td></td><td>0.33 (0,728)</td><td>609</td><td>659 (0,884)</td><td>616 (0,826)</td><td>65</td><td>57 (0,076)</td><td>674</td><td>726 (0,974)</td><td>673 (0,903)</td><td>14 (203)</td></tr><tr><td>106 (E6)</td><td>44 (97)</td><td>0.30</td><td></td><td>0.30 (0,661)</td><td>651</td><td>706 (0,947)</td><td>660 (0,885).</td><td>65</td><td>57 (0,076)</td><td>716</td><td>763 (1,023)</td><td>717 (0,962)</td><td>14 (203)</td></tr><tr><td>Reference</td><td></td><td>conditions:</td><td></td><td></td><td></td><td></td><td colspan=\"7\">Limit conditions:</td></tr><tr><td>Ambient</td><td>temperature</td><td></td><td>25</td><td>°C (77 °F)</td><td></td><td></td><td colspan=\"7\">Max. ambient temperature 43 °C (109 °F).</td></tr><tr><td>Inlet air</td><td>temperature</td><td></td><td>35</td><td>°C (95 °F)</td><td></td><td></td><td colspan=\"7\">Min. ambient temperature 5 °C (41 °F)</td></tr><tr><td>Working</td><td>pressure</td><td>7</td><td>bar</td><td>(102 psi)</td><td></td><td></td><td colspan=\"7\">Max. inlet air temperature 55 °C (131 °F)</td></tr><tr><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td colspan=\"7\">Max. working pressure 14 bar (203 psi)</td></tr></table>",
@@ -2113,7 +2113,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.590510456264019
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/f7d7bf33-aa08-4479-92c1-c5616feb5a02.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=7f009fc259bc50ff1a80e44eded880b58be24548bf0206ebddd6ead39440b1fe"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/f7d7bf33-aa08-4479-92c1-c5616feb5a02.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=7f009fc259bc50ff1a80e44eded880b58be24548bf0206ebddd6ead39440b1fe"
                             },
                             {
                                 "bbox": {
@@ -2193,7 +2193,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.8906897604465485
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/ab6f5747-5704-4229-8277-196d568c4049.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=1bc5eb78fd077b6ecef7b586820e61ab32788cc03b8fe6954ca44ade5882651b"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/ab6f5747-5704-4229-8277-196d568c4049.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=1bc5eb78fd077b6ecef7b586820e61ab32788cc03b8fe6954ca44ade5882651b"
                             },
                             {
                                 "bbox": {
@@ -2265,7 +2265,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.3004731148481369
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/d1fea6bb-dab6-497a-99d3-1498ff877357.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=a2ccce769267c68891d28c62e6f2620ea39aed919a19d1fa0d04d18086360950"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/d1fea6bb-dab6-497a-99d3-1498ff877357.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=a2ccce769267c68891d28c62e6f2620ea39aed919a19d1fa0d04d18086360950"
                             },
                             {
                                 "bbox": {
@@ -2283,7 +2283,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.9150583148002625
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/058f026c-bff8-47b2-947c-a11373c785de.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=0c5b55505e5e66a6fcbddd2879a5f3c8966d0cb373f0e12ce9badfea8b811118"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/058f026c-bff8-47b2-947c-a11373c785de.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=0c5b55505e5e66a6fcbddd2879a5f3c8966d0cb373f0e12ce9badfea8b811118"
                             },
                             {
                                 "bbox": {
@@ -2363,7 +2363,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.5423877000808716
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/4aefd406-18e9-4d35-9886-33753ad970b5.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=73eeab396cded884196cfdeb45da9086a6e4eedba3c7d724d732909e2aee766a"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/4aefd406-18e9-4d35-9886-33753ad970b5.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=73eeab396cded884196cfdeb45da9086a6e4eedba3c7d724d732909e2aee766a"
                             },
                             {
                                 "bbox": {
@@ -2399,7 +2399,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.718952226638794
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/5f7ddc40-fce5-40ab-8e0a-f6adc7c21387.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=c3db7b6659254e213f19d18b8aa3e55f13e97598b51473cac2ca52761b349681"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/5f7ddc40-fce5-40ab-8e0a-f6adc7c21387.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=c3db7b6659254e213f19d18b8aa3e55f13e97598b51473cac2ca52761b349681"
                             },
                             {
                                 "bbox": {
@@ -2443,7 +2443,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.9186591182436261
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/3e7b3367-2f12-46b2-bcc2-a4cfb4999e2a.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=f9f67c66ad0579f7432b9e56af603a92ab99b93f72f84cbab66aa33daf938d4d"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/3e7b3367-2f12-46b2-bcc2-a4cfb4999e2a.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=f9f67c66ad0579f7432b9e56af603a92ab99b93f72f84cbab66aa33daf938d4d"
                             }
                         ],
                         "content": "# 14.3 COMMAND AND CONTROL PANEL (Option \"free contact\") (cont.)\n\n<table><tr><th>Reference</th><th>Name</th></tr><tr><td>1</td><td>Alarm icon</td></tr><tr><td>2</td><td>Refrigerant compressor icon</td></tr><tr><td>3</td><td>Fan icon</td></tr><tr><td>4</td><td>Dryer ON</td></tr><tr><td>6</td><td>PDP indicator</td></tr><tr><td>7</td><td>Button to snooze or to reset the alarm</td></tr><tr><td>8</td><td>SET button</td></tr><tr><td>9</td><td>UP button</td></tr><tr><td>10</td><td>DOWN button</td></tr><tr><td>8 +9</td><td>Back to previous screen</td></tr><tr><td>8 + 10</td><td>Menu</td></tr><tr><td>11</td><td>Digital controller</td></tr><tr><td>12</td><td>Switch</td></tr></table>",
@@ -2487,7 +2487,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.865455024582999
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/a6ffeb35-116f-4f54-bce9-a3ceb3c5bd6b.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=4a8025ae85b24ec6ba2ae8c1c202b1e851d11a737febdb0a5cdcaae1fd15f299"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/a6ffeb35-116f-4f54-bce9-a3ceb3c5bd6b.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=4a8025ae85b24ec6ba2ae8c1c202b1e851d11a737febdb0a5cdcaae1fd15f299"
                             },
                             {
                                 "bbox": {
@@ -2621,7 +2621,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.5836490541696548
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/3815dde8-3eeb-44e9-86fc-76cee303727c.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=a90e7f9d68b0e814ca4bb49936562639d92a30b6a3f9141772691698b2f8d1a5"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/3815dde8-3eeb-44e9-86fc-76cee303727c.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=a90e7f9d68b0e814ca4bb49936562639d92a30b6a3f9141772691698b2f8d1a5"
                             },
                             {
                                 "bbox": {
@@ -2747,7 +2747,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.6248142883181571
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/a0c8f624-bf5f-47cd-864b-860763162e5e.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=739db16d4676a9c38072c5ba6ce50c71f41cdf05e888021a241166e4886a72ba"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/a0c8f624-bf5f-47cd-864b-860763162e5e.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=739db16d4676a9c38072c5ba6ce50c71f41cdf05e888021a241166e4886a72ba"
                             }
                         ],
                         "content": "# ENGLISH (cont.)\n\n## REMOTE ALARM FUNCTION\n\nThe controller allows to remotely control a number of alarms. This is managed by means of a free NC (Normally Closed) contact. The contact opens in case of an alarm or when the dryer is switched off. Refer to the table below to identify the availability of the function and refer to the related picture Fig. 9b Ref. 1 to identify the physical location of the free contact connector.\n\nIs possible remote alarm for P1, P2, P3, L2, H2 and H3. For the details of alarm see Cap. 17.2 Pag. 17.\n\nFIG. 9b\n\n| Label | Item | Location / Description |\n|---:|---|---|\n| (1) | Free contact connector | Small rectangular gray inline connector on the lower-right of a bundled set of white wires inside the cabinet; secured nearby with cable ties, near a vertical metal conduit and terminal blocks.\n\nLocation of the free contact connector (1)\n\n## 15.0 SCRAPPING THE UNIT\n\nIf the machine is to be scrapped, it must be dismantled into parts of the same material, to be disposed of according to the local regulations in force.\n\nALWAYS RESPECT THE REGULATIONS IN FORCE FOR DISPOSING OF OLD OIL AND OTHER POLLUTING MATERIALS SUCH AS INSULATING FOAM, ETC.\n\n10 Edition 09/2020 Cod. 2200780127 04 -\n\nENGLISH\n\nPART \"B\"",
@@ -2809,7 +2809,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.881508183479309
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/54e11ef6-5eeb-4d2a-bc79-467f330e1378.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=45b89a6a3cfbaad492a477fbae5df612d5fc944cb7ab45eab4e9f805aad1fe87"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/54e11ef6-5eeb-4d2a-bc79-467f330e1378.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=45b89a6a3cfbaad492a477fbae5df612d5fc944cb7ab45eab4e9f805aad1fe87"
                             },
                             {
                                 "bbox": {
@@ -2889,7 +2889,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.8581940606236458
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/58aeea2b-e12a-4ef2-b1b4-81d3092bf312.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=ef79038dfa4e918ac336698186f55aef90e3c1112152f9bec300de4b66466c89"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/58aeea2b-e12a-4ef2-b1b4-81d3092bf312.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=ef79038dfa4e918ac336698186f55aef90e3c1112152f9bec300de4b66466c89"
                             }
                         ],
                         "content": "# THIS PART \"B\" OF THE INSTRUCTIONS MANUAL IS RESERVED FOR PROFESSIONALLY SKILLED PERSONNEL APPROVED THE MANUFACTURER. (cont.)\n\n## 16.1 MAINTENANCE SCHEDULE (cont.)\n\n<table><tr><th>Every week</th><th> </th><th>Brush/blow off the finned surface of the condenser</th></tr><tr><td> </td><td> </td><td>Clean the filter of the automatic condensate drain</td></tr><tr><td>Every 2000 hours / 1 year</td><td>■■</td><td>Replace the filter of automatic condensate drain (2902016102)</td></tr><tr><td>Every 4000 hours / 2 year</td><td> </td><td>Replace drain kit (2200902017)</td></tr><tr><th>FAULT FOUND</th><th>POSSIBLE CAUSES</th><th>OBSERVATIONS</th></tr><tr><td>1) No compressed air passes through the dryer\noutlet</td><td>1A) The pipes are frozen inside</td><td>-The bypass valve of the hot gas is broken or\nout-of-calibration\n-The room temperature is too low and the\nevaporators piping are obstructed with ice</td></tr><tr><td rowspan=\"3\">2) Presence of condensate in the pipings.</td><td>2A) The condensate separator does not work\ncorrectly</td><td>-Clean the filter from the condensate drain\n-Check the condensate drain</td></tr><tr><td>2B) The dryer is working outside its rating</td><td>-Check the flow rate of treated air\n-Check the room temperature\n-Check the air temperature at the drier inlet.</td></tr><tr><td>2C) The dryer is working under bad conditions of\ncondensation</td><td>-Clean the condenser.\n\n■■-Check the good operation of the fan.</td></tr><tr><td>3) The compressor head is very hot\n(&gt; 55 °C)</td><td>Make reference to 2B\nMake reference to 2C\n3A) The cooling circuit is not working with the right\ngas charge</td><td>-Check if there are leaks of refrigerating gas.\n■■-Charge it again.</td></tr><tr><td>4) Motor cuts out on overload</td><td>Make reference to 2B\nMake reference to 2C\nMake reference to 3A</td><td> </td></tr><tr><td>5) The motor hums and does not start.</td><td>The line voltage is too low.\nYou switched the machine off and on again\nwithout leaving enough time for the pressure\nbalancing.\nThe starting system of the motor is defective.</td><td>-Contact the electric power company\n-Wait a few minutes before starting the machine\nagain.\n\n-Check the running and starting relays and\ncondensers (if any)</td></tr><tr><td>6) The machine has stopped and does not restart\neven after a few minutes.</td><td>The overload protection has intervened: make\nreference to 2B-2C-3A.\n\nThe motor has burnt out.</td><td> </td></tr><tr><td>7) The compressor is very noisy.</td><td>Troubles with the internal mechanical parts or\nwith the valves</td><td> </td></tr></table>",
@@ -3023,7 +3023,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.8186645418405533
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/cfdbe468-c9ee-41df-8543-60e8e2298c0d.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=205609a58b541f6985791a077d45f0e5d493c780b6206f94f07cb357c68a4de0"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/cfdbe468-c9ee-41df-8543-60e8e2298c0d.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=205609a58b541f6985791a077d45f0e5d493c780b6206f94f07cb357c68a4de0"
                             }
                         ],
                         "content": "# THIS PART \"B\" OF THE INSTRUCTIONS MANUAL IS RESERVED FOR PROFESSIONALLY SKILLED PERSONNEL APPROVED THE MANUFACTURER. (cont.)\n\n## 16.1 MAINTENANCE SCHEDULE (cont.)\n\n16.2 CLEANING OF THE AUTOMATIC CONDENSWATER DISCARGER FILTER (Fig. 10) Clean the filter of the steam trap.\n\nProceed as follows:\n\n- Close the cock Ref. 1 Fig. 10\n\n- Release the pressure in the dryer by pressing the condensate drain \"TEST\" pushbutton locate on the steam trap Ref. 2 Fig. 10.\n\n- Switch off the machine by pressing the STOP button Ref. 3 Fig. 10\n\n- Turn on the supply automatic differential switch Ref. 4 Fig. 10\n\nA",
@@ -3175,7 +3175,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.9529363870620728
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/14d3c913-04bf-4446-89a0-0d6a05bc3fab.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=e71e8da3eee5fb7b5a8fedc4eda4dfca23a2f2d70bddf1bcdf32607547e575b7"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/14d3c913-04bf-4446-89a0-0d6a05bc3fab.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=e71e8da3eee5fb7b5a8fedc4eda4dfca23a2f2d70bddf1bcdf32607547e575b7"
                             },
                             {
                                 "bbox": {
@@ -3309,7 +3309,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.8699006468057633
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/e6f0f52c-c61c-41f5-8a6e-b7de412d9e16.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=3e2b313bfd0b4cc0fd48896856d9f371d6bb5ddb423ac467bb591f1cc18cd1ca"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/e6f0f52c-c61c-41f5-8a6e-b7de412d9e16.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=3e2b313bfd0b4cc0fd48896856d9f371d6bb5ddb423ac467bb591f1cc18cd1ca"
                             },
                             {
                                 "bbox": {
@@ -3443,7 +3443,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.44267000406980517
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/b60877c3-e10e-4a30-9d1e-0f6cada247e7.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=14035e8cd53cec62a26b48301519849711807a9214cacdc41eedf4a408eba714"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/b60877c3-e10e-4a30-9d1e-0f6cada247e7.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=14035e8cd53cec62a26b48301519849711807a9214cacdc41eedf4a408eba714"
                             }
                         ],
                         "content": "# 17.1 TROUBLE-SHOOTING AND EMERGENCY REMEDIES (cont.)\n\n| DISPLAY | FLASHING WARNING | NOTES                          | Possible root causes        | Observations                                                                                    |\n| ------- | ------------------ | ------------------------------ | --------------------------- | ----------------------------------------------------------------------------------------------- |\n| Image   | Image              | Dryer is working OK            | n/a                         | n/a                                                                                             |\n| Image   | Image              | Warning icon NOT flashing, label P1 flashing       | Fan control probe failed        | Replace probe                                                                               |\n| Image   | Image              | Warning icon NOT flashing, label P2 flashing       | PDP Temp probe failed         | Replace probe                                                                               |\n| Image   | Image              | Warning icon NOT flashing, label H2 flashing       | High PDP call for service | refrigerant leak, flow rate/inlet, temperature exceeding the limit. |\n| Image   | Image              | Warning icon NOT flashing, label L2 flashing       | Low PDP call for service  | hot gas by pass valve out of order, ambient temperature lower than limits                    |",
@@ -3505,7 +3505,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.7897072762250901
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/670f3670-8522-40a2-99bb-ab40ca2411dc.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=b75c35a906f25a76af1284e63aeedb0766586edf8492d1896b3362c45bfbce3e"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/670f3670-8522-40a2-99bb-ab40ca2411dc.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=b75c35a906f25a76af1284e63aeedb0766586edf8492d1896b3362c45bfbce3e"
                             },
                             {
                                 "bbox": {
@@ -3613,7 +3613,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.850527521967888
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/b41824ea-3dc4-4aa6-8e57-33e75fff4a1c.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=3088f18bad287e136551577d8c0c0de193053298e46b15993e3f18ab1aca0ca5"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/b41824ea-3dc4-4aa6-8e57-33e75fff4a1c.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=3088f18bad287e136551577d8c0c0de193053298e46b15993e3f18ab1aca0ca5"
                             },
                             {
                                 "bbox": {
@@ -3649,7 +3649,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.27309513241052624
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/559b4237-ab4d-4061-ad8f-1e5138c3d490.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=cf6ef209ee0db8eec0ba1379e840f236934eb53c30a1f61804b1b866ee6e9b46"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/559b4237-ab4d-4061-ad8f-1e5138c3d490.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=cf6ef209ee0db8eec0ba1379e840f236934eb53c30a1f61804b1b866ee6e9b46"
                             },
                             {
                                 "bbox": {
@@ -3729,7 +3729,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.42220606505870817
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/bb57f5c7-1f60-4ed6-8e38-e77d57166d54.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=c726a3b704f64ab2979d8a3bf32ed2a6fcf4cff7af6b0ef38e6cd93c14af7f90"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/bb57f5c7-1f60-4ed6-8e38-e77d57166d54.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=c726a3b704f64ab2979d8a3bf32ed2a6fcf4cff7af6b0ef38e6cd93c14af7f90"
                             },
                             {
                                 "bbox": {
@@ -3827,7 +3827,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.874154295162721
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/c9432cce-0538-4c3a-b202-e2bc0c6812a8.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=d54d11d37d781fbb21c5234db6544d303e95d4d61dea79f8458aeb84468ba8a7"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/c9432cce-0538-4c3a-b202-e2bc0c6812a8.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=d54d11d37d781fbb21c5234db6544d303e95d4d61dea79f8458aeb84468ba8a7"
                             }
                         ],
                         "content": "# 17.2 TROUBLE-SHOOTING AND EMERGENCY REMEDIES (Option \"free contact\") (cont.)\n\n<table><tr><th>Disply</th><th>Flashing fault message</th><th>Description</th><th>Possible root\ncauses</th><th>Observations</th></tr><tr><td></td><td></td><td>Dryer is working OK</td><td>n/a</td><td>n/a</td></tr><tr><td>оп</td><td></td><td>Dryer is working OK</td><td>n/a</td><td>n/a</td></tr><tr><td>4**\nדוד</td><td>APU</td><td>Warning icon NOT\nflashing, label P1 flashing</td><td>Fan control probe failed</td><td>■■replace probe</td></tr><tr><td></td><td>EP2 m</td><td>Warning icon NOT\nflashing, label P2 flashing</td><td>PDP Temp probe failed</td><td>■■replace probe</td></tr><tr><td></td><td>4*4\n*EPB*</td><td>Warning icon NOT\nflashing, label P3 flashing</td><td>Refrigerant compressor\ntemperature probe\nfailed</td><td>replace probe</td></tr><tr><td></td><td>EH2</td><td>Warning icon NOT\nflashing, label H2 flashing</td><td>High PDP</td><td>■■refrigerant leak\nflow rate / inlet\n■temperature exeeding\nthe limit.\ncall for service</td></tr><tr><td></td><td>602</td><td>Warning icon NOT\nflashing, label L2 flashing</td><td>Low PDP</td><td>hot gas by pass valve\nout of order.\nambient temperature\nlower then limits\ncall for service</td></tr><tr><td></td><td>444\n*A3*</td><td>Warning icon NOT\nflashing, label H3 flashing</td><td>High refrigerant\ncompressor\ntemperature</td><td>■■refrigerant leak\ncall for service</td></tr><tr><td></td><td>RI</td><td>Warning icon NOT\nflashing, label H1 flashing</td><td>High temperature\ndischarge condenser</td><td>check probe\ncall for service</td></tr><tr><td></td><td></td><td>Warning icon NOT\nflashing, label L1 flashing</td><td>Low temperature\ndischarge condenser</td><td>check probe\ncall for service</td></tr></table>",
@@ -3925,7 +3925,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.8119965493679047
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/afc9a945-422c-4f94-90f3-5e084b775bba.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=5bb0cdc1a8a59e471e982bf6ad75316f636467a452883cfe38fece5c3040b0e9"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/afc9a945-422c-4f94-90f3-5e084b775bba.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=5bb0cdc1a8a59e471e982bf6ad75316f636467a452883cfe38fece5c3040b0e9"
                             },
                             {
                                 "bbox": {
@@ -3997,7 +3997,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.621024289727211
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/68fbab3e-483e-4eb2-9852-073b48acb7b6.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=64d3c35bd1247a7b76ecc36827f068a1f752ce7e74295f6f1c006f9c8f31f8b7"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/68fbab3e-483e-4eb2-9852-073b48acb7b6.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=64d3c35bd1247a7b76ecc36827f068a1f752ce7e74295f6f1c006f9c8f31f8b7"
                             },
                             {
                                 "bbox": {
@@ -4229,7 +4229,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.3561828389763832
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/208b4ee7-ee9d-423b-9255-91ae63b98b78.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=6d7fd9f060eb73d50bc14f3d544b1a5dbe4393638cfe797c91cbe57328023952"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/208b4ee7-ee9d-423b-9255-91ae63b98b78.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=6d7fd9f060eb73d50bc14f3d544b1a5dbe4393638cfe797c91cbe57328023952"
                             },
                             {
                                 "bbox": {
@@ -4309,7 +4309,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.4218528360128403
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/7707e011-9251-4b30-b1d1-2f9f267a7287.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=64ed20118c33478c668c3bda79421bd964c99bab9354c290d97963143c28a58c"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/7707e011-9251-4b30-b1d1-2f9f267a7287.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=64ed20118c33478c668c3bda79421bd964c99bab9354c290d97963143c28a58c"
                             },
                             {
                                 "bbox": {
@@ -4381,7 +4381,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.888107779622078
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/b46fb0f8-f8f2-43ef-9b17-adb61b08aaca.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=52f064e2f5036c252477ff5d49f9b13b2692caa08b9a1d3ae891cd0bc3d0838c"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/b46fb0f8-f8f2-43ef-9b17-adb61b08aaca.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=52f064e2f5036c252477ff5d49f9b13b2692caa08b9a1d3ae891cd0bc3d0838c"
                             },
                             {
                                 "bbox": {
@@ -4649,7 +4649,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.8943182498216629
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/4fabfb60-9727-4e3b-902a-bf01d5e095f6.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=ecb6938b897fbe22e5db13113b68d888dd618983becb43b3791a24779f17d195"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/4fabfb60-9727-4e3b-902a-bf01d5e095f6.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=ecb6938b897fbe22e5db13113b68d888dd618983becb43b3791a24779f17d195"
                             },
                             {
                                 "bbox": {
@@ -4783,7 +4783,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.8528283218542736
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/70921d9e-9643-4974-a2d0-63748e744eb2.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=ed030c41596449c0b924d729ccb6e8648f1c6f4d53b88e2eb0b0fc93431b2030"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/70921d9e-9643-4974-a2d0-63748e744eb2.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=ed030c41596449c0b924d729ccb6e8648f1c6f4d53b88e2eb0b0fc93431b2030"
                             },
                             {
                                 "bbox": {
@@ -4801,7 +4801,7 @@
                                     "extract_confidence": null,
                                     "parse_confidence": 0.9346898466348648
                                 },
-                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/21ff018c-d072-4b1e-8197-c9c70d3bcd14.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=dc1db6131b95343a80836607fa0be0fe5ae536909ff57f06aeb3be70cb5a0979"
+                                "image_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/21ff018c-d072-4b1e-8197-c9c70d3bcd14.png?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035807Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=dc1db6131b95343a80836607fa0be0fe5ae536909ff57f06aeb3be70cb5a0979"
                             },
                             {
                                 "bbox": {
@@ -4836,7 +4836,7 @@
                 "num_pages": 21,
                 "credits": 41.0
             },
-            "pdf_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/f2e89c07-b9ed-4c45-9ed5-25e13845167d.pdf?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA2UOK6OVBOUYL7WYA%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035808Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=de38003bd853a1cc97d17316c59cd8d776d9334eccd29c56c5ee121b36e1b5b4",
+            "pdf_url": "https://prod-storage20241010144745140900000001.s3.amazonaws.com/f2e89c07-b9ed-4c45-9ed5-25e13845167d.pdf?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAEXAMPLEKEYID00000%2F20251104%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20251104T035808Z&X-Amz-Expires=3600&X-Amz-SignedHeaders=host&X-Amz-Signature=de38003bd853a1cc97d17316c59cd8d776d9334eccd29c56c5ee121b36e1b5b4",
             "studio_link": "https://studio.reducto.ai/job/abe86bf0-19be-4929-aa13-54b40cd466da"
         },
         "split": null,
